@@ -480,8 +480,10 @@ class Swarm {
     const riskBook = acct > 0 ? updateBook(sw.risk?.[book], acct, now) : sw.risk?.[book];
     const closedBook = sw.positions.filter((p) => p.closedAt && sameBook(p));
     const read = riskBook ? optimize(opt, riskBook, acct, closedBook, open.map((p) => ({ costSol: p.costSol * (p.left / p.tokens), valueSol: valueOf(p) })), live ? (m.floorSol ?? 0) : 0, share) : null;
-    if (read && read.notes.join() !== this.lastNotes) {
-      this.lastNotes = read.notes.join();
+    // said again only when what it says changes, not each time a number in it moves
+    const noteKey = read ? `${read.notes.join().replace(/\d+(\.\d+)?/g, '#')}|${read.sizeMult}` : '';
+    if (read && noteKey !== this.lastNotes) {
+      this.lastNotes = noteKey;
       this.say('optimizer', `${read.notes.join('; ')} · size ${read.sizeMult.toFixed(2)}× · health ${read.health}`);
     }
     if (read?.gate && read.gate !== this.lastOptGate) this.say('optimizer', read.gate);
@@ -504,7 +506,9 @@ class Swarm {
       const a = assess(tok, now, solUsd);
       // only coins with something going on are worth the bots' time
       if (tok.trades.length < 3 && !tok.dex) continue;
-      const v = sentinel(tok, now, tok.creator ? this.creators.get(tok.creator) : undefined);
+      // the creator's record from their other coins: a coin that went quiet is not held against itself when it wakes up
+      const cr = tok.creator ? this.creators.get(tok.creator) : undefined;
+      const v = sentinel(tok, now, cr && this.rugged.has(tok.mint) ? { ...cr, rugs: cr.rugs - 1 } : cr);
       tally.checked++;
       tally[v.verdict]++;
       if (v.verdict !== 'pass' && v.reasons[0]) {

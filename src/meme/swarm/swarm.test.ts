@@ -259,4 +259,20 @@ describe('the swarm, end to end', () => {
     swarm.tick(now + 2_000);
     expect(useSwarm.getState().positions).toHaveLength(1);
   });
+
+  it('a coin that went quiet and wakes up is judged again, not held against itself as its creator’s rug', () => {
+    const { tok, now } = runner(6);
+    tok.creator = 'QuietDev';
+    useMeme.setState({ tokens: { [tok.mint]: tok }, solUsd: 150 });
+    useSwarm.setState({ positions: [], outcomes: [], log: [] });
+    // four minutes without a trade: rejected as idle
+    swarm.tick(now + 4 * 60_000);
+    expect(useSwarm.getState().reads.find((r) => r.mint === tok.mint)?.decision ?? 'rejected: no trades for 3 minutes — gone idle').toMatch(/gone idle/);
+    // it wakes up: the old idle verdict is not "this creator's earlier coin rugged"
+    let t = now + 4 * 60_000;
+    for (let i = 0; i < 6; i++) applyTrade(tok, trade(tok, 'buy', `Wake${i}`, 0.3, (t += 2_000)));
+    swarm.tick(t + 1_000);
+    const r = useSwarm.getState().reads.find((x) => x.mint === tok.mint);
+    expect(r?.decision ?? '').not.toMatch(/earlier coin/);
+  });
 });
