@@ -524,7 +524,7 @@ export function CommandCenter() {
       <section className="cc-core cc-card" aria-label="Swarm core">
         <CoreView input={input} onSelect={openCoin} />
         <div className="cc-core-agents">
-          {(['scout', 'sentinel', 'herald', 'strategist', 'manager'] as const).map((a) => (
+          {(['scout', 'sentinel', 'herald', 'strategist', 'manager', 'optimizer'] as const).map((a) => (
             <span key={a} className={`cc-agent ${sw.enabled ? 'on' : ''}`}>
               <i /> {a}
             </span>
@@ -601,9 +601,10 @@ export function CommandCenter() {
             <Gauge value={Math.min(1, ss.scout.perMin / 30)} text={`${ss.scout.perMin}`} label="Scout" sub="new coins / min" tone="cyan" />
             <Gauge value={passRate} label="Sentinel" sub="pass rate" tone="cyan" />
             <Gauge value={viralShare} label="Herald" sub="viral share" tone="magenta" />
-            <Gauge value={sw.reads.length ? bestRead / 100 : null} text={sw.reads.length ? String(bestRead) : '—'} label="Strategist" sub={`best read · buys at ${sw.strategy.minConviction}+`} tone={bestRead >= sw.strategy.minConviction ? 'mint' : 'cyan'} />
-            <Gauge value={ss.strategist.insiderBest / 100} text={String(ss.strategist.insiderBest)} label="Insiders" sub={`${ss.strategist.proven} proven wallets · buys at ${sw.strategy.insiderMin}+`} tone={sw.strategy.insiderMin > 0 && ss.strategist.insiderBest >= sw.strategy.insiderMin ? 'mint' : 'magenta'} />
+            <Gauge value={sw.reads.length ? bestRead / 100 : null} text={sw.reads.length ? String(bestRead) : '—'} label="Strategist" sub={`best read · buys ${sw.strategy.minConviction}+`} tone={bestRead >= sw.strategy.minConviction ? 'mint' : 'cyan'} />
+            <Gauge value={ss.strategist.insiderBest / 100} text={String(ss.strategist.insiderBest)} label="Insiders" sub={`${ss.strategist.proven} proven · buys ${sw.strategy.insiderMin}+`} tone={sw.strategy.insiderMin > 0 && ss.strategist.insiderBest >= sw.strategy.insiderMin ? 'mint' : 'magenta'} />
             <Gauge value={st.open.length / Math.max(1, sw.manager.maxOpen)} text={`${st.open.length}/${sw.manager.maxOpen}`} label="Manager" sub="positions open" tone="mint" />
+            <Gauge value={ss.optimizer ? ss.optimizer.health / 100 : null} text={ss.optimizer ? `${ss.optimizer.sizeMult.toFixed(2)}×` : '—'} label="Optimizer" sub={ss.optimizer ? `health ${ss.optimizer.health} · size` : 'risk & portfolio'} tone={!ss.optimizer || ss.optimizer.health >= 70 ? 'mint' : ss.optimizer.health >= 40 ? 'chrome' : 'magenta'} />
             <Gauge value={sw.manager.dailyLossSol ? st.lostToday / sw.manager.dailyLossSol : null} label="Loss limit" sub={`${st.lostToday.toFixed(2)} / ${sw.manager.dailyLossSol} SOL`} tone="chrome" />
             <Gauge value={spentToday / budget} label="Budget" sub={`${spentToday.toFixed(2)} / ${budget} SOL`} tone="chrome" />
           </div>

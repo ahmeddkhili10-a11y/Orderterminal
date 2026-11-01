@@ -3145,6 +3145,11 @@ table.grid.meme-tape td {
 .swarm-logline.a-manager b {
   color: var(--buy);
 }
+.swarm-logline.a-optimizer b,
+.cc-tick.a-optimizer b,
+.cc-logline.a-optimizer b {
+  color: var(--text);
+}
 .swarm-rules {
   max-width: 760px;
 }
@@ -4174,12 +4179,12 @@ table.grid.meme-tape td {
 .cc-right > .cc-wallet-card {
   flex: none;
 }
-/* eight gauges in a row */
+/* nine gauges in a row */
 .cc-gauges-card .cc-card-body {
   padding-bottom: 6px;
 }
 .cc-gauges {
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(9, 1fr);
 }
 .cc-gauges .cc-gauge svg {
   width: min(64px, 100%);

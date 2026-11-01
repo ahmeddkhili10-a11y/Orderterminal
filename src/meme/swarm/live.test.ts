@@ -22,7 +22,7 @@ function setup(armed = true) {
   const { tok, now } = runner(8);
   tok.meta = { twitter: 'x', telegram: 't', fetchedAt: now };
   useMeme.setState({ tokens: { [tok.mint]: tok }, solUsd: 150 });
-  useSwarm.setState({ mode: 'live', positions: [], outcomes: [], log: [], wallet: { address: 'Swarm111', limits: { ...LIMITS, armed }, spentToday: 0, sol: 1 } });
+  useSwarm.setState({ mode: 'live', positions: [], outcomes: [], log: [], risk: {}, wallet: { address: 'Swarm111', limits: { ...LIMITS, armed }, spentToday: 0, sol: 1 } });
   return { tok, now };
 }
 
@@ -51,7 +51,8 @@ describe('the swarm, trading live', () => {
   it('sizes a R500 account’s trade at a fifth of what it is worth, and stops buying under its floor', async () => {
     const { tok, now } = setup();
     fake.buy.mockRejectedValue(new Error('stop here'));
-    useSwarm.setState((s) => ({ wallet: { ...s.wallet!, sol: 0.28, limits: { ...LIMITS, maxBuySol: 0.11 } }, manager: { ...s.manager, autoSize: 0.2, floorSol: 0.14 } }));
+    // the plain size (the Optimizer's tilts are tested on their own)
+    useSwarm.setState((s) => ({ optimizer: { ...s.optimizer, enabled: false }, wallet: { ...s.wallet!, sol: 0.28, limits: { ...LIMITS, maxBuySol: 0.11 } }, manager: { ...s.manager, autoSize: 0.2, floorSol: 0.14 } }));
     swarm.tick(now);
     expect(fake.buy).toHaveBeenCalledWith(tok.mint, 0.055, undefined);
     await flush();
@@ -61,7 +62,7 @@ describe('the swarm, trading live', () => {
     swarm.tick(later);
     expect(fake.buy).not.toHaveBeenCalled();
     expect(useSwarm.getState().log.map((l) => l.text)).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^${next.symbol}: not bought — the account \\(0\\.120 SOL\\) is under its floor of 0\\.14 SOL`))]));
-    useSwarm.setState((s) => ({ manager: { ...s.manager, floorSol: 0 } }));
+    useSwarm.setState((s) => ({ manager: { ...s.manager, floorSol: 0 }, optimizer: { ...s.optimizer, enabled: true } }));
   });
 
   it('paper trades left open, or lost today, do not hold up live buying', async () => {
@@ -152,6 +153,24 @@ describe('the swarm, live, when things go wrong', () => {
     expect(useSwarm.getState().log.map((l) => l.text)).toContain(`${tok.symbol}: the RPC did not report the sale's amounts yet — booked at the price now`);
   });
 
+  it('the Optimizer trims a live winner grown past half the account back to 35 % of it', async () => {
+    const { tok, now } = setup();
+    const px = markPrice(tok, 150);
+    // 2 SOL of a coin bought at an eighth of the price, both take profits done; 1 SOL in the wallet
+    const left = 2 / px;
+    const raw = BigInt(Math.round(left * 1e6));
+    useSwarm.setState({ positions: [held(tok, now, { entryPx: px / 8, tokens: left, left, tpDone: 2, peakMult: 8, live: { rawLeft: raw.toString(), decimals: 6, buyTx: 'B' } })], wallet: { ...useSwarm.getState().wallet!, limits: { ...LIMITS, maxBuySol: 0 } } });
+    fake.buy.mockRejectedValue(new Error('cap'));
+    fake.sell.mockResolvedValueOnce({ signature: 'Trim', via: 'Jupiter', solDelta: 0.95, tokenDelta: String(-((raw * 475_000n) / 1_000_000n)), decimals: 6 } satisfies SwarmFill);
+    swarm.tick(now);
+    expect(fake.sell).toHaveBeenCalledWith(tok.mint, ((raw * 475_000n) / 1_000_000n).toString(), undefined);
+    await flush();
+    const p = useSwarm.getState().positions[0];
+    expect(p.closedAt).toBeUndefined();
+    expect(p.realizedSol).toBeCloseTo(0.95);
+    expect(useSwarm.getState().log.map((l) => l.text)).toEqual(expect.arrayContaining([expect.stringMatching(/^rebalanced: .+ grew to 67% of the account — sold 48% to bank it, the rest keeps running$/)]));
+  });
+
   it('after a restart: a sell that was in flight is managed again, and a coin already traded is not bought again', async () => {
     const { tok, now } = setup();
     const restored = mergeSwarm({ positions: [held(tok, now, { pending: true, retryAt: now + 9e9, closedAt: now - 1000 })] }, useSwarm.getState());
@@ -176,6 +195,37 @@ describe('the swarm, live, when things go wrong', () => {
     swarm.tick(Math.max(now, ...more.map((m) => m.now)));
     expect(fake.buy.mock.calls.length).toBe(2);
     useSwarm.setState((s) => ({ manager: { ...s.manager, maxOpen: 4 } }));
+  });
+});
+
+describe('the Optimizer and money moved in or out', () => {
+  it('a deposit or a withdrawal shifts the record instead of reading as a gain or a loss', async () => {
+    setup();
+    // buys an earlier test left in flight on purpose would hold the check off
+    const internals = swarm as unknown as { buying: Set<string>; lastSol: number | null; tradeFlow: number };
+    internals.buying.clear();
+    internals.lastSol = null;
+    internals.tradeFlow = 0;
+    const w = { address: 'Swarm111', limits: LIMITS, spentToday: 0, home: null };
+    fake.wallet.mockResolvedValue(w as never);
+    fake.balance.mockResolvedValue({ sol: 0.28, spentToday: 0, limits: LIMITS });
+    useSwarm.setState({ risk: { live: { startSol: 0.28, peakSol: 0.3, day: '2026-11-01', dayStartSol: 0.28 } } });
+    await swarm.refreshWallet();
+    fake.balance.mockResolvedValue({ sol: 0.48, spentToday: 0, limits: LIMITS });
+    await swarm.refreshWallet();
+    const after = useSwarm.getState().risk.live!;
+    expect(after.startSol).toBeCloseTo(0.48);
+    expect(after.peakSol).toBeCloseTo(0.5);
+    expect(after.dayStartSol).toBeCloseTo(0.48);
+    expect(useSwarm.getState().log.map((l) => l.text)).toContain('deposit of 0.2000 SOL noticed — counted as money moved, not as a gain');
+    fake.balance.mockResolvedValue({ sol: 0.33, spentToday: 0, limits: LIMITS });
+    await swarm.refreshWallet();
+    expect(useSwarm.getState().risk.live!.peakSol).toBeCloseTo(0.35);
+    // small differences (fees, rent) are not money moved
+    fake.balance.mockResolvedValue({ sol: 0.325, spentToday: 0, limits: LIMITS });
+    await swarm.refreshWallet();
+    expect(useSwarm.getState().risk.live!.peakSol).toBeCloseTo(0.35);
+    fake.wallet.mockResolvedValue(null);
   });
 });
 

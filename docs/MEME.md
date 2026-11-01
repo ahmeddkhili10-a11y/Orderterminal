@@ -60,7 +60,7 @@ goes on the few worth a look.
 
 ## The swarm
 
-**Meme Swarm** (Meme category) runs five bots over everything the scanner sees,
+**Meme Swarm** (Meme category) runs six bots over everything the scanner sees,
 every two seconds, whether or not its panel is open (switch it on in the panel;
 it remembers):
 
@@ -71,6 +71,7 @@ it remembers):
 | **Herald** | virality — is it catching on | new buyers per minute and whether they are arriving faster; the meme's narrative (how many coins share its name this hour, and whether this one leads them); linked X / Telegram / website; DexScreener profile or paid boosts; total wallets in |
 | **Strategist** | picks the entries — only ones with room for 5× | Sentinel pass, viability 60+, heat 55+, virality 45+, **conviction 80+** (40 % heat + 35 % virality + 25 % viability), under 45 min old, **room for 5× to a $1M market cap** (so under $200k now), 12–85 % of the curve sold; pools need $20k liquidity. **Not after a spike**: on the curve, no buying while the price stands 50 %+ above its own 5-minute average; on a pool, not after +60 % in 5 minutes. **Net buying**: buyers at least 58 % of the last 5 minutes' flow. All adjustable under Rules. |
 | **Insider tracker** (part of the Strategist) | catches insiders and smart money early | Learns from every trade it watches: a wallet that bought a coin and sold it at 3× its buy or better scores a hit, and one with two hits and right on 30 %+ of its coins since is **proven** (kept between runs, the best 1,500). A coin scores when proven wallets are buying and holding (35 each), when 3+ wallets each put 1 SOL+ in within 3 minutes without selling (30; 5+ wallets and 8 SOL+: 45), when the buying is one-sided (80 %+), when there are still few wallets (before the crowd), or when the creator adds to the bag; proven wallets already selling count against it. Launch-second buys are left to the Sentinel (bundles and snipers dump). **At 65+ it buys without waiting for heat and virality** — the same Sentinel pass, the same 5× room, 3–85 % of the curve, buyers 60 %+, a looser spike limit (their buying lifts the price) — and it **sells everything once half the wallets it followed in have sold**. |
+| **Optimizer** | risk and the portfolio as a whole — keeps the account alive, and in the green once it gets there | **Edge sizing**: after 10 closed trades, the win rate and the average win and loss give the Kelly fraction; it bets half of it, between 0.5× and 1.25× of the normal trade (no edge yet → half size). **Conviction tilt**: 0.85× at the minimum conviction to 1.15× at 100. **Drawdown cuts**: three-quarter size 15 % under the account's high, half size at 25 %. **Keep a good day**: up 30 % on the day → half size for the rest of it. **Profit lock**: once the account reaches 1.5× its start, the floor rises to the start or 70 % of the high — it stops buying before it can fall back into the red. **Portfolio heat**: no new trade while the open coins are down more than 12 % of the account together. **One per narrative**: no second coin on a meme already held. **Trim**: a winner worth more than half the account is sold back to 35 % of it, the rest keeps running. Deposits and withdrawals (a balance change of 0.01 SOL+ no trade explains) shift its record instead of reading as gains or losses; **Set up for my balance** starts the record again. All adjustable under Rules → Optimizer. |
 | **Manager** | runs the trades — on paper, or live from the swarm wallet | Sized to the account (Wallet → Set up for my balance): a fifth of the account a trade, at most two thirds in coins, a daily loss limit, a pause after three losses in a row, and a floor at half the starting account. Exits: rug (creator dumps, danger flag, trading stops) → insiders out (insider-lane buys) → stop loss −35 % → take profits (a third at 3× — the cost back — and half of the rest at 5×) → trailing 40 % from the peak once up 2×, and **60 % for the runner left after both take profits** (room for a 50× or 100×) → out after 20 min without a new high under 1.3×. Multiples are the price against the price paid. |
 
 Trades are **on paper** by default: fills priced exactly on the bonding curve
@@ -218,7 +219,8 @@ Chrome** theme (the other themes still work):
 - **Bottom**: a gauge per bot — Scout (new coins a minute), Sentinel (pass
   rate), Herald (viral share), Strategist (the best read's conviction against
   the 80 it needs), Insiders (the best insider score against the 65 it buys
-  at, and how many proven wallets it knows), Manager (positions open) — plus the daily loss limit used
+  at, and how many proven wallets it knows), Manager (positions open), Optimizer (the book's health
+  and the size it is betting, 0.25×–1.25×) — plus the daily loss limit used
   and the budget spent, and the bots' live log.
 - **Right**: the Wallet (balance, where profits go, Open wallet), results and
   the execution tape.

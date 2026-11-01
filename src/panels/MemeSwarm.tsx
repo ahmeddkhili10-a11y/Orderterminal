@@ -22,6 +22,7 @@ const AGENTS: { id: AgentId; name: string; job: string }[] = [
   { id: 'herald', name: 'Herald', job: 'virality — is it catching on' },
   { id: 'strategist', name: 'Strategist', job: 'picks the entries' },
   { id: 'manager', name: 'Manager', job: 'runs the trades' },
+  { id: 'optimizer', name: 'Optimizer', job: 'risk and the portfolio as a whole' },
 ];
 
 const pct = (x: number | null) => (x === null || !Number.isFinite(x) ? '—' : `${Math.round(x * 100)}%`);
@@ -46,6 +47,8 @@ export function MemeSwarm({ config: c, setConfig }: PanelProps<MemeSwarmConfig>)
         return `${sw.outcomes.filter((o) => o.kind === 'pick').length} picks`;
       case 'manager':
         return `${st.manager.open} open · ${st.manager.closed} closed · ${sol(st.manager.pnlSol)}`;
+      case 'optimizer':
+        return st.optimizer ? `size ${st.optimizer.sizeMult.toFixed(2)}× · health ${st.optimizer.health} · ${Math.round(st.optimizer.drawdown * 100)}% off the high${st.optimizer.floorSol > 0 ? ` · floor ${st.optimizer.floorSol.toFixed(3)} SOL` : ''}` : 'waiting for the account';
     }
   };
 
@@ -280,7 +283,7 @@ function Results() {
 }
 
 export function Rules() {
-  const { strategy: s, manager: m, setStrategy, setManager } = useSwarm();
+  const { strategy: s, manager: m, optimizer: o, setStrategy, setManager, setOptimizer } = useSwarm();
   const [tp, setTp] = useState(m.takeProfits.map((t) => `${t.at}:${Math.round(t.sell * 100)}`).join(', '));
   const row = (label: string, el: React.ReactNode, hint: string) => (
     <label className="swarm-rule">
@@ -309,6 +312,15 @@ export function Rules() {
       <div className="section-title">Insider lane — follow the wallets that win</div>
       {row('Buy at insider score', <NumberInput value={s.insiderMin} onChange={(insiderMin) => setStrategy({ insiderMin })} min={0} step={5} />, 'proven wallets (seen selling coins at 3×+) or quiet 1 SOL+ buyers in early — buys before the crowd, same safety checks and room rule, out when they sell. 0 = off')}
       {row('Insider spike limit', <NumberInput value={Math.round(s.insiderMaxExtension * 100 - 100)} onChange={(v) => setStrategy({ insiderMaxExtension: 1 + v / 100 })} min={0} step={10} suffix="%" />, 'their buying lifts the price: how far above its 5-minute average it may still buy')}
+      <div className="section-title">Optimizer — risk and the portfolio as a whole</div>
+      {row('Optimizer', <input type="checkbox" checked={o.enabled} onChange={(e) => setOptimizer({ enabled: e.target.checked })} />, 'sizes each trade from the edge so far, the drawdown and the day; locks in profits; keeps the book from bleeding or doubling up')}
+      {row('Edge sizing', <NumberInput value={Math.round(o.kellyShare * 100)} onChange={(v) => setOptimizer({ kellyShare: v / 100 })} min={0} step={5} suffix="% Kelly" />, `after ${o.minTrades} closed trades, bet this share of the Kelly fraction (within 0.5×–1.25× of the normal size)`)}
+      {row('Drawdown cuts', <NumberInput value={Math.round(o.ddCut1 * 100)} onChange={(v) => setOptimizer({ ddCut1: v / 100 })} min={1} step={5} suffix="%" />, `three-quarter size this far under the account's high, half size at ${Math.round(o.ddCut2 * 100)}%`)}
+      {row('Keep a good day', <NumberInput value={Math.round(o.dayLock * 100)} onChange={(v) => setOptimizer({ dayLock: v / 100 })} min={5} step={5} suffix="%" />, 'once the day is up this much, half size for the rest of it')}
+      {row('Lock profits at', <NumberInput value={o.profitLockAt} onChange={(profitLockAt) => setOptimizer({ profitLockAt })} min={1.1} step={0.25} suffix="×" />, `once the account reaches this, the floor rises to the start or ${Math.round(o.profitLockShare * 100)}% of the high — it stops buying before it can fall into the red`)}
+      {row('Portfolio heat', <NumberInput value={Math.round(o.heatMax * 100)} onChange={(v) => setOptimizer({ heatMax: v / 100 })} min={1} step={2} suffix="%" />, 'no new trade while the open coins together are down this much of the account')}
+      {row('One per narrative', <input type="checkbox" checked={o.oneNarrative} onChange={(e) => setOptimizer({ oneNarrative: e.target.checked })} />, 'no second coin on a meme already held — they pump and rug together')}
+      {row('Trim a winner over', <NumberInput value={Math.round(o.concentrationMax * 100)} onChange={(v) => setOptimizer({ concentrationMax: v / 100 })} min={10} step={5} suffix="%" />, `of the account: sell it back to ${Math.round(o.trimTo * 100)}% — the gain is banked, the rest keeps running`)}
       <div className="section-title">Manager — how to run the trade</div>
       {row('Size', <NumberInput value={m.sizeSol} onChange={(sizeSol) => setManager({ sizeSol })} min={0.01} step={0.05} suffix="SOL" />, 'per trade on paper (and live when Follow the account is 0)')}
       {row('Follow the account', <NumberInput value={Math.round((m.autoSize ?? 0) * 100)} onChange={(v) => setManager({ autoSize: v / 100 })} min={0} step={5} suffix="%" />, 'live: each trade is this share of what the account is worth now — smaller after losses, bigger after wins (0 = always Size)')}
@@ -461,6 +473,8 @@ export function Wallet() {
                     run('limits', async () => {
                       await desktop!.swarm.setLimits({ maxBuySol: plan.maxBuySol, dailySpendSol: plan.dailySpendSol, reserveSol: plan.reserveSol, priorityLamports: plan.priorityLamports });
                       sw.setManager({ sizeSol: plan.sizeSol, maxOpen: plan.maxOpen, dailyLossSol: plan.dailyLossSol, autoSize: plan.tradeShare, floorSol: plan.floorSol });
+                      // the Optimizer's record starts again from this balance
+                      sw.set({ risk: { ...sw.risk, live: undefined } });
                     })
                   }
                 >

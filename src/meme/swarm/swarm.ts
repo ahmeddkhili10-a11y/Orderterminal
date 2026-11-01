@@ -19,12 +19,13 @@ import { scanner, useMeme } from '../scanner';
 import { assess } from '../score';
 import type { MemeToken } from '../token';
 import { herald, insiderRead, isSmart, learnSmart, Narratives, sentinel, strategist, STRATEGY_DEFAULTS, type CreatorRecord, type SmartBook, type StrategyConfig, type Viability, type Virality } from './agents';
-import { MIN_TRADE_SOL, riskGate, tradeSize } from './bankroll';
-import { applySell, decideExit, managePosition, MANAGER_DEFAULTS, markPrice, multiple, newMilestone, openPosition, pnlSol, type ExitDecision, type ManagerConfig, type Position } from './book';
+import { MIN_TRADE_SOL, riskGate, TRADE_SHARE, tradeSize } from './bankroll';
+import { applySell, decideExit, managePosition, MANAGER_DEFAULTS, markPrice, multiple, newMilestone, openPosition, pnlSol, quoteSell, type ExitDecision, type ManagerConfig, type Position } from './book';
 import { alertHere, tellWithCard } from './notify';
+import { convictionTilt, optimize, OPTIMIZER_DEFAULTS, sharedNarrative, shiftBook, trimShare, updateBook, type OptimizerConfig, type OptimizerRead, type RiskBook } from './optimizer';
 import { follow, newOutcome, type Outcome } from './outcomes';
 
-export type AgentId = 'scout' | 'sentinel' | 'herald' | 'strategist' | 'manager';
+export type AgentId = 'scout' | 'sentinel' | 'herald' | 'strategist' | 'manager' | 'optimizer';
 
 export interface LogLine {
   t: number;
@@ -67,6 +68,9 @@ interface SwarmState {
   outcomes: Outcome[];
   /** wallets seen selling coins at 3×+ (the insider tracker's memory) */
   smart: SmartBook;
+  optimizer: OptimizerConfig;
+  /** the Optimizer's record of each book: start, high, start of today */
+  risk: { live?: RiskBook; paper?: RiskBook };
   // runtime (not saved)
   log: LogLine[];
   reads: CoinRead[];
@@ -76,8 +80,10 @@ interface SwarmState {
     herald: { scored: number; viral: number; narratives: { word: string; count: number }[] };
     strategist: { signals: number; last: string; proven: number; insiderBest: number };
     manager: { open: number; closed: number; pnlSol: number; winRate: number | null };
+    optimizer: (OptimizerRead & { equity: number | null }) | null;
   };
   set(p: Partial<SwarmState>): void;
+  setOptimizer(p: Partial<OptimizerConfig>): void;
   setStrategy(p: Partial<StrategyConfig>): void;
   setManager(p: Partial<ManagerConfig>): void;
   reset(): void;
@@ -89,6 +95,7 @@ const emptyStats = (): SwarmState['stats'] => ({
   herald: { scored: 0, viral: 0, narratives: [] },
   strategist: { signals: 0, last: '', proven: 0, insiderBest: 0 },
   manager: { open: 0, closed: 0, pnlSol: 0, winRate: null },
+  optimizer: null,
 });
 
 /** The saved swarm over the defaults. A sell in flight when the app closed is not in flight any more: those positions are managed again. */
@@ -101,7 +108,7 @@ export function mergeSwarm(persisted: unknown, current: SwarmState): SwarmState 
     const m = p.manager ?? MANAGER_DEFAULTS;
     return { ...current, ...p, positions, strategy: { ...STRATEGY_DEFAULTS }, manager: { ...MANAGER_DEFAULTS, sizeSol: m.sizeSol, maxOpen: m.maxOpen, dailyLossSol: m.dailyLossSol } };
   }
-  return { ...current, ...p, positions, strategy: { ...STRATEGY_DEFAULTS, ...p.strategy }, manager: { ...MANAGER_DEFAULTS, ...p.manager } };
+  return { ...current, ...p, positions, strategy: { ...STRATEGY_DEFAULTS, ...p.strategy }, manager: { ...MANAGER_DEFAULTS, ...p.manager }, optimizer: { ...OPTIMIZER_DEFAULTS, ...p.optimizer } };
 }
 
 export const useSwarm = create<SwarmState>()(
@@ -115,10 +122,13 @@ export const useSwarm = create<SwarmState>()(
       positions: [],
       outcomes: [],
       smart: {},
+      optimizer: { ...OPTIMIZER_DEFAULTS },
+      risk: {},
       log: [],
       reads: [],
       stats: emptyStats(),
       set: (p) => set(p),
+      setOptimizer: (p) => set((s) => ({ optimizer: { ...s.optimizer, ...p } })),
       setStrategy: (p) => set((s) => ({ strategy: { ...s.strategy, ...p } })),
       setManager: (p) => set((s) => ({ manager: { ...s.manager, ...p } })),
       reset: () => set({ positions: [], outcomes: [], log: [] }),
@@ -126,7 +136,7 @@ export const useSwarm = create<SwarmState>()(
     {
       name: 'novus-swarm',
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ enabled: s.enabled, mode: s.mode, strategy: s.strategy, manager: s.manager, positions: s.positions.slice(-300), outcomes: s.outcomes.slice(-2000), smart: s.smart }),
+      partialize: (s) => ({ enabled: s.enabled, mode: s.mode, strategy: s.strategy, manager: s.manager, positions: s.positions.slice(-300), outcomes: s.outcomes.slice(-2000), smart: s.smart, optimizer: s.optimizer, risk: s.risk }),
       merge: (persisted, current) => mergeSwarm(persisted, current),
     },
   ),
@@ -150,6 +160,8 @@ class Swarm {
   private verdicts = new Map<string, Viability['verdict']>();
   private smartDone = new Set<string>();
   private floorHit = false;
+  private lastNotes = '';
+  private lastOptGate: string | null = null;
   private lastLearn = 0;
 
   /** Run while enabled; the scanner runs with it, whatever panels are open. */
@@ -195,10 +207,36 @@ class Swarm {
       const b = await desktop.swarm.balance(this.rpcId()).catch(() => null);
       const wallet = { address: w.address, limits: b?.limits ?? w.limits, spentToday: b?.spentToday ?? w.spentToday, sol: b ? b.sol : null, home: w.home ?? null };
       useSwarm.setState({ wallet });
+      if (wallet.sol !== null) this.noticeFlows(wallet.sol);
       void this.sweepHome(wallet);
     } catch {
       /* keep the last state */
     }
+  }
+
+  /** the wallet's SOL at the last look, and what trades moved since */
+  private lastSol: number | null = null;
+  private tradeFlow = 0;
+
+  /**
+   * A change in the wallet no trade explains (0.01 SOL or more) is money moved
+   * in or out — a deposit, a withdrawal, profits sent home: the Optimizer's
+   * record shifts with it, so it is not read as a gain or a loss. Not judged
+   * while a buy or sell is on its way.
+   */
+  private noticeFlows(sol: number) {
+    const sw = useSwarm.getState();
+    if (this.buying.size || sw.positions.some((p) => p.pending)) return;
+    if (this.lastSol !== null) {
+      const moved = sol - this.lastSol - this.tradeFlow;
+      const book = sw.risk?.live;
+      if (Math.abs(moved) >= 0.01 && book) {
+        useSwarm.setState((s) => ({ risk: { ...s.risk, live: shiftBook(book, moved) } }));
+        this.say('optimizer', `${moved > 0 ? 'deposit' : 'withdrawal'} of ${Math.abs(moved).toFixed(4)} SOL noticed — counted as money moved, not as a ${moved > 0 ? 'gain' : 'loss'}`);
+      }
+    }
+    this.lastSol = sol;
+    this.tradeFlow = 0;
   }
 
   private sweeping = false;
@@ -234,6 +272,7 @@ class Swarm {
       const raw = BigInt(r.tokenDelta ?? '0');
       const tokens = Number(raw) / 10 ** decimals;
       const cost = r.solDelta !== null ? -r.solDelta : sizeSol;
+      this.tradeFlow -= cost;
       if (!(tokens > 0)) throw new Error(`the buy went through (${r.signature}) but no tokens showed up — check the wallet`);
       const now = Date.now();
       const p: Position = {
@@ -287,6 +326,7 @@ class Swarm {
       const sol = r.solDelta ?? tokens * p.entryPx * (Number.isFinite(d.mult) ? d.mult : 0);
       if (!reported || r.solDelta === null) this.say('manager', `${sym}: the RPC did not report the sale's amounts yet — booked at the price now`, p.mint);
       applySell(p, Date.now(), tokens, sol, d.why, d.mult, d.share >= 1 || rest === 0n);
+      this.tradeFlow += sol + (r.rentBack ?? 0);
       if (d.tp) p.tpDone++;
       p.retryAt = undefined;
       this.say('manager', `${sym}: sold live — ${sol.toFixed(4)} SOL back — ${d.why}`, p.mint);
@@ -391,13 +431,13 @@ class Swarm {
     }
     this.narratives.prune(now);
     // the insider tracker learns which wallets really sell at 3×+ (every half minute)
-    const book = sw.smart ?? {};
+    const smartBook = sw.smart ?? {};
     let learned = 0;
     const learning = now - this.lastLearn >= 30_000;
     if (learning) {
       this.lastLearn = now;
-      learned = learnSmart(book, all, now, this.smartDone, sw.wallet?.address);
-      if (learned) this.say('strategist', `insider tracker: ${learned} more wallet${learned > 1 ? 's' : ''} seen selling at 3×+ — ${Object.values(book).filter(isSmart).length} proven so far`);
+      learned = learnSmart(smartBook, all, now, this.smartDone, sw.wallet?.address);
+      if (learned) this.say('strategist', `insider tracker: ${learned} more wallet${learned > 1 ? 's' : ''} seen selling at 3×+ — ${Object.values(smartBook).filter(isSmart).length} proven so far`);
     }
     let insiderBest = 0;
     this.seenTimes = this.seenTimes.filter((t) => now - t < 60_000);
@@ -429,8 +469,23 @@ class Swarm {
     const newOutcomes: Outcome[] = [];
     // live: what the account is worth now — the SOL in the wallet and the open coins at their price
     const live = sw.mode === 'live';
-    const equity = live && sw.wallet?.sol != null ? sw.wallet.sol + open.filter((p) => p.live).reduce((a, p) => a + Math.max(0, p.left * (tokens[p.mint] ? markPrice(tokens[p.mint], solUsd) : 0) || 0), 0) : null;
+    const valueOf = (p: Position) => Math.max(0, p.left * (tokens[p.mint] ? markPrice(tokens[p.mint], solUsd) : 0) || 0);
+    const equity = live && sw.wallet?.sol != null ? sw.wallet.sol + open.filter((p) => p.live).reduce((a, p) => a + valueOf(p), 0) : null;
     const m = sw.manager;
+    // the Optimizer: the account as a whole (paper: an account the paper size implies, plus the paper results)
+    const book = live ? 'live' : 'paper';
+    const opt = sw.optimizer ?? OPTIMIZER_DEFAULTS;
+    const share = (m.autoSize ?? 0) > 0 ? m.autoSize : TRADE_SHARE;
+    const acct = equity ?? m.sizeSol / share + sw.positions.filter(sameBook).reduce((a, p) => a + pnlSol(p, tokens[p.mint], solUsd), 0);
+    const riskBook = acct > 0 ? updateBook(sw.risk?.[book], acct, now) : sw.risk?.[book];
+    const closedBook = sw.positions.filter((p) => p.closedAt && sameBook(p));
+    const read = riskBook ? optimize(opt, riskBook, acct, closedBook, open.map((p) => ({ costSol: p.costSol * (p.left / p.tokens), valueSol: valueOf(p) })), live ? (m.floorSol ?? 0) : 0, share) : null;
+    if (read && read.notes.join() !== this.lastNotes) {
+      this.lastNotes = read.notes.join();
+      this.say('optimizer', `${read.notes.join('; ')} · size ${read.sizeMult.toFixed(2)}× · health ${read.health}`);
+    }
+    if (read?.gate && read.gate !== this.lastOptGate) this.say('optimizer', read.gate);
+    this.lastOptGate = read?.gate ?? null;
     const gate = riskGate(
       sw.positions.filter(sameBook),
       now,
@@ -479,7 +534,7 @@ class Swarm {
         scored++;
         if (x.score >= 60) viral++;
       }
-      const ins = v.verdict === 'pass' ? insiderRead(tok, now, book) : null;
+      const ins = v.verdict === 'pass' ? insiderRead(tok, now, smartBook) : null;
       if (ins) insiderBest = Math.max(insiderBest, ins.score);
       const d = x ? strategist(tok, a, v, x, sw.strategy, ins ?? undefined) : { enter: false, conviction: 0, why: `rejected: ${v.reasons[0] ?? ''}`, insiders: undefined };
       if (a.heat >= 30 || d.enter || (ins?.score ?? 0) >= 40) reads.push({ mint: tok.mint, symbol: tok.symbol, heat: a.heat, viability: v, virality: x, conviction: d.conviction, decision: d.why, enter: d.enter, mcapUsd: a.mcapUsd, insider: ins?.score ?? 0 });
@@ -493,9 +548,18 @@ class Swarm {
         const room = open.length + newPositions.length + this.buying.size < sw.manager.maxOpen;
         const budget = lostToday < sw.manager.dailyLossSol;
         const mc = Number.isFinite(a.mcapUsd) ? ` at $${Math.round(a.mcapUsd).toLocaleString('en-US')} market cap` : '';
-        // live: the trade follows the account (smaller after losses, bigger after wins), within the wallet's cap
-        const liveSize = equity !== null && (m.autoSize ?? 0) > 0 ? tradeSize(equity, m.autoSize) : m.sizeSol;
+        // the size: the Optimizer's multiple (edge, drawdown, a good day) and the pick's conviction
+        const sizeMult = opt.enabled ? (read?.sizeMult ?? 1) * convictionTilt(d.conviction, d.insiders ? sw.strategy.insiderMin : sw.strategy.minConviction) : 1;
+        // live: the trade follows the account (smaller after losses, bigger after wins), within the wallet's cap; never pushed under the fee floor by the Optimizer
+        const plain = equity !== null && (m.autoSize ?? 0) > 0 ? tradeSize(equity, m.autoSize) : m.sizeSol;
+        const tuned = equity !== null && (m.autoSize ?? 0) > 0 ? tradeSize(equity, m.autoSize * sizeMult) : Math.round(m.sizeSol * sizeMult * 1000) / 1000;
+        const liveSize = plain >= MIN_TRADE_SOL ? Math.max(MIN_TRADE_SOL, tuned) : tuned;
+        const paperSize = Math.max(0.005, Math.round(m.sizeSol * sizeMult * 1000) / 1000);
+        const heldNames = [...open, ...newPositions].map((p) => tokens[p.mint]).filter(Boolean).map((t) => ({ name: t!.name, symbol: t!.symbol }));
+        const twin = opt.enabled && opt.oneNarrative ? sharedNarrative(tok.name, tok.symbol, heldNames) : null;
         if (gate) this.say('manager', `${tok.symbol}: not bought — ${gate}`, tok.mint);
+        else if (read?.gate) this.say('optimizer', `${tok.symbol}: not bought — ${read.gate}`, tok.mint);
+        else if (twin) this.say('optimizer', `${tok.symbol}: not bought — already holding a coin on "${twin}"; same-narrative coins pump and rug together`, tok.mint);
         else if (room && budget && live) {
           const w = sw.wallet;
           const size = w ? Math.min(liveSize, w.limits.maxBuySol) : 0;
@@ -504,7 +568,7 @@ class Swarm {
           else if (size < MIN_TRADE_SOL) this.say('manager', `${tok.symbol}: not bought — a trade would be ${size} SOL, too small for its fees (under ${MIN_TRADE_SOL})`, tok.mint);
           else if (!this.buying.has(tok.mint)) void this.liveBuy(tok, size, d.why, d.conviction, mc, d.insiders);
         } else if (room && budget) {
-          const p = openPosition(tok, sw.manager.sizeSol, now, solUsd, d.why, d.conviction);
+          const p = openPosition(tok, paperSize, now, solUsd, d.why, d.conviction);
           if (p) {
             if (d.insiders) p.insiders = d.insiders;
             newPositions.push(p);
@@ -542,6 +606,21 @@ class Swarm {
           if (p.closedAt || p.tpDone > tpBefore) this.afterSell(p, { share: 1, why: f.why, mult: f.mult, tp: p.tpDone > tpBefore && !p.closedAt });
         }
       }
+      // the Optimizer: a winner grown past half the account is sold back to a third of it
+      if (!p.closedAt && !p.pending && !(p.retryAt && Date.now() < p.retryAt) && sameBook(p)) {
+        const mult = multiple(p, tok, solUsd);
+        const cut = trimShare(valueOf(p), acct, mult, opt);
+        if (cut) {
+          const why = `rebalanced: ${p.symbol} grew to ${Math.round((valueOf(p) / acct) * 100)}% of the account — sold ${Math.round(cut * 100)}% to bank it, the rest keeps running`;
+          this.say('optimizer', why, p.mint);
+          if (p.live) void this.liveSell(p, { share: cut, why, mult, tp: false });
+          else {
+            const tokensOut = p.left * cut;
+            applySell(p, now, tokensOut, quoteSell(tok, tokensOut, solUsd), why, mult, false);
+            this.afterSell(p, { share: cut, why, mult, tp: false });
+          }
+        }
+      }
       if (p.closedAt) scanner.pin(p.mint, false);
       // progress on Telegram as the price multiplies: 2×, 5×, 10×, 25×, 50×, 100× …
       const m = multiple(p, tok, solUsd);
@@ -567,13 +646,15 @@ class Swarm {
     useSwarm.setState({
       positions,
       outcomes,
-      ...(learning ? { smart: { ...book } } : {}),
+      ...(learning ? { smart: { ...smartBook } } : {}),
+      ...(riskBook ? { risk: { ...sw.risk, [book]: riskBook } } : {}),
       reads: reads.sort((a, b) => b.conviction - a.conviction).slice(0, 60),
       stats: {
         scout: { seen: this.seen.size, perMin: this.seenTimes.length },
         sentinel: { ...tally, top: [...why.values()].sort((a, b) => b.n - a.n).slice(0, 5).map((g) => ({ why: g.text, n: g.n })) },
         herald: { scored, viral, narratives: this.narratives.top(8) },
-        strategist: { signals: positions.length, last: sw.stats.strategist.last, proven: Object.values(book).filter(isSmart).length, insiderBest },
+        strategist: { signals: positions.length, last: sw.stats.strategist.last, proven: Object.values(smartBook).filter(isSmart).length, insiderBest },
+        optimizer: read ? { ...read, equity: acct } : null,
         manager: {
           open: positions.filter((p) => !p.closedAt).length,
           closed: closed.length,

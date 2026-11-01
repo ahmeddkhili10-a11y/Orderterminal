@@ -6,6 +6,7 @@ import { applyTrade } from '../token';
 import { buyerGrowth, earlyBuys, herald, memeWords, Narratives, sentinel, strategist, STRATEGY_DEFAULTS } from './agents';
 import { managePosition, MANAGER_DEFAULTS, multiple, openPosition, pnlSol, quoteSell } from './book';
 import { coin, DEV, runner, T0, trade } from './fixtures';
+import { convictionTilt } from './optimizer';
 import { calibrate, follow, newOutcome } from './outcomes';
 import { swarm, useSwarm } from './swarm';
 
@@ -246,11 +247,13 @@ describe('the swarm, end to end', () => {
     swarm.tick(now);
     const s = useSwarm.getState();
     expect(s.positions).toHaveLength(1);
-    expect(s.positions[0]).toMatchObject({ mint: tok.mint, costSol: MANAGER_DEFAULTS.sizeSol });
+    // the Optimizer tilts the size by conviction: 0.85× at the minimum to 1.15× at 100
+    expect(s.positions[0].mint).toBe(tok.mint);
+    expect(s.positions[0].costSol).toBeCloseTo(Math.round(MANAGER_DEFAULTS.sizeSol * convictionTilt(s.positions[0].conviction, STRATEGY_DEFAULTS.minConviction) * 1000) / 1000, 6);
     expect(s.outcomes.find((o) => o.mint === tok.mint)).toMatchObject({ kind: 'pick', done: false });
     expect(sentinel(bundled, now).verdict).toBe('reject');
     expect(s.positions.some((p) => p.mint === bundled.mint)).toBe(false);
-    expect(s.log.map((l) => `${l.agent}: ${l.text.split(' — ')[0]}`)).toEqual(expect.arrayContaining([`strategist: FROG: PICK (conviction ${s.positions[0].conviction})`, 'manager: FROG: bought 0.1 SOL (paper) at $' + Math.round(tok.mcapSol * 150).toLocaleString('en-US') + ' market cap']));
+    expect(s.log.map((l) => `${l.agent}: ${l.text.split(' — ')[0]}`)).toEqual(expect.arrayContaining([`strategist: FROG: PICK (conviction ${s.positions[0].conviction})`, `manager: FROG: bought ${s.positions[0].costSol} SOL (paper) at $` + Math.round(tok.mcapSol * 150).toLocaleString('en-US') + ' market cap']));
     expect(s.stats.sentinel.reject).toBeGreaterThanOrEqual(1);
     // a second tick does not buy the same coin twice
     swarm.tick(now + 2_000);
