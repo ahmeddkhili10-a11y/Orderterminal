@@ -639,7 +639,8 @@ class Swarm {
       }
       this.verdicts.set(tok.mint, v.verdict);
       // the on-chain check for anything with heat and no check yet
-      if (!tok.safety && a.heat >= 35) scanner.check(tok.mint);
+      // the on-chain check for anything with heat (again if the last one failed); likely picks first
+      if ((!tok.safety || tok.safety.error) && a.heat >= 35) scanner.check(tok.mint, a.heat >= 55);
       let x: Virality | null = null;
       if (v.verdict !== 'reject') {
         if (a.heat >= 35) this.fetchMeta(tok);

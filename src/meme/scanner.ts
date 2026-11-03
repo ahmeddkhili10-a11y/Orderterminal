@@ -92,8 +92,9 @@ class Scanner {
   }
 
   /** Ask for an on-chain check (queued; one at a time). */
-  check(mint: string) {
-    this.queueSafety(mint);
+  /** The on-chain check for a coin; `urgent` (a likely pick) goes to the front of the queue. */
+  check(mint: string, urgent = false) {
+    this.queueSafety(mint, urgent);
   }
 
   /** Panels call this on mount; the scanner runs while any is open. */
@@ -341,7 +342,8 @@ class Scanner {
 
   private queueSafety(mint: string, first = false) {
     const tok = useMeme.getState().tokens[mint];
-    if (!tok || (tok.safety && Date.now() - tok.safety.checkedAt < 10 * 60_000)) return;
+    // a good check holds for 10 minutes; a failed one is tried again after a minute
+    if (!tok || (tok.safety && Date.now() - tok.safety.checkedAt < (tok.safety.error ? 60_000 : 10 * 60_000))) return;
     this.safetyQueue = this.safetyQueue.filter((m) => m !== mint);
     if (first) this.safetyQueue.unshift(mint);
     else this.safetyQueue.push(mint);

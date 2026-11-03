@@ -84,6 +84,10 @@ export function sentinel(tok: MemeToken, now: number, creator?: CreatorRecord, f
   if (!s) {
     watch = true;
     reasons.push('waiting for the on-chain check');
+  } else if (s.error && s.mintRevoked === null && s.freezeRevoked === null) {
+    // a check that failed proves nothing: wait for it to be done again, never pass on it
+    watch = true;
+    reasons.push('the on-chain check failed — trying again');
   } else {
     if (s.mintRevoked === false) no('mint authority live — supply can be printed');
     if (s.freezeRevoked === false) no('freeze authority live — holders can be frozen');

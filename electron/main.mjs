@@ -516,7 +516,12 @@ function registerIpc() {
       flight: swarmFlight,
       wallet: swarmKeypair,
       rpc: swarmRpc(rpcSecretId),
-      http: (url, init) => fetch(httpsOnly(url), init),
+      // quotes and swap transactions (Jupiter, PumpPortal): a hung request must not hold a buy — and its slot — forever
+      http: (url, init) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 20_000);
+        return fetch(httpsOnly(url), { ...init, signal: ctrl.signal }).finally(() => clearTimeout(t));
+      },
       limits: swarmLimits,
       spent: swarmSpent,
       addSpend: (sol) => db.set('swarmSpent', { day: today(), sol: swarmSpent() + sol }),

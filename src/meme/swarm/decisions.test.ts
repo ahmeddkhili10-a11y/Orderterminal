@@ -10,6 +10,7 @@ import { FEATURES } from './features';
 import { coin, runner, trade } from './fixtures';
 import { Forest, oddsOf, priorTree } from './forest';
 import { swarm, useSwarm } from './swarm';
+import { sentinel } from './agents';
 import { COUNCIL_DEFAULTS } from './council';
 
 const keepAlive = (tok: MemeToken, from: number, to: number) => {
@@ -66,6 +67,25 @@ describe('Decision chain — no bottlenecks', () => {
     swarm.tick(now);
     expect(texts().some((t) => t.startsWith('BONK: PICK') || t.startsWith('BONK · council'))).toBe(false);
     expect(useSwarm.getState().reads.find((r) => r.mint === tok.mint)?.decision).toMatch(/^rejected: impersonates \$BONK/);
+  });
+});
+
+describe('Decision chain — safety checks', () => {
+  it('a failed on-chain check never passes a coin: it waits, and trades once a good check comes back', () => {
+    const { tok, now } = runner(8);
+    tok.creator = 'SafetyDev';
+    tok.meta = { twitter: 'x', telegram: 't', fetchedAt: now };
+    tok.safety = { checkedAt: now, mintRevoked: null, freezeRevoked: null, top10: null, top1: null, error: 'RPC 429' };
+    expect(sentinel(tok, now)).toMatchObject({ verdict: 'watch', reasons: ['the on-chain check failed — trying again'] });
+    useMeme.setState({ tokens: { [tok.mint]: tok }, solUsd: 150 });
+    paperBook();
+    swarm.tick(now);
+    expect(useSwarm.getState().positions.some((p) => p.mint === tok.mint)).toBe(false);
+    expect(texts().some((t) => t.startsWith(`${tok.symbol}: PICK`))).toBe(false);
+    // the check comes back clean: the same coin goes through
+    tok.safety = { checkedAt: now + 1000, mintRevoked: true, freezeRevoked: true, top10: 0.2, top1: 0.05 };
+    swarm.tick(now + 2000);
+    expect(useSwarm.getState().positions.some((p) => p.mint === tok.mint)).toBe(true);
   });
 });
 
