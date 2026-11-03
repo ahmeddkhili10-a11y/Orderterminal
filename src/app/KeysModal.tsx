@@ -4,7 +4,7 @@ import { vault } from '../desktop/vault';
 import { getSettings } from '../store/settings';
 import { Modal } from './Modals';
 
-const KIND_LABEL: Record<SecretKind, string> = { exchange: 'Exchange (CCXT)', 'solana-rpc': 'Solana RPC', telegram: 'Telegram bot', api: 'Other API key' };
+const KIND_LABEL: Record<SecretKind, string> = { exchange: 'Exchange (CCXT)', 'solana-rpc': 'Solana RPC', telegram: 'Telegram bot', 'x-api': 'X (Twitter) API', api: 'Other API key' };
 
 const FIELD_LABEL: Record<string, string> = {
   apiKey: 'API key',
@@ -44,7 +44,7 @@ const blank = (kind: SecretKind): Draft => ({
       ? [{ name: 'apiKey', value: '' }, { name: 'secret', value: '' }]
       : kind === 'solana-rpc'
         ? [{ name: 'url', value: '' }]
-        : kind === 'telegram'
+        : kind === 'telegram' || kind === 'x-api'
           ? [{ name: 'token', value: '' }]
           : [{ name: 'key', value: '' }],
 });
@@ -141,7 +141,15 @@ export const QUICK: Quick[] = [
     kind: 'telegram',
     badge: 'TG',
     url: 'https://t.me/BotFather',
-    steps: ['In Telegram, open @BotFather and send /newbot. Pick a name and a username ending in “bot”.', 'Copy the token it sends (looks like 123456:ABC-…) and paste it below.', 'Save, then open the Telegram panel: press Start in your bot’s chat and click “Detect chat”. Daily/weekly reports and alerts are switched on there.'],
+    steps: ['In Telegram, open @BotFather and send /newbot. Pick a name and a username ending in “bot”.', 'Copy the token it sends (looks like 123456:ABC-…) and paste it below.', 'Save, then open the Telegram panel: press Start in your bot’s chat and click “Detect chat”. The swarm’s trade notifications are switched on there.'],
+  },
+  {
+    id: 'x',
+    name: 'X (Twitter) API',
+    kind: 'x-api',
+    badge: 'X',
+    url: 'https://developer.x.com',
+    steps: ['Optional, and paid by X: search costs about $0.005 for every post it reads (pay-per-use credits — check developer.x.com for today’s prices). The Herald keeps to the hourly budget you set under Rules → Herald on X, and is off until you switch it on there.', 'At developer.x.com: sign in, create a Project and an App, buy a few dollars of credits, and copy the App’s Bearer Token.', 'Paste the Bearer Token below. It is encrypted here and used only by the app’s main process to search recent posts.'],
   },
   {
     id: 'solana',

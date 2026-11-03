@@ -8,6 +8,7 @@ import { Db } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DEFAULT_RPC, recentActivity, SOL_MINT, tokenInfo, walletBalances } from '../src/shared/solana.ts';
 import { TelegramCommands, tgDetectChat, tgMe, tgSendLong, tgSendPhoto } from '../src/shared/telegram.ts';
+import { parseSearch, searchUrl } from '../src/shared/xapi.ts';
 import { AttemptGate, isLedgerRecord, ledgerMatches, makeLedger, PUBLIC_CHANNELS } from '../src/shared/ledger.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { Vault } from './vault.mjs';
@@ -715,6 +716,24 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
   let commands = null;
   let tgStatus = { price: 'No data yet', status: 'No data yet' };
   handle('telegram:me', (_e, id) => tgMe(tg(id).fields.token));
+
+  // X (Twitter) recent search for the Herald: the bearer token never leaves the main process
+  handle('x:search', async (_e, id, query, max) => {
+    const s = vault.reveal(id);
+    if (s.kind !== 'x-api' || !s.fields.token) throw new Error('choose an X API key (Connect → X)');
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15_000);
+    try {
+      const res = await fetch(searchUrl(String(query).slice(0, 500), Number(max) || 10), { headers: { Authorization: `Bearer ${s.fields.token}` }, signal: ctrl.signal });
+      if (res.status === 429) throw new Error('X rate limit reached — the Herald waits');
+      if (res.status === 401) throw new Error('X rejected the key — check it under Connect → X');
+      if (res.status === 402 || res.status === 403) throw new Error(`X refused the search (${res.status}) — the X developer account may be out of credits`);
+      if (!res.ok) throw new Error(`X search failed (${res.status})`);
+      return parseSearch(await res.json());
+    } finally {
+      clearTimeout(t);
+    }
+  });
   handle('telegram:detect', async (_e, id) => {
     const s = tg(id);
     const wasRunning = commands;

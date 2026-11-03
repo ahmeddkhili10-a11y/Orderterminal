@@ -227,7 +227,7 @@ describe('Outcomes', () => {
     expect(b[0]).toMatchObject({ label: 'Conviction 80+', n: 2, x2: 1, x5: 0.5, x10: 0.5, dead: 0 });
     expect(b[1]).toMatchObject({ label: 'Conviction 65–79', n: 1, x2: 0, dead: 1 });
     expect(b[3]).toMatchObject({ label: 'All picks', n: 4, x2: 0.5 });
-    expect(b[4]).toMatchObject({ label: 'Passed, not picked', n: 2, x2: 0, dead: 0.5 });
+    expect(b.find((x) => x.label === 'Passed, not picked')).toMatchObject({ n: 2, x2: 0, dead: 0.5 });
   });
 });
 

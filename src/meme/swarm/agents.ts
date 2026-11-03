@@ -67,7 +67,7 @@ export function earlyBuys(tok: MemeToken, sec = 3) {
   return { wallets: wallets.size, share: tokens / 1e9 };
 }
 
-export function sentinel(tok: MemeToken, now: number, creator?: CreatorRecord): Viability {
+export function sentinel(tok: MemeToken, now: number, creator?: CreatorRecord, fakes: string[] = []): Viability {
   const reasons: string[] = [];
   let score = 100;
   let reject = false;
@@ -107,6 +107,8 @@ export function sentinel(tok: MemeToken, now: number, creator?: CreatorRecord): 
   if (f5.buyers >= 5 && f5.churners / f5.buyers > 0.5) no(`${f5.churners} of ${f5.buyers} buyers also sold within minutes — wash trading`);
   if (tok.trades.length >= 5 && now - tok.lastTradeAt > 180_000 && !tok.dex) no('no trades for 3 minutes — gone idle');
   if (tok.dex && tok.dex.liquidityUsd < 5_000 && (tok.migrated || tok.source === 'dex')) no('pool liquidity under $5k');
+  // fakes: impersonators, duplicates, stolen logos, copied socials (see fakes.ts)
+  for (const f of fakes) no(f);
   if (creator && creator.rugs > 0) no(`this creator's earlier coin${creator.rugs > 1 ? 's' : ''} rugged (${creator.rugs})`);
   else if (creator && creator.launches >= 3) hm(`serial launcher — ${creator.launches} coins seen from this creator`, 15);
   score = Math.max(0, Math.round(score));
@@ -183,7 +185,7 @@ export function buyerGrowth(tok: MemeToken, now: number) {
   return { perMin: recent / 2, accel: (recent + 1) / (prior + 1), total: seenBefore.size };
 }
 
-export function herald(tok: MemeToken, now: number, narratives: Narratives, leaderOf: (mints: string[]) => string | null): Virality {
+export function herald(tok: MemeToken, now: number, narratives: Narratives, leaderOf: (mints: string[]) => string | null, social?: { posts: number; authors: number; reach: number } | null): Virality {
   const reasons: string[] = [];
   let score = 0;
   // 1. new wallets arriving, and arriving faster
@@ -217,6 +219,11 @@ export function herald(tok: MemeToken, now: number, narratives: Narratives, lead
   if (tok.dex && (tok.dex.boosts > 0 || tok.dex.socials.length)) {
     score += tok.dex.boosts > 0 ? 10 : 5;
     reasons.push(tok.dex.boosts > 0 ? 'team is paying for DexScreener boosts' : 'DexScreener profile set up');
+  }
+  // 5. on X (when the Herald is connected): posts in the last hour, the accounts behind them, their reach
+  if (social && social.posts > 0) {
+    score += Math.min(20, log(social.posts, 30) * 10 + log(social.authors, 15) * 6 + log(social.reach, 200_000) * 4);
+    reasons.push(`${social.posts} posts from ${social.authors} accounts on X in the last hour (${social.reach >= 1000 ? `${Math.round(social.reach / 1000)}k` : social.reach} followers)`);
   }
   // 4. breadth: how many wallets have bought in at all
   score += log(g.total, 300) * 15;

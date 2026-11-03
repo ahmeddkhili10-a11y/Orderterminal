@@ -107,6 +107,10 @@ export interface Position {
   milestones?: number[];
   /** insider lane: the wallets it followed in; out when half of them sell */
   insiders?: string[];
+  /** what the swarm expected when it bought: the forest's odds, its expected multiple, the room to the target cap */
+  potential?: { expMult: number; p2: number; p5: number; trust: number; room: number | null };
+  /** the council's votes when it bought, one line each */
+  council?: string[];
 }
 
 const POOL_FEE = 0.0025;

@@ -7,6 +7,8 @@ import { useMeme } from '../meme/scanner';
 import { multiple, pnlSol } from '../meme/swarm/book';
 import { bankrollPlan } from '../meme/swarm/bankroll';
 import { calibrate } from '../meme/swarm/outcomes';
+import { hourlyCost } from '../meme/swarm/xwatch';
+import { openConnections } from '../app/connect';
 import { swarm, useSwarm, type AgentId } from '../meme/swarm/swarm';
 import { Chip, Empty, NumberInput, Select, Spacer, Toolbar, useTicker, type PanelProps } from '../ui/controls';
 
@@ -23,6 +25,7 @@ const AGENTS: { id: AgentId; name: string; job: string }[] = [
   { id: 'strategist', name: 'Strategist', job: 'picks the entries' },
   { id: 'manager', name: 'Manager', job: 'runs the trades' },
   { id: 'optimizer', name: 'Optimizer', job: 'risk and the portfolio as a whole' },
+  { id: 'forest', name: 'Forest', job: 'the statistics: odds from what happened to coins like it' },
 ];
 
 const pct = (x: number | null) => (x === null || !Number.isFinite(x) ? '—' : `${Math.round(x * 100)}%`);
@@ -47,6 +50,10 @@ export function MemeSwarm({ config: c, setConfig }: PanelProps<MemeSwarmConfig>)
         return `${sw.outcomes.filter((o) => o.kind === 'pick').length} picks`;
       case 'manager':
         return `${st.manager.open} open · ${st.manager.closed} closed · ${sol(st.manager.pnlSol)}`;
+      case 'forest':
+        return st.forest.n
+          ? `learned from ${st.forest.n} coins · right ${st.forest.accuracy === null ? '—' : `${Math.round(st.forest.accuracy * 100)}%`} on unseen coins (guessing: ${Math.round((st.forest.baseline ?? 0) * 100)}%) · trust ${Math.round(st.forest.trust * 100)}%`
+          : `learning — ${sw.outcomes.filter((o) => o.x && !o.done).length} coins being followed, ${sw.outcomes.filter((o) => o.x && o.done).length} done (learns from 30)`;
       case 'optimizer':
         return st.optimizer ? `size ${st.optimizer.sizeMult.toFixed(2)}× · health ${st.optimizer.health} · ${Math.round(st.optimizer.drawdown * 100)}% off the high${st.optimizer.floorSol > 0 ? ` · floor ${st.optimizer.floorSol.toFixed(3)} SOL` : ''}` : 'waiting for the account';
     }
@@ -224,6 +231,12 @@ export function MemeSwarm({ config: c, setConfig }: PanelProps<MemeSwarmConfig>)
                   </a>
                 </>
               )}
+              {sw.positions.some((p) => !p.live) && (
+                <>
+                  {' '}
+                  <a onClick={() => confirm('Remove every paper (demo) trade and its fills? Live trades stay.') && sw.clearPaper()}>Clear paper trades</a>
+                </>
+              )}
               {sw.positions.length > 0 && !sw.positions.some((p) => p.live && !p.closedAt) && (
                 <>
                   {' '}
@@ -283,7 +296,20 @@ function Results() {
 }
 
 export function Rules() {
-  const { strategy: s, manager: m, optimizer: o, setStrategy, setManager, setOptimizer } = useSwarm();
+  const { strategy: s, manager: m, optimizer: o, x: xc, setStrategy, setManager, setOptimizer, setX } = useSwarm();
+  const xSearches = useSwarm((st) => st.stats.herald.xSearches);
+  const [xKeys, setXKeys] = useState<SecretRecord[]>([]);
+  useEffect(() => {
+    vault
+      .list()
+      .then((l) => {
+        const k = l.filter((r) => r.kind === 'x-api');
+        setXKeys(k);
+        if (!xc.secretId && k[0]) setX({ secretId: k[0].id });
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [tp, setTp] = useState(m.takeProfits.map((t) => `${t.at}:${Math.round(t.sell * 100)}`).join(', '));
   const row = (label: string, el: React.ReactNode, hint: string) => (
     <label className="swarm-rule">
@@ -309,6 +335,24 @@ export function Rules() {
       {row('Not after a spike', <NumberInput value={Math.round(s.maxExtension * 100 - 100)} onChange={(v) => setStrategy({ maxExtension: 1 + v / 100 })} min={0} step={10} suffix="%" />, 'on the curve: no buying while the price stands this far above its 5-minute average')}
       {row('Pool spike', <NumberInput value={Math.round(s.maxRun5m * 100)} onChange={(v) => setStrategy({ maxRun5m: v / 100 })} min={0} step={10} suffix="%" />, 'on a pool: no buying after more than this rise in 5 minutes')}
       {row('Min buyers', <NumberInput value={Math.round(s.minBuyShare * 100)} onChange={(v) => setStrategy({ minBuyShare: v / 100 })} min={0} step={2} suffix="%" />, 'share of the last 5 minutes’ flow that is buying — net accumulation, not churn')}
+      <div className="section-title">Herald on X — early posts about a coin</div>
+      {xKeys.length ? (
+        <>
+          {row('X key', <Select value={xc.secretId} options={[{ value: '', label: 'Choose…' }, ...xKeys.map((k) => ({ value: k.id, label: k.label }))]} onChange={(secretId) => setX({ secretId })} width={150} />, 'the X API key it searches with (Connect → X)')}
+          {row('Look up candidates', <input type="checkbox" checked={xc.mentions} onChange={(e) => setX({ mentions: e.target.checked })} />, 'before the council: posts naming the coin’s $TICKER or address in the last hour, the accounts behind them and their followers — into the Herald’s vote and the forest')}
+          {row('Scan for early trends', <input type="checkbox" checked={xc.trend} onChange={(e) => setX({ trend: e.target.checked })} />, `every ${xc.trendEveryMin} min, the newest posts with pump.fun links; a coin posted by several accounts (or one with 10k+ followers) is sent to the swarm to be read`)}
+          {row('Searches an hour', <NumberInput value={xc.maxPerHour} onChange={(maxPerHour) => setX({ maxPerHour: Math.max(1, Math.round(maxPerHour)) })} min={1} step={2} />, `at most — ${xSearches} in the last hour. X bills about $0.005 a post read: this budget costs at most $${hourlyCost(xc).toFixed(2)} an hour, $${(hourlyCost(xc) * 24).toFixed(2)} a day if every search fills its page`)}
+          {row('Scan every', <NumberInput value={xc.trendEveryMin} onChange={(trendEveryMin) => setX({ trendEveryMin: Math.max(5, Math.round(trendEveryMin)) })} min={5} step={5} suffix="min" />, 'between trend scans')}
+        </>
+      ) : (
+        <div className="swarm-rule">
+          <span>Not connected</span>
+          <button className="chip" onClick={openConnections}>
+            Connect → X
+          </button>
+          <span className="muted">optional, paid by X (about $0.005 a post read). Without it the Herald reads virality from the chain, socials and narratives only.</span>
+        </div>
+      )}
       <div className="section-title">Insider lane — follow the wallets that win</div>
       {row('Buy at insider score', <NumberInput value={s.insiderMin} onChange={(insiderMin) => setStrategy({ insiderMin })} min={0} step={5} />, 'proven wallets (seen selling coins at 3×+) or quiet 1 SOL+ buyers in early — buys before the crowd, same safety checks and room rule, out when they sell. 0 = off')}
       {row('Insider spike limit', <NumberInput value={Math.round(s.insiderMaxExtension * 100 - 100)} onChange={(v) => setStrategy({ insiderMaxExtension: 1 + v / 100 })} min={0} step={10} suffix="%" />, 'their buying lifts the price: how far above its 5-minute average it may still buy')}

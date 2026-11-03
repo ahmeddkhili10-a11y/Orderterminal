@@ -1,3 +1,4 @@
+import type { XPost } from '../shared/xapi';
 import type { Kline } from '../core/types';
 import type { TokenInfo, WalletActivity, WalletBalances } from '../shared/solana';
 
@@ -13,7 +14,7 @@ export interface SecretRecord {
   backend: 'os' | 'local' | 'browser';
 }
 
-export type SecretKind = 'exchange' | 'solana-rpc' | 'telegram' | 'api';
+export type SecretKind = 'exchange' | 'solana-rpc' | 'telegram' | 'x-api' | 'api';
 
 export interface SecretInput {
   id?: string;
@@ -643,6 +644,8 @@ export interface NovusApi {
     tokenInfo(mints: string[]): Promise<TokenInfo>;
     activity(address: string, rpcSecretId?: string): Promise<WalletActivity[]>;
   };
+  /** X (Twitter) recent search, with the X API key in the vault */
+  x: { search(id: string, query: string, max: number): Promise<XPost[]> };
   telegram: {
     me(id: string): Promise<{ username: string; name: string }>;
     detect(id: string): Promise<{ id: string; title: string }>;

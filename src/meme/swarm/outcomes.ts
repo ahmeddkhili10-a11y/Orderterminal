@@ -10,8 +10,14 @@ export interface Outcome {
   symbol: string;
   t0: number;
   mcap0: number;
-  /** picked by the Strategist, or a passed-but-not-picked comparison sample */
-  kind: 'pick' | 'control';
+  /** picked by the Strategist, a passed-but-not-picked comparison sample, or a coin followed only to teach the forest */
+  kind: 'pick' | 'control' | 'sample';
+  /** the coin as numbers when it was seen (features.ts) — what the forest learns from */
+  x?: number[];
+  /** the council's verdict on a pick */
+  voted?: 'buy' | 'no';
+  /** the scanner stopped tracking it before the hour was up (it went quiet) */
+  lost?: boolean;
   conviction: number;
   heat: number;
   virality: number;
@@ -24,13 +30,14 @@ export interface Outcome {
 
 export const FOLLOW_MS = 60 * 60_000;
 
-export function newOutcome(o: Omit<Outcome, 'peak' | 'last' | 'graduated' | 'done'>): Outcome {
+export function newOutcome(o: Omit<Outcome, 'peak' | 'last' | 'graduated' | 'done' | 'lost'>): Outcome {
   return { ...o, peak: 1, last: 1, graduated: false, done: false };
 }
 
 /** Update with the coin's market cap now (SOL), or mark it done after the hour. */
-export function follow(o: Outcome, mcapSol: number, migrated: boolean, now: number) {
+export function follow(o: Outcome, mcapSol: number, migrated: boolean, now: number, gone = false) {
   if (o.done) return;
+  if (gone) o.lost = true;
   if (mcapSol > 0 && o.mcap0 > 0) {
     o.last = mcapSol / o.mcap0;
     o.peak = Math.max(o.peak, o.last);
@@ -70,6 +77,8 @@ export function calibrate(rows: Outcome[]): Bucket[] {
     make('Conviction 65–79', picks.filter((o) => o.conviction >= 65 && o.conviction < 80)),
     make('Conviction < 65', picks.filter((o) => o.conviction < 65)),
     make('All picks', picks),
+    make('Council said buy', picks.filter((o) => o.voted === 'buy')),
+    make('Council said no', picks.filter((o) => o.voted === 'no')),
     make('Passed, not picked', rows.filter((o) => o.kind === 'control')),
   ];
 }

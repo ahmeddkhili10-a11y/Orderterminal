@@ -61,7 +61,7 @@ describe('the swarm, trading live', () => {
     useSwarm.setState((s) => ({ wallet: { ...s.wallet!, sol: 0.12, limits: { ...LIMITS, maxBuySol: 0.11 } }, manager: { ...s.manager, autoSize: 0.2, floorSol: 0.14 } }));
     swarm.tick(later);
     expect(fake.buy).not.toHaveBeenCalled();
-    expect(useSwarm.getState().log.map((l) => l.text)).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^${next.symbol}: not bought — the account \\(0\\.120 SOL\\) is under its floor of 0\\.14 SOL`))]));
+    expect(useSwarm.getState().log.map((l) => l.text)).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^${next.symbol} · council ⛔ the account \\(0\\.120 SOL\\) is under its floor of 0\\.14 SOL`)), `${next.symbol}: council — vetoed by the Optimizer`]));
     useSwarm.setState((s) => ({ manager: { ...s.manager, floorSol: 0 }, optimizer: { ...s.optimizer, enabled: true } }));
   });
 

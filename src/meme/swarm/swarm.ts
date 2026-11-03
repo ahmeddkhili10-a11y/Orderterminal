@@ -21,11 +21,16 @@ import type { MemeToken } from '../token';
 import { herald, insiderRead, isSmart, learnSmart, Narratives, sentinel, strategist, STRATEGY_DEFAULTS, type CreatorRecord, type SmartBook, type StrategyConfig, type Viability, type Virality } from './agents';
 import { MIN_TRADE_SOL, riskGate, TRADE_SHARE, tradeSize } from './bankroll';
 import { applySell, decideExit, managePosition, MANAGER_DEFAULTS, markPrice, multiple, newMilestone, openPosition, pnlSol, quoteSell, type ExitDecision, type ManagerConfig, type Position } from './book';
-import { alertHere, tellWithCard } from './notify';
+import { alertHere, tellWithCard, type CardBadge } from './notify';
+import { FakeFilter } from './fakes';
+import { council, MARK, type CouncilBot } from './council';
+import { features, type XStats } from './features';
+import { classOf, Forest, oddsOf, type Odds } from './forest';
+import { fmtReach, X_DEFAULTS, XWatch, type XConfig } from './xwatch';
 import { convictionTilt, optimize, OPTIMIZER_DEFAULTS, sharedNarrative, shiftBook, trimShare, updateBook, type OptimizerConfig, type OptimizerRead, type RiskBook } from './optimizer';
 import { follow, newOutcome, type Outcome } from './outcomes';
 
-export type AgentId = 'scout' | 'sentinel' | 'herald' | 'strategist' | 'manager' | 'optimizer';
+export type AgentId = 'scout' | 'sentinel' | 'herald' | 'strategist' | 'manager' | 'optimizer' | 'forest';
 
 export interface LogLine {
   t: number;
@@ -46,6 +51,8 @@ export interface CoinRead {
   mcapUsd: number;
   /** insider tracker score (0–100) */
   insider: number;
+  /** the decision forest's odds for it (coins that passed the Sentinel) */
+  odds?: Odds;
 }
 
 export interface SwarmWallet {
@@ -71,19 +78,27 @@ interface SwarmState {
   optimizer: OptimizerConfig;
   /** the Optimizer's record of each book: start, high, start of today */
   risk: { live?: RiskBook; paper?: RiskBook };
+  /** the paper (demo) trades were cleared once, when this version first ran */
+  paperCleared?: boolean;
+  /** the Herald on X (off until switched on; X bills each post read) */
+  x: XConfig;
   // runtime (not saved)
   log: LogLine[];
   reads: CoinRead[];
   stats: {
     scout: { seen: number; perMin: number };
     sentinel: { checked: number; pass: number; watch: number; reject: number; top: { why: string; n: number }[] };
-    herald: { scored: number; viral: number; narratives: { word: string; count: number }[] };
+    herald: { scored: number; viral: number; narratives: { word: string; count: number }[]; xSearches: number };
     strategist: { signals: number; last: string; proven: number; insiderBest: number };
+    forest: { n: number; accuracy: number | null; baseline: number | null; brier: number | null; trust: number; best: Odds | null; trainedAt: number; importance: number[] };
     manager: { open: number; closed: number; pnlSol: number; winRate: number | null };
     optimizer: (OptimizerRead & { equity: number | null }) | null;
   };
   set(p: Partial<SwarmState>): void;
   setOptimizer(p: Partial<OptimizerConfig>): void;
+  setX(p: Partial<XConfig>): void;
+  /** forget every paper (demo) trade: positions, fills and the paper record; live trades stay */
+  clearPaper(): void;
   setStrategy(p: Partial<StrategyConfig>): void;
   setManager(p: Partial<ManagerConfig>): void;
   reset(): void;
@@ -92,8 +107,9 @@ interface SwarmState {
 const emptyStats = (): SwarmState['stats'] => ({
   scout: { seen: 0, perMin: 0 },
   sentinel: { checked: 0, pass: 0, watch: 0, reject: 0, top: [] },
-  herald: { scored: 0, viral: 0, narratives: [] },
+  herald: { scored: 0, viral: 0, narratives: [], xSearches: 0 },
   strategist: { signals: 0, last: '', proven: 0, insiderBest: 0 },
+  forest: { n: 0, accuracy: null, baseline: null, brier: null, trust: 0, best: null, trainedAt: 0, importance: [] },
   manager: { open: 0, closed: 0, pnlSol: 0, winRate: null },
   optimizer: null,
 });
@@ -101,14 +117,18 @@ const emptyStats = (): SwarmState['stats'] => ({
 /** The saved swarm over the defaults. A sell in flight when the app closed is not in flight any more: those positions are managed again. */
 export function mergeSwarm(persisted: unknown, current: SwarmState): SwarmState {
   const p = (persisted ?? {}) as Partial<SwarmState>;
-  const positions = (p.positions ?? []).map((x) => ({ ...x, pending: false, retryAt: undefined }));
+  // the demo trades made before this version are cleared once; live trades always stay
+  const clear = !p.paperCleared;
+  const positions = (p.positions ?? []).filter((x) => !clear || x.live).map((x) => ({ ...x, pending: false, retryAt: undefined }));
+  if (clear) p.risk = { ...p.risk, paper: undefined };
+  p.paperCleared = true;
   // rules saved before the 5× strategy (no conviction floor): the new entry and exit rules,
   // keeping the account's sizing (positions, size, daily loss limit)
   if (p.strategy && !('minConviction' in p.strategy)) {
     const m = p.manager ?? MANAGER_DEFAULTS;
     return { ...current, ...p, positions, strategy: { ...STRATEGY_DEFAULTS }, manager: { ...MANAGER_DEFAULTS, sizeSol: m.sizeSol, maxOpen: m.maxOpen, dailyLossSol: m.dailyLossSol } };
   }
-  return { ...current, ...p, positions, strategy: { ...STRATEGY_DEFAULTS, ...p.strategy }, manager: { ...MANAGER_DEFAULTS, ...p.manager }, optimizer: { ...OPTIMIZER_DEFAULTS, ...p.optimizer } };
+  return { ...current, ...p, positions, strategy: { ...STRATEGY_DEFAULTS, ...p.strategy }, manager: { ...MANAGER_DEFAULTS, ...p.manager }, optimizer: { ...OPTIMIZER_DEFAULTS, ...p.optimizer }, x: { ...X_DEFAULTS, ...p.x } };
 }
 
 export const useSwarm = create<SwarmState>()(
@@ -124,11 +144,14 @@ export const useSwarm = create<SwarmState>()(
       smart: {},
       optimizer: { ...OPTIMIZER_DEFAULTS },
       risk: {},
+      x: { ...X_DEFAULTS },
       log: [],
       reads: [],
       stats: emptyStats(),
       set: (p) => set(p),
       setOptimizer: (p) => set((s) => ({ optimizer: { ...s.optimizer, ...p } })),
+      setX: (p) => set((s) => ({ x: { ...s.x, ...p } })),
+      clearPaper: () => set((s) => ({ positions: s.positions.filter((x) => x.live), risk: { ...s.risk, paper: undefined }, log: s.log.filter((l) => !/\(paper\)|· paper/.test(l.text)) })),
       setStrategy: (p) => set((s) => ({ strategy: { ...s.strategy, ...p } })),
       setManager: (p) => set((s) => ({ manager: { ...s.manager, ...p } })),
       reset: () => set({ positions: [], outcomes: [], log: [] }),
@@ -136,13 +159,41 @@ export const useSwarm = create<SwarmState>()(
     {
       name: 'novus-swarm',
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ enabled: s.enabled, mode: s.mode, strategy: s.strategy, manager: s.manager, positions: s.positions.slice(-300), outcomes: s.outcomes.slice(-2000), smart: s.smart, optimizer: s.optimizer, risk: s.risk }),
+      partialize: (s) => ({ enabled: s.enabled, mode: s.mode, strategy: s.strategy, manager: s.manager, positions: s.positions.slice(-300), outcomes: s.outcomes.slice(-4000), smart: s.smart, optimizer: s.optimizer, risk: s.risk, paperCleared: s.paperCleared, x: s.x }),
       merge: (persisted, current) => mergeSwarm(persisted, current),
     },
   ),
 );
 
 const TICK_MS = 2000;
+
+/** Which bot speaks for each council seat in the live feed. */
+const AGENT_OF: Record<CouncilBot, AgentId> = { sentinel: 'sentinel', herald: 'herald', strategist: 'strategist', forest: 'forest', optimizer: 'optimizer' };
+
+/** The x potential, in words: what the forest expects, its odds, and the room to the target. */
+export function potentialText(p: NonNullable<Position['potential']>) {
+  return `expects ${p.expMult.toFixed(2)}× · P(2×) ${Math.round(p.p2 * 100)}% · P(5×) ${Math.round(p.p5 * 100)}%${p.room ? ` · up to ${Math.round(p.room)}× of room to the target cap` : ''}${p.trust < 0.15 ? ' · forest still learning' : ''}`;
+}
+
+/** The card's badge on a buy: how far it could go (the room to the target cap), and what the forest expects. */
+export function potentialBadge(p?: Position['potential']): CardBadge | undefined {
+  if (!p) return undefined;
+  return p.room
+    ? { label: 'X POTENTIAL', value: `${p.room >= 10 ? Math.round(p.room) : p.room.toFixed(1)}×`, sub: `room to the target cap · expects ${p.expMult.toFixed(2)}× · P(5×) ${Math.round(p.p5 * 100)}%`, tone: 'accent' }
+    : { label: 'X POTENTIAL', value: `${p.expMult.toFixed(2)}×`, sub: `expected · P(2×) ${Math.round(p.p2 * 100)}% · P(5×) ${Math.round(p.p5 * 100)}%`, tone: 'accent' };
+}
+
+/** The card's badge on a close: the x it ended at, against what was hoped for. */
+export function resultBadge(p: Position): CardBadge {
+  const x = p.costSol > 0 ? p.realizedSol / p.costSol : 0;
+  const was = p.potential ? ` · potential was ${p.potential.room ? `${Math.round(p.potential.room)}×` : `${p.potential.expMult.toFixed(1)}×`}, expected ${p.potential.expMult.toFixed(2)}×` : '';
+  return { label: 'RESULT', value: `${x.toFixed(2)}×`, sub: `peak ${p.peakMult.toFixed(2)}×${was}`, tone: x >= 1 ? 'buy' : 'sell' };
+}
+
+/** Followed coins the forest learns from: done, with their numbers kept. */
+export function trainingRows(outcomes: Outcome[]) {
+  return outcomes.filter((o) => o.done && o.x && o.x.length).map((o) => ({ x: o.x!, y: classOf(o.peak, o.last, o.lost) }));
+}
 
 class Swarm {
   private release: (() => void) | null = null;
@@ -159,10 +210,44 @@ class Swarm {
   private metaInFlight = 0;
   private verdicts = new Map<string, Viability['verdict']>();
   private smartDone = new Set<string>();
+  private fakes = new FakeFilter();
+  /** the decision forest (null until it has learned from 30 followed coins) */
+  forest: Forest | null = null;
+  private training = false;
+  private lastTrain = 0;
+  private sampled = new Set<string>();
+  /** what the Herald found on X, by coin */
+  social = new Map<string, XStats>();
+  private xw = new XWatch(
+    (id, q, max) => desktop!.x.search(id, q, max),
+    this.social,
+    (mint, stats) => {
+      scanner.watchMint(mint);
+      this.say('herald', `spotted on X: ${mint.slice(0, 4)}…${mint.slice(-4)} — ${stats.posts} posts from ${stats.authors} accounts (${fmtReach(stats.reach)} followers) — sent to the swarm to be read`, mint);
+    },
+    (text, mint) => this.say('herald', text, mint),
+  );
+  private lastPrune = 0;
   private floorHit = false;
   private lastNotes = '';
   private lastOptGate: string | null = null;
   private lastLearn = 0;
+
+  /** Retrain the forest on what the swarm has followed (every 10 minutes, once 30 coins are done). */
+  private maybeTrain(outcomes: Outcome[], now: number) {
+    if (this.training || (this.forest && now - this.lastTrain < 10 * 60_000)) return;
+    const rows = trainingRows(outcomes);
+    if (rows.length < 30 || (this.forest && rows.length === this.forest.stats.n)) return;
+    this.training = true;
+    this.lastTrain = now;
+    void Forest.train(rows, undefined, now)
+      .then((f) => {
+        this.forest = f;
+        const acc = f.stats.accuracy;
+        this.say('forest', `retrained on ${f.stats.n} followed coins — right ${acc === null ? '—' : `${Math.round(acc * 100)}%`} of the time on coins it did not see (always guessing the commonest: ${Math.round((f.stats.baseline ?? 0) * 100)}%) · trust ${Math.round((f.stats.n / (f.stats.n + 60)) * 100)}%`);
+      })
+      .finally(() => (this.training = false));
+  }
 
   /** Run while enabled; the scanner runs with it, whatever panels are open. */
   sync() {
@@ -263,7 +348,7 @@ class Swarm {
   private buying = new Set<string>();
 
   /** Buy for real from the swarm wallet; the position books what the chain says happened. */
-  private async liveBuy(tok: MemeToken, sizeSol: number, why: string, conviction: number, mc: string, insiders?: string[]) {
+  private async liveBuy(tok: MemeToken, sizeSol: number, why: string, conviction: number, mc: string, insiders?: string[], extra?: Pick<Position, 'potential' | 'council'>) {
     this.buying.add(tok.mint);
     this.say('manager', `${tok.symbol}: buying ${sizeSol} SOL live${mc}…`, tok.mint);
     try {
@@ -293,11 +378,12 @@ class Swarm {
         conviction,
         live: { rawLeft: raw.toString(), decimals, buyTx: r.signature },
         insiders,
+        ...extra,
       };
       useSwarm.setState((s) => ({ positions: [...s.positions, p] }));
       this.say('manager', `${tok.symbol}: bought live — ${cost.toFixed(4)} SOL for ${tokens.toLocaleString('en-US', { maximumFractionDigits: 0 })} tokens via ${r.via}`, tok.mint);
       alertHere(`Swarm bought ${tok.symbol} · LIVE`, `${cost.toFixed(3)} SOL${mc} — ${why}`, 'buy');
-      void tellWithCard(tok, p, `Bought — ${cost.toFixed(3)} SOL`, `🐝 Swarm bought ${tok.symbol} (LIVE)${mc}\nWhy: ${why}\nPaid: ${cost.toFixed(4)} SOL incl. fees, via ${r.via}\nPlan: ${this.plan()}\nTx: https://solscan.io/tx/${r.signature}`, useMeme.getState().solUsd);
+      void tellWithCard(tok, p, `Bought — ${cost.toFixed(3)} SOL`, `🐝 Swarm bought ${tok.symbol} (LIVE)${mc}\nPotential: ${p.potential ? potentialText(p.potential) : '—'}\nWhy: ${why}${p.council ? `\n${p.council.join('\n')}` : ''}\nPaid: ${cost.toFixed(4)} SOL incl. fees, via ${r.via}\nPlan: ${this.plan()}\nTx: https://solscan.io/tx/${r.signature}`, useMeme.getState().solUsd, potentialBadge(p.potential));
       void this.refreshWallet();
     } catch (e) {
       const msg = String((e as Error)?.message ?? e);
@@ -365,8 +451,9 @@ class Swarm {
         tok,
         p,
         `${pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(3)} SOL (${(((p.realizedSol / p.costSol) - 1) * 100).toFixed(0)}%)`,
-        `${pnl >= 0 ? '💰' : '🔻'} Swarm closed ${p.symbol} (${tag}) ${pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(4)} SOL\nWhy: ${d.why}\nResult: paid ${p.costSol.toFixed(4)} SOL, got back ${p.realizedSol.toFixed(4)} SOL · peak ${p.peakMult.toFixed(2)}× · held ${Math.max(1, Math.round((Date.now() - p.openedAt) / 60_000))} min${tx ? `\nTx: ${tx}` : ''}`,
+        `${pnl >= 0 ? '💰' : '🔻'} Swarm closed ${p.symbol} (${tag}) at ${(p.realizedSol / p.costSol).toFixed(2)}× · ${pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(4)} SOL\nWhy: ${d.why}\nResult: paid ${p.costSol.toFixed(4)} SOL, got back ${p.realizedSol.toFixed(4)} SOL (${(p.realizedSol / p.costSol).toFixed(2)}×) · peak ${p.peakMult.toFixed(2)}× · held ${Math.max(1, Math.round((Date.now() - p.openedAt) / 60_000))} min${p.potential ? `\nAt the buy: ${potentialText(p.potential)}` : ''}${tx ? `\nTx: ${tx}` : ''}`,
         solUsd,
+        resultBadge(p),
       );
     } else
       void tellWithCard(
@@ -375,6 +462,7 @@ class Swarm {
         `${d.mult.toFixed(2)}× — profit taken`,
         `✅ ${p.symbol} at ${d.mult.toFixed(2)}× (${tag}) — ${d.why}\nBanked so far: ${p.realizedSol.toFixed(4)} SOL of ${p.costSol.toFixed(4)} paid · still holding ${Math.round((p.left / p.tokens) * 100)}%${tx ? `\nTx: ${tx}` : ''}`,
         solUsd,
+        { label: 'NOW', value: `${d.mult.toFixed(2)}×`, sub: `profit taken · banked ${(p.realizedSol / p.costSol).toFixed(2)}× of the cost so far`, tone: 'buy' },
       );
   }
 
@@ -430,6 +518,10 @@ class Swarm {
       }
     }
     this.narratives.prune(now);
+    if (now - this.lastPrune > 60_000) {
+      this.lastPrune = now;
+      this.fakes.prune(now);
+    }
     // the insider tracker learns which wallets really sell at 3×+ (every half minute)
     const smartBook = sw.smart ?? {};
     let learned = 0;
@@ -440,6 +532,9 @@ class Swarm {
       if (learned) this.say('strategist', `insider tracker: ${learned} more wallet${learned > 1 ? 's' : ''} seen selling at 3×+ — ${Object.values(smartBook).filter(isSmart).length} proven so far`);
     }
     let insiderBest = 0;
+    let bestOdds: Odds | null = null;
+    let openSamples = sw.outcomes.filter((o) => o.kind === 'sample' && !o.done).length;
+    this.maybeTrain(sw.outcomes, now);
     this.seenTimes = this.seenTimes.filter((t) => now - t < 60_000);
     const leaderOf = (mints: string[]) => {
       let best: string | null = null;
@@ -508,7 +603,9 @@ class Swarm {
       if (tok.trades.length < 3 && !tok.dex) continue;
       // the creator's record from their other coins: a coin that went quiet is not held against itself when it wakes up
       const cr = tok.creator ? this.creators.get(tok.creator) : undefined;
-      const v = sentinel(tok, now, cr && this.rugged.has(tok.mint) ? { ...cr, rugs: cr.rugs - 1 } : cr);
+      this.fakes.see(tok);
+      const fake = this.fakes.check(tok, now, (m) => tokens[m]?.symbol ?? '', (m) => tokens[m]?.mcapSol ?? 0);
+      const v = sentinel(tok, now, cr && this.rugged.has(tok.mint) ? { ...cr, rugs: cr.rugs - 1 } : cr, fake);
       tally.checked++;
       tally[v.verdict]++;
       if (v.verdict !== 'pass' && v.reasons[0]) {
@@ -518,7 +615,7 @@ class Swarm {
         why.set(key, g);
       }
       // a rejected coin's creator is remembered for their next launch
-      if (v.verdict === 'reject' && tok.creator && !this.rugged.has(tok.mint) && /dumped|sold|bundled|idle|wash/.test(v.reasons.join(' '))) {
+      if (v.verdict === 'reject' && tok.creator && !this.rugged.has(tok.mint) && /dumped|sold|bundled|idle|wash|a copy|copied|impersonates|not theirs/.test(v.reasons.join(' '))) {
         this.rugged.add(tok.mint);
         const r = this.creators.get(tok.creator);
         if (r) r.rugs++;
@@ -534,18 +631,29 @@ class Swarm {
       let x: Virality | null = null;
       if (v.verdict !== 'reject') {
         if (a.heat >= 35) this.fetchMeta(tok);
-        x = herald(tok, now, this.narratives, leaderOf);
+        x = herald(tok, now, this.narratives, leaderOf, this.social.get(tok.mint));
         scored++;
         if (x.score >= 60) viral++;
       }
       const ins = v.verdict === 'pass' ? insiderRead(tok, now, smartBook) : null;
       if (ins) insiderBest = Math.max(insiderBest, ins.score);
       const d = x ? strategist(tok, a, v, x, sw.strategy, ins ?? undefined) : { enter: false, conviction: 0, why: `rejected: ${v.reasons[0] ?? ''}`, insiders: undefined };
-      if (a.heat >= 30 || d.enter || (ins?.score ?? 0) >= 40) reads.push({ mint: tok.mint, symbol: tok.symbol, heat: a.heat, viability: v, virality: x, conviction: d.conviction, decision: d.why, enter: d.enter, mcapUsd: a.mcapUsd, insider: ins?.score ?? 0 });
+      // the statistics: the coin as numbers, and the forest's odds for it
+      const fx = v.verdict === 'pass' && x ? features(tok, now, a, v, x, ins, this.social.get(tok.mint) ?? null) : null;
+      const odds = fx ? oddsOf(fx, this.forest) : undefined;
+      if (odds && (!bestOdds || odds.expMult > bestOdds.expMult)) bestOdds = odds;
+      if (a.heat >= 30 || d.enter || (ins?.score ?? 0) >= 40) reads.push({ mint: tok.mint, symbol: tok.symbol, heat: a.heat, viability: v, virality: x, conviction: d.conviction, decision: d.why, enter: d.enter, mcapUsd: a.mcapUsd, insider: ins?.score ?? 0, odds });
+      // the forest's schooling: every coin that passed the Sentinel with some heat is followed for an hour, its numbers kept
+      if (fx && a.heat >= 30 && !d.enter && !this.sampled.has(tok.mint) && openSamples < 400) {
+        this.sampled.add(tok.mint);
+        openSamples++;
+        newOutcomes.push(newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'sample', conviction: d.conviction, heat: a.heat, virality: x?.score ?? 0, viability: v.score, x: fx }));
+      }
 
       if (d.enter && !this.traded.has(tok.mint)) {
         this.traded.add(tok.mint);
-        newOutcomes.push(newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'pick', conviction: d.conviction, heat: a.heat, virality: x!.score, viability: v.score }));
+        const pick = newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'pick', conviction: d.conviction, heat: a.heat, virality: x!.score, viability: v.score, x: fx ?? undefined });
+        newOutcomes.push(pick);
         scanner.pin(tok.mint);
         this.say('strategist', `${tok.symbol}: ${d.insiders ? 'INSIDER PICK' : 'PICK'} (conviction ${d.conviction}) — ${d.why}`, tok.mint);
         // buys still in flight count as open
@@ -553,7 +661,10 @@ class Swarm {
         const budget = lostToday < sw.manager.dailyLossSol;
         const mc = Number.isFinite(a.mcapUsd) ? ` at $${Math.round(a.mcapUsd).toLocaleString('en-US')} market cap` : '';
         // the size: the Optimizer's multiple (edge, drawdown, a good day) and the pick's conviction
-        const sizeMult = opt.enabled ? (read?.sizeMult ?? 1) * convictionTilt(d.conviction, d.insiders ? sw.strategy.insiderMin : sw.strategy.minConviction) : 1;
+        // …and, once the forest has learned enough to be trusted, what it expects the trade to come back as
+        const o = odds ?? oddsOf(features(tok, now, a, v, x, ins, this.social.get(tok.mint) ?? null), this.forest);
+        const forestMult = o.trust >= 0.3 ? Math.min(1.25, Math.max(0.6, 0.6 + (o.expMult - 1))) : 1;
+        const sizeMult = opt.enabled ? (read?.sizeMult ?? 1) * convictionTilt(d.conviction, d.insiders ? sw.strategy.insiderMin : sw.strategy.minConviction) * forestMult : 1;
         // live: the trade follows the account (smaller after losses, bigger after wins), within the wallet's cap; never pushed under the fee floor by the Optimizer
         const plain = equity !== null && (m.autoSize ?? 0) > 0 ? tradeSize(equity, m.autoSize) : m.sizeSol;
         const tuned = equity !== null && (m.autoSize ?? 0) > 0 ? tradeSize(equity, m.autoSize * sizeMult) : Math.round(m.sizeSol * sizeMult * 1000) / 1000;
@@ -561,24 +672,42 @@ class Swarm {
         const paperSize = Math.max(0.005, Math.round(m.sizeSol * sizeMult * 1000) / 1000);
         const heldNames = [...open, ...newPositions].map((p) => tokens[p.mint]).filter(Boolean).map((t) => ({ name: t!.name, symbol: t!.symbol }));
         const twin = opt.enabled && opt.oneNarrative ? sharedNarrative(tok.name, tok.symbol, heldNames) : null;
-        if (gate) this.say('manager', `${tok.symbol}: not bought — ${gate}`, tok.mint);
-        else if (read?.gate) this.say('optimizer', `${tok.symbol}: not bought — ${read.gate}`, tok.mint);
-        else if (twin) this.say('optimizer', `${tok.symbol}: not bought — already holding a coin on "${twin}"; same-narrative coins pump and rug together`, tok.mint);
-        else if (room && budget && live) {
+        // the council: every bot gives its view; a veto or too few votes and it is not bought
+        const verdict = council({
+          viability: v,
+          virality: x!,
+          minVirality: sw.strategy.minVirality,
+          decision: d,
+          odds: o,
+          optimizerGate: gate ?? read?.gate ?? (twin ? `already holding a coin on "${twin}" — same-narrative coins pump and rug together` : null),
+          sizeMult,
+          social: this.social.get(tok.mint) ?? null,
+        });
+        const transcript = verdict.votes.map((b) => `${MARK[b.stance]} ${b.bot[0].toUpperCase() + b.bot.slice(1)}: ${b.why}`);
+        for (const b of verdict.votes) this.say(AGENT_OF[b.bot], `${tok.symbol} · council ${MARK[b.stance]} ${b.why}`, tok.mint);
+        this.say('strategist', `${tok.symbol}: council — ${verdict.summary}`, tok.mint);
+        pick.voted = verdict.buy ? 'buy' : 'no';
+        const room5 = Number.isFinite(a.mcapUsd) && a.mcapUsd > 0 ? sw.strategy.targetMcapUsd / a.mcapUsd : null;
+        const potential = { expMult: o.expMult, p2: o.p2, p5: o.p5, trust: o.trust, room: room5 };
+        if (!verdict.buy) {
+          /* the council said no: nothing bought, the call is still followed for the record */
+        } else if (room && budget && live) {
           const w = sw.wallet;
           const size = w ? Math.min(liveSize, w.limits.maxBuySol) : 0;
           if (!desktop || !w) this.say('manager', `${tok.symbol}: not bought — live mode needs the swarm wallet (Wallet tab)`, tok.mint);
           else if (!w.limits.armed) this.say('manager', `${tok.symbol}: not bought — live trading is not armed (Wallet tab)`, tok.mint);
           else if (size < MIN_TRADE_SOL) this.say('manager', `${tok.symbol}: not bought — a trade would be ${size} SOL, too small for its fees (under ${MIN_TRADE_SOL})`, tok.mint);
-          else if (!this.buying.has(tok.mint)) void this.liveBuy(tok, size, d.why, d.conviction, mc, d.insiders);
+          else if (!this.buying.has(tok.mint)) void this.liveBuy(tok, size, d.why, d.conviction, mc, d.insiders, { potential, council: transcript });
         } else if (room && budget) {
           const p = openPosition(tok, paperSize, now, solUsd, d.why, d.conviction);
           if (p) {
             if (d.insiders) p.insiders = d.insiders;
+            p.potential = potential;
+            p.council = transcript;
             newPositions.push(p);
             this.say('manager', `${tok.symbol}: bought ${p.costSol} SOL (paper)${mc}`, tok.mint);
             alertHere(`Swarm bought ${tok.symbol} · paper`, `${p.costSol} SOL${mc} — ${d.why}`, 'buy');
-            void tellWithCard(tok, p, `Bought — ${p.costSol} SOL (paper)`, `🐝 Swarm bought ${tok.symbol} (paper)${mc}\nWhy: ${d.why}\nPlan: ${this.plan()}`, solUsd);
+            void tellWithCard(tok, p, `Bought — ${p.costSol} SOL (paper)`, `🐝 Swarm bought ${tok.symbol} (paper)${mc}\nPotential: ${potentialText(potential)}\nCouncil: ${verdict.summary}\n${transcript.join('\n')}\nPlan: ${this.plan()}`, solUsd, potentialBadge(potential));
           }
         } else this.say('manager', `${tok.symbol}: not bought — ${room ? `daily loss limit (${sw.manager.dailyLossSol} SOL) reached` : `${sw.manager.maxOpen} positions already open`}`, tok.mint);
       } else if (!d.enter && v.verdict === 'pass' && a.heat >= 30 && !this.traded.has(tok.mint) && !this.controls.has(tok.mint) && now - this.lastControl > 30_000) {
@@ -586,8 +715,17 @@ class Swarm {
         this.controls.add(tok.mint);
         this.lastControl = now;
         scanner.pin(tok.mint);
-        newOutcomes.push(newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'control', conviction: d.conviction, heat: a.heat, virality: x?.score ?? 0, viability: v.score }));
+        newOutcomes.push(newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'control', conviction: d.conviction, heat: a.heat, virality: x?.score ?? 0, viability: v.score, x: fx ?? undefined }));
       }
+    }
+
+    // the Herald on X: the best candidates' posts, and the trend scan (within its hourly budget)
+    if (desktop && sw.x && (sw.x.mentions || sw.x.trend)) {
+      const cands = reads
+        .filter((r) => r.viability.verdict === 'pass' && (r.heat >= 55 || r.insider >= 50))
+        .sort((p, q) => q.conviction - p.conviction)
+        .map((r) => ({ mint: r.mint, symbol: r.symbol }));
+      void this.xw.tick(Date.now(), sw.x, cands);
     }
 
     // Manager: every open position (paper fills at once; live sells wait for the chain)
@@ -632,7 +770,7 @@ class Swarm {
       if (hit) {
         const value = p.realizedSol + p.left * p.entryPx * m;
         this.say('manager', `${p.symbol}: ${hit}× — position worth ${value.toFixed(3)} SOL (paid ${p.costSol.toFixed(3)})`, p.mint);
-        void tellWithCard(tok, p, `${m.toFixed(1)}× and running`, `🚀 ${p.symbol} is ${m.toFixed(2)}× (${p.live ? 'LIVE' : 'paper'})\nPosition: worth ${value.toFixed(4)} SOL · paid ${p.costSol.toFixed(4)} SOL · banked ${p.realizedSol.toFixed(4)} SOL\nNext: ${this.plan()}`, solUsd);
+        void tellWithCard(tok, p, `${m.toFixed(1)}× and running`, `🚀 ${p.symbol} is ${m.toFixed(2)}× (${p.live ? 'LIVE' : 'paper'})\nPosition: worth ${value.toFixed(4)} SOL · paid ${p.costSol.toFixed(4)} SOL · banked ${p.realizedSol.toFixed(4)} SOL\nNext: ${this.plan()}`, solUsd, { label: 'NOW', value: `${m.toFixed(1)}×`, sub: `and running${p.potential ? ` · potential was ${p.potential.room ? `${Math.round(p.potential.room)}×` : `${p.potential.expMult.toFixed(1)}×`}` : ''}`, tone: 'buy' });
       }
     }
 
@@ -641,7 +779,7 @@ class Swarm {
     for (const o of outcomes) {
       if (o.done) continue;
       const tok = tokens[o.mint];
-      follow(o, tok?.mcapSol ?? 0, Boolean(tok?.migrated), now);
+      follow(o, tok?.mcapSol ?? 0, Boolean(tok?.migrated), now, !tok);
       if (o.done && !positions.some((p) => p.mint === o.mint && !p.closedAt)) scanner.pin(o.mint, false);
     }
 
@@ -656,8 +794,18 @@ class Swarm {
       stats: {
         scout: { seen: this.seen.size, perMin: this.seenTimes.length },
         sentinel: { ...tally, top: [...why.values()].sort((a, b) => b.n - a.n).slice(0, 5).map((g) => ({ why: g.text, n: g.n })) },
-        herald: { scored, viral, narratives: this.narratives.top(8) },
+        herald: { scored, viral, narratives: this.narratives.top(8), xSearches: this.xw.used(Date.now()) },
         strategist: { signals: positions.length, last: sw.stats.strategist.last, proven: Object.values(smartBook).filter(isSmart).length, insiderBest },
+        forest: {
+          n: this.forest?.stats.n ?? 0,
+          accuracy: this.forest?.stats.accuracy ?? null,
+          baseline: this.forest?.stats.baseline ?? null,
+          brier: this.forest?.stats.brier ?? null,
+          trust: bestOdds?.trust ?? (this.forest ? this.forest.stats.n / (this.forest.stats.n + 60) : 0),
+          best: bestOdds,
+          trainedAt: this.forest?.stats.trainedAt ?? 0,
+          importance: this.forest?.stats.importance ?? [],
+        },
         optimizer: read ? { ...read, equity: acct } : null,
         manager: {
           open: positions.filter((p) => !p.closedAt).length,

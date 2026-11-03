@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld('novus', {
     tokenInfo: (mints) => call('wallet:tokenInfo', mints),
     activity: (address, rpcSecretId) => call('wallet:activity', address, rpcSecretId),
   },
+  x: { search: (id, query, max) => call('x:search', id, query, max) },
   telegram: {
     me: (id) => call('telegram:me', id),
     detect: (id) => call('telegram:detect', id),

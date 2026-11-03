@@ -35,8 +35,16 @@ async function logo(url?: string): Promise<HTMLImageElement | null> {
   }
 }
 
-/** A 960×540 card: logo, name, headline, market-cap chart with the trade on it, numbers. */
-export async function coinCard(tok: MemeToken, p: Position | null, headline: string, solUsd: number): Promise<Uint8Array> {
+/** The big number top right of a card: the x potential on a buy, the x it ended at on a close. */
+export interface CardBadge {
+  label: string;
+  value: string;
+  sub: string;
+  tone: 'buy' | 'sell' | 'accent';
+}
+
+/** A 960×540 card: the coin's logo, name, headline, the x badge, its market-cap chart with the trade on it, numbers. */
+export async function coinCard(tok: MemeToken, p: Position | null, headline: string, solUsd: number, badge?: CardBadge): Promise<Uint8Array> {
   const W = 960;
   const H = 540;
   const c = document.createElement('canvas');
@@ -50,42 +58,83 @@ export async function coinCard(tok: MemeToken, p: Position | null, headline: str
   // header: logo, ticker, name, headline
   const img = await logo(tok.image);
   const L = 24;
+  const LOGO = 72;
   if (img) {
     ctx.save();
     ctx.beginPath();
-    ctx.roundRect(L, 18, 56, 56, 12);
+    ctx.roundRect(L, 12, LOGO, LOGO, 16);
     ctx.clip();
-    ctx.drawImage(img, L, 18, 56, 56);
+    ctx.drawImage(img, L, 12, LOGO, LOGO);
     ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(L + 0.5, 12.5, LOGO - 1, LOGO - 1, 16);
+    ctx.stroke();
   } else {
     ctx.fillStyle = 'rgba(255,255,255,0.08)';
     ctx.beginPath();
-    ctx.roundRect(L, 18, 56, 56, 12);
+    ctx.roundRect(L, 12, LOGO, LOGO, 16);
     ctx.fill();
     ctx.fillStyle = pal.text;
     const initials = tok.symbol.slice(0, 3).toUpperCase();
-    ctx.font = font(initials.length > 2 ? 16 : 20, 800, false);
+    ctx.font = font(initials.length > 2 ? 20 : 24, 800, false);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(initials, L + 28, 46);
+    ctx.fillText(initials, L + LOGO / 2, 12 + LOGO / 2);
+  }
+  const TX = L + LOGO + 16;
+  // the badge, top right: what it could do (on a buy), what it did (on a close)
+  const BW = badge ? 230 : 0;
+  if (badge) {
+    const bx = W - 24 - BW;
+    const tone = badge.tone === 'buy' ? pal.buyRgb : badge.tone === 'sell' ? pal.sellRgb : pal.accentRgb;
+    ctx.fillStyle = rgba(tone, 0.12);
+    ctx.strokeStyle = rgba(tone, 0.55);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(bx, 12, BW, LOGO, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = pal.muted;
+    ctx.font = font(11, 700);
+    ctx.fillText(badge.label, bx + 14, 31);
+    ctx.fillStyle = rgba(tone, 1);
+    ctx.font = font(30, 800, false);
+    ctx.fillText(badge.value, bx + 14, 63);
+    const vw = ctx.measureText(badge.value).width;
+    ctx.fillStyle = pal.text;
+    ctx.font = font(11, 500, false);
+    const words = badge.sub.split(' ');
+    let line = '';
+    let y = 47;
+    for (const w of words) {
+      const next = line ? `${line} ${w}` : w;
+      if (ctx.measureText(next).width > BW - vw - 40 && line) {
+        ctx.fillText(line, bx + vw + 26, y);
+        line = w;
+        y += 14;
+      } else line = next;
+    }
+    if (line && y <= 75) ctx.fillText(line, bx + vw + 26, y);
   }
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = pal.text;
-  ctx.font = font(26, 800, false);
-  ctx.fillText(tok.symbol, L + 72, 44);
+  ctx.font = font(30, 800, false);
+  ctx.fillText(tok.symbol, TX, 44);
   const symW = ctx.measureText(tok.symbol).width;
   ctx.fillStyle = pal.muted;
   ctx.font = font(15, 500, false);
-  ctx.fillText(tok.name.slice(0, 40), L + 84 + symW, 44);
+  const nameRoom = W - 24 - BW - 20 - (TX + symW + 12);
+  let name = tok.name.slice(0, 40);
+  while (name.length > 3 && ctx.measureText(name).width > nameRoom) name = name.slice(0, -2);
+  ctx.fillText(name, TX + symW + 12, 44);
   ctx.fillStyle = headline.startsWith('−') || /loss|stop|rug|out$/i.test(headline) ? pal.sell : pal.buy;
-  ctx.font = font(17, 700, false);
-  ctx.fillText(headline, L + 72, 68);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = pal.muted;
-  ctx.font = font(12, 500);
-  ctx.fillText(`${tok.mint.slice(0, 6)}…${tok.mint.slice(-6)}`, W - 24, 36);
-  ctx.fillText(p?.live ? 'LIVE · swarm wallet' : 'PAPER', W - 24, 56);
+  ctx.font = font(18, 700, false);
+  ctx.fillText(headline, TX, 72);
 
   // chart: market cap (USD when known) over the coin's trades, or its pool's history
   await Promise.race([ensureHistory(tok, solUsd, fetchJson).catch(() => undefined), new Promise((r) => setTimeout(r, 6000))]);
@@ -189,7 +238,7 @@ export async function coinCard(tok: MemeToken, p: Position | null, headline: str
   ctx.font = font(11, 600);
   ctx.fillStyle = pal.muted;
   ctx.textAlign = 'right';
-  ctx.fillText('NOVUS ORDO · SWARM', W - 24, H - 12);
+  ctx.fillText(`${tok.mint.slice(0, 6)}…${tok.mint.slice(-6)} · ${p?.live ? 'LIVE · swarm wallet' : 'PAPER'} · NOVUS ORDO SWARM`, W - 24, H - 12);
   const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
   if (!blob) throw new Error('could not draw the coin card');
   return new Uint8Array(await blob.arrayBuffer());
@@ -201,13 +250,13 @@ const html = (text: string) => {
 };
 
 /** Send a coin card with a caption (text alone when the picture cannot be made). */
-export async function tellWithCard(tok: MemeToken | undefined, p: Position | null, headline: string, text: string, solUsd: number) {
+export async function tellWithCard(tok: MemeToken | undefined, p: Position | null, headline: string, text: string, solUsd: number, badge?: CardBadge) {
   const s = getSettings();
   if (!s.telegramSwarm || !s.telegramSecretId) return;
   const caption = html(text);
   try {
     if (!tok || !desktop) throw new Error('no card');
-    const png = await coinCard(tok, p, headline, solUsd);
+    const png = await coinCard(tok, p, headline, solUsd, badge);
     if (caption.length <= 1024) return await desktop.swarm.notifyPhoto(s.telegramSecretId, png, caption);
     await desktop.swarm.notifyPhoto(s.telegramSecretId, png, `<b>${escapeHtml(headline)}</b>`);
   } catch {

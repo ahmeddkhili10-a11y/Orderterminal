@@ -3145,6 +3145,11 @@ table.grid.meme-tape td {
 .swarm-logline.a-manager b {
   color: var(--buy);
 }
+.swarm-logline.a-forest b,
+.cc-tick.a-forest b,
+.cc-logline.a-forest b {
+  color: var(--accent);
+}
 .swarm-logline.a-optimizer b,
 .cc-tick.a-optimizer b,
 .cc-logline.a-optimizer b {
@@ -3236,7 +3241,7 @@ table.grid.meme-tape td {
   display: grid;
   /* the core is the centre of attention: slim sides, a wide middle */
   grid-template-columns: minmax(200px, 0.62fr) minmax(480px, 3.3fr) minmax(250px, 0.82fr);
-  grid-template-rows: auto minmax(0, 1fr) minmax(128px, 17%);
+  grid-template-rows: auto minmax(0, 1fr) minmax(172px, 20%);
   position: relative;
   grid-template-areas:
     'top top top'
@@ -3377,7 +3382,7 @@ table.grid.meme-tape td {
 .cc-bottom {
   grid-area: bottom;
   display: grid;
-  grid-template-columns: 2.4fr 1fr;
+  grid-template-columns: 3fr 1fr;
   gap: var(--gap);
   min-height: 0;
 }
@@ -4179,19 +4184,28 @@ table.grid.meme-tape td {
 .cc-right > .cc-wallet-card {
   flex: none;
 }
-/* nine gauges in a row */
+/* ten gauges in a row, big enough to read at a glance */
 .cc-gauges-card .cc-card-body {
   padding-bottom: 6px;
 }
 .cc-gauges {
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(10, 1fr);
+  gap: 6px;
 }
 .cc-gauges .cc-gauge svg {
-  width: min(64px, 100%);
+  width: min(92px, 100%);
 }
 .cc-gauges .cc-gauge-val {
-  top: calc(min(64px, 100%) / 2 - 8px);
-  font-size: 12px;
+  top: calc(min(92px, 100%) / 2 - 11px);
+  font-size: 17px;
+}
+.cc-gauges .cc-gauge-label {
+  font-size: 11px;
+  margin-top: 2px;
+}
+.cc-gauges .cc-gauge-sub {
+  font-size: 10px;
+  line-height: 1.25;
 }
 .cc-gauge.mint .cc-gauge-arc {
   stroke: var(--buy);
@@ -4247,4 +4261,39 @@ table.grid.meme-tape td {
 .cc-drawer-body > .panel {
   position: absolute;
   inset: 0;
+}
+
+.cc-clear {
+  margin-left: 10px;
+  cursor: pointer;
+  color: var(--muted);
+  text-decoration: underline dotted;
+}
+.cc-clear:hover {
+  color: var(--text);
+}
+
+/* each gauge in its own colour (--g, see GAUGE_COLORS): the arc, the lit ticks, a soft halo, a hint in the label */
+.cc-gauge.tinted .cc-gauge-arc {
+  stroke: var(--g);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--g) 65%, transparent));
+}
+.cc-gauge.tinted .cc-gauge-track {
+  stroke: color-mix(in srgb, var(--g) 12%, var(--panel2));
+}
+.cc-gauge.tinted .cc-gauge-tick.lit {
+  stroke: color-mix(in srgb, var(--g) 80%, transparent);
+}
+.cc-gauge.tinted .cc-gauge-val {
+  color: color-mix(in srgb, var(--g) 30%, var(--text));
+}
+.cc-gauge.tinted .cc-gauge-label {
+  color: color-mix(in srgb, var(--g) 55%, var(--text));
+}
+.cc-gauge.tinted.dim .cc-gauge-arc {
+  stroke: color-mix(in srgb, var(--g) 55%, var(--panel2));
+  filter: none;
+}
+.cc-gauge.tinted.dim .cc-gauge-tick.lit {
+  stroke: color-mix(in srgb, var(--g) 45%, transparent);
 }

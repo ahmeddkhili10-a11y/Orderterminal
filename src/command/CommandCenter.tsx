@@ -247,12 +247,30 @@ function CoreView({ input, onSelect }: { input: React.MutableRefObject<CoreInput
   return <div className="cc3d" ref={host} />;
 }
 
-function Gauge({ value, label, sub, tone, text }: { value: number | null; label: string; sub: string; tone: 'cyan' | 'magenta' | 'chrome' | 'mint'; text?: string }) {
+/**
+ * One colour per gauge: ten hues, evenly spread and held to the same brightness
+ * and saturation so none shouts — they read as a set on black and chrome.
+ */
+export const GAUGE_COLORS = {
+  scout: '#3fd4f2', // cyan
+  sentinel: '#5b8def', // azure
+  herald: '#e8578f', // rose
+  strategist: '#36d6a0', // jade
+  insiders: '#a68cf2', // violet
+  forest: '#9ccc65', // sage
+  manager: '#e6b955', // gold
+  optimizer: '#dfe4ea', // platinum
+  loss: '#f07a5a', // coral
+  budget: '#8fa7c6', // steel
+} as const;
+
+/** A dial in its own colour; `dim` when its condition is not met (a quieter glow, same hue). */
+function Gauge({ value, label, sub, color, dim, text }: { value: number | null; label: string; sub: string; color: string; dim?: boolean; text?: string }) {
   const v = value === null || !Number.isFinite(value) ? 0 : Math.max(0, Math.min(1, value));
   const r = 30;
   const c = 2 * Math.PI * r;
   return (
-    <div className={`cc-gauge ${tone}`}>
+    <div className={`cc-gauge tinted${dim ? ' dim' : ''}`} style={{ '--g': color } as React.CSSProperties}>
       <svg viewBox="0 0 80 80" width="80" height="80" aria-hidden>
         <circle cx="40" cy="40" r="38" className="cc-gauge-bezel" />
         {Array.from({ length: 40 }, (_, i) => {
@@ -524,7 +542,7 @@ export function CommandCenter() {
       <section className="cc-core cc-card" aria-label="Swarm core">
         <CoreView input={input} onSelect={openCoin} />
         <div className="cc-core-agents">
-          {(['scout', 'sentinel', 'herald', 'strategist', 'manager', 'optimizer'] as const).map((a) => (
+          {(['scout', 'sentinel', 'herald', 'strategist', 'forest', 'manager', 'optimizer'] as const).map((a) => (
             <span key={a} className={`cc-agent ${sw.enabled ? 'on' : ''}`}>
               <i /> {a}
             </span>
@@ -576,7 +594,7 @@ export function CommandCenter() {
             </div>
           </div>
         </Card>
-        <Card n="07" title="Execution tape" className="cc-tape-card" right={<span className="muted">{st.tape.length ? `${st.tape.length} fills` : ''}</span>}>
+        <Card n="07" title="Execution tape" className="cc-tape-card" right={<span className="muted">{st.tape.length ? `${st.tape.length} fills` : ''}{sw.positions.some((p) => !p.live) && <a className="cc-clear" title="Remove every paper (demo) trade and its fills; live trades stay" onClick={() => confirm('Remove every paper (demo) trade and its fills? Live trades stay.') && sw.clearPaper()}>clear paper</a>}</span>}>
           <div className="cc-tape">
             {st.tape.length ? (
               st.tape.map((f) => (
@@ -598,15 +616,16 @@ export function CommandCenter() {
       <div className="cc-bottom">
         <Card n="08" title="Swarm gauges" className="cc-gauges-card">
           <div className="cc-gauges">
-            <Gauge value={Math.min(1, ss.scout.perMin / 30)} text={`${ss.scout.perMin}`} label="Scout" sub="new coins / min" tone="cyan" />
-            <Gauge value={passRate} label="Sentinel" sub="pass rate" tone="cyan" />
-            <Gauge value={viralShare} label="Herald" sub="viral share" tone="magenta" />
-            <Gauge value={sw.reads.length ? bestRead / 100 : null} text={sw.reads.length ? String(bestRead) : '—'} label="Strategist" sub={`best read · buys ${sw.strategy.minConviction}+`} tone={bestRead >= sw.strategy.minConviction ? 'mint' : 'cyan'} />
-            <Gauge value={ss.strategist.insiderBest / 100} text={String(ss.strategist.insiderBest)} label="Insiders" sub={`${ss.strategist.proven} proven · buys ${sw.strategy.insiderMin}+`} tone={sw.strategy.insiderMin > 0 && ss.strategist.insiderBest >= sw.strategy.insiderMin ? 'mint' : 'magenta'} />
-            <Gauge value={st.open.length / Math.max(1, sw.manager.maxOpen)} text={`${st.open.length}/${sw.manager.maxOpen}`} label="Manager" sub="positions open" tone="mint" />
-            <Gauge value={ss.optimizer ? ss.optimizer.health / 100 : null} text={ss.optimizer ? `${ss.optimizer.sizeMult.toFixed(2)}×` : '—'} label="Optimizer" sub={ss.optimizer ? `health ${ss.optimizer.health} · size` : 'risk & portfolio'} tone={!ss.optimizer || ss.optimizer.health >= 70 ? 'mint' : ss.optimizer.health >= 40 ? 'chrome' : 'magenta'} />
-            <Gauge value={sw.manager.dailyLossSol ? st.lostToday / sw.manager.dailyLossSol : null} label="Loss limit" sub={`${st.lostToday.toFixed(2)} / ${sw.manager.dailyLossSol} SOL`} tone="chrome" />
-            <Gauge value={spentToday / budget} label="Budget" sub={`${spentToday.toFixed(2)} / ${budget} SOL`} tone="chrome" />
+            <Gauge value={Math.min(1, ss.scout.perMin / 30)} text={`${ss.scout.perMin}`} label="Scout" sub="new coins / min" color={GAUGE_COLORS.scout} />
+            <Gauge value={passRate} label="Sentinel" sub="pass rate" color={GAUGE_COLORS.sentinel} />
+            <Gauge value={viralShare} label="Herald" sub="viral share" color={GAUGE_COLORS.herald} />
+            <Gauge value={sw.reads.length ? bestRead / 100 : null} text={sw.reads.length ? String(bestRead) : '—'} label="Strategist" sub={`best read · buys ${sw.strategy.minConviction}+`} color={GAUGE_COLORS.strategist} dim={bestRead < sw.strategy.minConviction} />
+            <Gauge value={ss.strategist.insiderBest / 100} text={String(ss.strategist.insiderBest)} label="Insiders" sub={`${ss.strategist.proven} proven · buys ${sw.strategy.insiderMin}+`} color={GAUGE_COLORS.insiders} dim={!(sw.strategy.insiderMin > 0 && ss.strategist.insiderBest >= sw.strategy.insiderMin)} />
+            <Gauge value={st.open.length / Math.max(1, sw.manager.maxOpen)} text={`${st.open.length}/${sw.manager.maxOpen}`} label="Manager" sub="positions open" color={GAUGE_COLORS.manager} dim={!st.open.length} />
+            <Gauge value={ss.forest.best ? ss.forest.best.p2 : null} text={ss.forest.best ? `${Math.round(ss.forest.best.p2 * 100)}%` : '—'} label="Forest" sub={ss.forest.n ? `best P(2×) · trust ${Math.round(ss.forest.trust * 100)}%` : 'best P(2×) · learning'} color={GAUGE_COLORS.forest} dim={!(ss.forest.best && ss.forest.best.expMult >= 1.15)} />
+            <Gauge value={ss.optimizer ? ss.optimizer.health / 100 : null} text={ss.optimizer ? `${ss.optimizer.sizeMult.toFixed(2)}×` : '—'} label="Optimizer" sub={ss.optimizer ? `health ${ss.optimizer.health} · size` : 'risk & portfolio'} color={!ss.optimizer || ss.optimizer.health >= 40 ? GAUGE_COLORS.optimizer : GAUGE_COLORS.loss} dim={!!ss.optimizer && ss.optimizer.health < 70 && ss.optimizer.health >= 40} />
+            <Gauge value={sw.manager.dailyLossSol ? st.lostToday / sw.manager.dailyLossSol : null} label="Loss limit" sub={`${st.lostToday.toFixed(2)} / ${sw.manager.dailyLossSol} SOL`} color={GAUGE_COLORS.loss} dim={st.lostToday <= 0} />
+            <Gauge value={spentToday / budget} label="Budget" sub={`${spentToday.toFixed(2)} / ${budget} SOL`} color={GAUGE_COLORS.budget} />
           </div>
         </Card>
         <Card n="09" title="Live feed" className="cc-log-card">

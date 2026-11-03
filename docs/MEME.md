@@ -60,17 +60,18 @@ goes on the few worth a look.
 
 ## The swarm
 
-**Meme Swarm** (Meme category) runs six bots over everything the scanner sees,
+**Meme Swarm** (Meme category) runs six bots and a decision forest over everything the scanner sees,
 every two seconds, whether or not its panel is open (switch it on in the panel;
 it remembers):
 
 | Bot | Job | How |
 |---|---|---|
 | **Scout** | finds every new coin | the scanner's feeds: pump.fun launches and migrations, DexScreener listings |
-| **Sentinel** | viability — rejects the rugs | rejects: live mint or freeze authority; top 10 wallets over 50 %; the creator buying 20 %+ at launch or selling half the bag; 4+ wallets taking 10 %+ of supply within 3 s of launch (bundled or sniped); most buyers also selling (wash trading); 3 minutes without a trade; pool liquidity under $5k; a creator whose earlier coin rugged. Penalises: top 10 over 30 %, one wallet over 15 %, a big creator bag, partial creator sells, concentrated buying, serial launchers. Waits for the on-chain check before passing anything. |
-| **Herald** | virality — is it catching on | new buyers per minute and whether they are arriving faster; the meme's narrative (how many coins share its name this hour, and whether this one leads them); linked X / Telegram / website; DexScreener profile or paid boosts; total wallets in |
+| **Sentinel** | viability — rejects the rugs | rejects: live mint or freeze authority; top 10 wallets over 50 %; the creator buying 20 %+ at launch or selling half the bag; 4+ wallets taking 10 %+ of supply within 3 s of launch (bundled or sniped); most buyers also selling (wash trading); 3 minutes without a trade; pool liquidity under $5k; a creator whose earlier coin rugged. **Fakes**: a new coin with an established coin's ticker or name ($BONK, $WIF, USDC … — the real ones are months old); a duplicate of a ticker or name launched earlier by another coin (unless the copy has overtaken the first by 3×); the same logo file as another coin; an X, Telegram or website link that belongs to another coin; a famous account (@elonmusk …) linked as its own. Creators of rugs and fakes are remembered for their next launch. Penalises: top 10 over 30 %, one wallet over 15 %, a big creator bag, partial creator sells, concentrated buying, serial launchers. Waits for the on-chain check before passing anything. |
+| **Herald** | virality — is it catching on | new buyers per minute and whether they are arriving faster; the meme's narrative (how many coins share its name this hour, and whether this one leads them); linked X / Telegram / website; DexScreener profile or paid boosts; total wallets in; and, when connected to X, the posts naming the coin in the last hour, the accounts behind them and their followers (see **Herald on X**) |
 | **Strategist** | picks the entries — only ones with room for 5× | Sentinel pass, viability 60+, heat 55+, virality 45+, **conviction 80+** (40 % heat + 35 % virality + 25 % viability), under 45 min old, **room for 5× to a $1M market cap** (so under $200k now), 12–85 % of the curve sold; pools need $20k liquidity. **Not after a spike**: on the curve, no buying while the price stands 50 %+ above its own 5-minute average; on a pool, not after +60 % in 5 minutes. **Net buying**: buyers at least 58 % of the last 5 minutes' flow. All adjustable under Rules. |
 | **Insider tracker** (part of the Strategist) | catches insiders and smart money early | Learns from every trade it watches: a wallet that bought a coin and sold it at 3× its buy or better scores a hit, and one with two hits and right on 30 %+ of its coins since is **proven** (kept between runs, the best 1,500). A coin scores when proven wallets are buying and holding (35 each), when 3+ wallets each put 1 SOL+ in within 3 minutes without selling (30; 5+ wallets and 8 SOL+: 45), when the buying is one-sided (80 %+), when there are still few wallets (before the crowd), or when the creator adds to the bag; proven wallets already selling count against it. Launch-second buys are left to the Sentinel (bundles and snipers dump). **At 65+ it buys without waiting for heat and virality** — the same Sentinel pass, the same 5× room, 3–85 % of the curve, buyers 60 %+, a looser spike limit (their buying lifts the price) — and it **sells everything once half the wallets it followed in have sold**. |
+| **Forest** | the statistics — the odds, from what happened to coins like it | A decision forest (40 classification trees, each grown on a bootstrap sample of the coins the swarm has followed, trying a few random features at each split) reads 18 numbers per coin — the bots' scores, market cap, age, curve, buyer speed, buy share, price stretch, holder concentration, creator selling, socials, narrative size, X posts — and gives the odds that in the next hour it dies, goes nowhere, reaches 2× or reaches 5×, and what a trade is expected to come back as under the Manager's exits, fees out. It learns from the swarm's own record: every coin that passes the Sentinel with some heat is followed for an hour and labelled by how it went; it retrains every 10 minutes once 30 are done, and scores itself on the coins each tree did not see (accuracy against always guessing the commonest outcome). Until then it leans on a prior — a small hand-written tree of base rates, a starting guess, not a finding — and the learned forest takes over as data comes in (weight n / (n + 60)). Its expected multiple also scales the size, once it is trusted. |
 | **Optimizer** | risk and the portfolio as a whole — keeps the account alive, and in the green once it gets there | **Edge sizing**: after 10 closed trades, the win rate and the average win and loss give the Kelly fraction; it bets half of it, between 0.5× and 1.25× of the normal trade (no edge yet → half size). **Conviction tilt**: 0.85× at the minimum conviction to 1.15× at 100. **Drawdown cuts**: three-quarter size 15 % under the account's high, half size at 25 %. **Keep a good day**: up 30 % on the day → half size for the rest of it. **Profit lock**: once the account reaches 1.5× its start, the floor rises to the start or 70 % of the high — it stops buying before it can fall back into the red. **Portfolio heat**: no new trade while the open coins are down more than 12 % of the account together. **One per narrative**: no second coin on a meme already held. **Trim**: a winner worth more than half the account is sold back to 35 % of it, the rest keeps running. Deposits and withdrawals (a balance change of 0.01 SOL+ no trade explains) shift its record instead of reading as gains or losses; **Set up for my balance** starts the record again. All adjustable under Rules → Optimizer. |
 | **Manager** | runs the trades — on paper, or live from the swarm wallet | Sized to the account (Wallet → Set up for my balance): a fifth of the account a trade, at most two thirds in coins, a daily loss limit, a pause after three losses in a row, and a floor at half the starting account. Exits: rug (creator dumps, danger flag, trading stops) → insiders out (insider-lane buys) → stop loss −35 % → take profits (a third at 3× — the cost back — and half of the rest at 5×) → trailing 40 % from the peak once up 2×, and **60 % for the runner left after both take profits** (room for a 50× or 100×) → out after 20 min without a new high under 1.3×. Multiples are the price against the price paid. |
 
@@ -158,14 +159,27 @@ transaction. Exits follow the same Manager rules; a failed sell is retried
 after 15 s. **Disarm** stops buying at once; open positions keep being
 managed and sold. **Sell** on a trade, or **Sell everything**, exits now.
 
+### The council
+
+No buy on one rule firing: for every pick, each bot gives its view and why, in the live feed — the Sentinel (clean, or a veto), the Herald (catching on or not; it abstains for the insider lane), the Strategist (its rules or the insider lane), the Forest (its odds and expected multiple) and the Optimizer (the size it allows, or a veto from a portfolio gate). The swarm buys only with no veto, the Strategist for, and the weighted votes for minus against at 1.5 or more. Once the forest has learned from enough coins to be trusted (30 %+), an expected loss or a likely death is a veto. A pick the council turns down is still followed for the hour, and **Results** compares the council's yes and no.
+
+### Herald on X
+
+Optional, and paid by X (pay-per-use: about $0.005 for every post a search returns — check developer.x.com). Add an X API Bearer Token under Connect → X, then switch on, under Rules → Herald on X:
+
+- **Look up candidates**: before the council, the posts naming the coin's $TICKER or address in the last hour — how many, from how many accounts, their followers — into the Herald's vote and the forest;
+- **Scan for early trends**: every 15 minutes, the newest posts with pump.fun coin links; a coin posted by several accounts (or one with 10k+ followers) is sent to the swarm to be read.
+
+Both keep to an hourly budget of searches (12 by default — at most about $0.90 an hour, $21.60 a day if every search fills its page); the Rules show the cost of the budget set. The key stays in the main process.
+
 **Telegram** (Telegram Bot panel → Swarm trades on Telegram) gets a card — the
 coin's logo, a market-cap chart with the buy and sells marked, and the
 numbers — with the reasoning:
 
-- on each buy: why it was picked, what was paid, the exit plan, the transaction;
+- on each buy: the coin's logo and chart with an **X POTENTIAL** badge (the room to the target market cap, what the forest expects it to come back as, its odds of 5×), the council's votes, what was paid, the exit plan, the transaction;
 - at each new multiple: 2×, 5×, 10×, 25×, 50×, 100×, 250×, 500×, 1000×, with
   what the position is worth and what has been banked;
-- on each take-profit and on the close: why, and the result.
+- on each take-profit and on the close: why, and the result — the close card's **RESULT** badge is the x it ended at (SOL back over SOL paid), its peak, and what was hoped for at the buy.
 
 Buys and closes also show as a pop-up with a sound on the computer (Telegram
 Bot panel → Pop-up and sound here). The order-flow alerts and reports
@@ -219,7 +233,7 @@ Chrome** theme (the other themes still work):
 - **Bottom**: a gauge per bot — Scout (new coins a minute), Sentinel (pass
   rate), Herald (viral share), Strategist (the best read's conviction against
   the 80 it needs), Insiders (the best insider score against the 65 it buys
-  at, and how many proven wallets it knows), Manager (positions open), Optimizer (the book's health
+  at, and how many proven wallets it knows), Forest (the best candidate's odds of 2×, and how far it trusts what it learned), Manager (positions open), Optimizer (the book's health
   and the size it is betting, 0.25×–1.25×) — plus the daily loss limit used
   and the budget spent, and the bots' live log.
 - **Right**: the Wallet (balance, where profits go, Open wallet), results and
