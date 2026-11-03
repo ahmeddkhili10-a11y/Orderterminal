@@ -166,6 +166,9 @@ export const useSwarm = create<SwarmState>()(
 );
 
 const TICK_MS = 2000;
+/** a pick the council could not buy (a veto that can pass, no free slot, the daily limit, not armed) sits again after this, up to MAX_TRIES times */
+const RETRY_MS = 60_000;
+const MAX_TRIES = 4;
 
 /** Which bot speaks for each council seat in the live feed. */
 const AGENT_OF: Record<CouncilBot, AgentId> = { sentinel: 'sentinel', herald: 'herald', strategist: 'strategist', forest: 'forest', optimizer: 'optimizer' };
@@ -211,6 +214,10 @@ class Swarm {
   private verdicts = new Map<string, Viability['verdict']>();
   private smartDone = new Set<string>();
   private fakes = new FakeFilter();
+  /** picks the council turned down for a reason that can pass: when it may sit again, how often it has */
+  private retryAt = new Map<string, number>();
+  private tries = new Map<string, number>();
+  private picks = new Map<string, Outcome>();
   /** the decision forest (null until it has learned from 30 followed coins) */
   forest: Forest | null = null;
   private training = false;
@@ -564,7 +571,12 @@ class Swarm {
     const newOutcomes: Outcome[] = [];
     // live: what the account is worth now — the SOL in the wallet and the open coins at their price
     const live = sw.mode === 'live';
-    const valueOf = (p: Position) => Math.max(0, p.left * (tokens[p.mint] ? markPrice(tokens[p.mint], solUsd) : 0) || 0);
+    // what a held coin is worth now; with no price yet (just restarted, not in the scanner's memory) it counts at what was paid —
+    // a coin with no price is not a loss, and must not trip the Optimizer's heat gate or read as a drawdown
+    const valueOf = (p: Position) => {
+      const px = tokens[p.mint] ? markPrice(tokens[p.mint], solUsd) : NaN;
+      return Math.max(0, p.left * (px > 0 ? px : p.entryPx));
+    };
     const equity = live && sw.wallet?.sol != null ? sw.wallet.sol + open.filter((p) => p.live).reduce((a, p) => a + valueOf(p), 0) : null;
     const m = sw.manager;
     // the Optimizer: the account as a whole (paper: an account the paper size implies, plus the paper results)
@@ -650,21 +662,27 @@ class Swarm {
         newOutcomes.push(newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'sample', conviction: d.conviction, heat: a.heat, virality: x?.score ?? 0, viability: v.score, x: fx }));
       }
 
-      if (d.enter && !this.traded.has(tok.mint)) {
-        this.traded.add(tok.mint);
-        const pick = newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'pick', conviction: d.conviction, heat: a.heat, virality: x!.score, viability: v.score, x: fx ?? undefined });
-        newOutcomes.push(pick);
-        scanner.pin(tok.mint);
-        this.say('strategist', `${tok.symbol}: ${d.insiders ? 'INSIDER PICK' : 'PICK'} (conviction ${d.conviction}) — ${d.why}`, tok.mint);
+      if (d.enter && !this.traded.has(tok.mint) && now >= (this.retryAt.get(tok.mint) ?? 0)) {
+        // a pick is recorded once (the research record); the council can sit again if what stopped the buy was passing
+        const tries = (this.tries.get(tok.mint) ?? 0) + 1;
+        this.tries.set(tok.mint, tries);
+        let pick = this.picks.get(tok.mint);
+        if (!pick) {
+          pick = newOutcome({ mint: tok.mint, symbol: tok.symbol, t0: now, mcap0: tok.mcapSol, kind: 'pick', conviction: d.conviction, heat: a.heat, virality: x!.score, viability: v.score, x: fx ?? undefined });
+          this.picks.set(tok.mint, pick);
+          newOutcomes.push(pick);
+          scanner.pin(tok.mint);
+        }
+        this.say('strategist', `${tok.symbol}: ${d.insiders ? 'INSIDER PICK' : 'PICK'} (conviction ${d.conviction})${tries > 1 ? ` — again, try ${tries} of ${MAX_TRIES}` : ''} — ${d.why}`, tok.mint);
         // buys still in flight count as open
         const room = open.length + newPositions.length + this.buying.size < sw.manager.maxOpen;
         const budget = lostToday < sw.manager.dailyLossSol;
         const mc = Number.isFinite(a.mcapUsd) ? ` at $${Math.round(a.mcapUsd).toLocaleString('en-US')} market cap` : '';
-        // the size: the Optimizer's multiple (edge, drawdown, a good day) and the pick's conviction
-        // …and, once the forest has learned enough to be trusted, what it expects the trade to come back as
+        // the size: the Optimizer's multiple (edge, drawdown, a good day), the pick's conviction and,
+        // once the forest is trusted, what it expects the trade to come back as — together never past 0.25×–1.25×
         const o = odds ?? oddsOf(features(tok, now, a, v, x, ins, this.social.get(tok.mint) ?? null), this.forest);
         const forestMult = o.trust >= 0.3 ? Math.min(1.25, Math.max(0.6, 0.6 + (o.expMult - 1))) : 1;
-        const sizeMult = opt.enabled ? (read?.sizeMult ?? 1) * convictionTilt(d.conviction, d.insiders ? sw.strategy.insiderMin : sw.strategy.minConviction) * forestMult : 1;
+        const sizeMult = opt.enabled ? Math.min(1.25, Math.max(0.25, (read?.sizeMult ?? 1) * convictionTilt(d.conviction, d.insiders ? sw.strategy.insiderMin : sw.strategy.minConviction) * forestMult)) : 1;
         // live: the trade follows the account (smaller after losses, bigger after wins), within the wallet's cap; never pushed under the fee floor by the Optimizer
         const plain = equity !== null && (m.autoSize ?? 0) > 0 ? tradeSize(equity, m.autoSize) : m.sizeSol;
         const tuned = equity !== null && (m.autoSize ?? 0) > 0 ? tradeSize(equity, m.autoSize * sizeMult) : Math.round(m.sizeSol * sizeMult * 1000) / 1000;
@@ -689,18 +707,26 @@ class Swarm {
         pick.voted = verdict.buy ? 'buy' : 'no';
         const room5 = Number.isFinite(a.mcapUsd) && a.mcapUsd > 0 ? sw.strategy.targetMcapUsd / a.mcapUsd : null;
         const potential = { expMult: o.expMult, p2: o.p2, p5: o.p5, trust: o.trust, room: room5 };
-        if (!verdict.buy) {
-          /* the council said no: nothing bought, the call is still followed for the record */
-        } else if (room && budget && live) {
+        // what stopped it, if anything — and whether that can pass (then the council sits again in a minute)
+        let held: string | null = null;
+        let bought = false;
+        if (!verdict.buy) held = verdict.summary;
+        else if (!room) held = `${sw.manager.maxOpen} positions already open`;
+        else if (!budget) held = `daily loss limit (${sw.manager.dailyLossSol} SOL) reached`;
+        else if (live) {
           const w = sw.wallet;
           const size = w ? Math.min(liveSize, w.limits.maxBuySol) : 0;
-          if (!desktop || !w) this.say('manager', `${tok.symbol}: not bought — live mode needs the swarm wallet (Wallet tab)`, tok.mint);
-          else if (!w.limits.armed) this.say('manager', `${tok.symbol}: not bought — live trading is not armed (Wallet tab)`, tok.mint);
-          else if (size < MIN_TRADE_SOL) this.say('manager', `${tok.symbol}: not bought — a trade would be ${size} SOL, too small for its fees (under ${MIN_TRADE_SOL})`, tok.mint);
-          else if (!this.buying.has(tok.mint)) void this.liveBuy(tok, size, d.why, d.conviction, mc, d.insiders, { potential, council: transcript });
-        } else if (room && budget) {
+          if (!desktop || !w) held = 'live mode needs the swarm wallet (Wallet tab)';
+          else if (!w.limits.armed) held = 'live trading is not armed (Wallet tab)';
+          else if (size < MIN_TRADE_SOL) held = `a trade would be ${size} SOL, too small for its fees (under ${MIN_TRADE_SOL})`;
+          else {
+            bought = true;
+            if (!this.buying.has(tok.mint)) void this.liveBuy(tok, size, d.why, d.conviction, mc, d.insiders, { potential, council: transcript });
+          }
+        } else {
           const p = openPosition(tok, paperSize, now, solUsd, d.why, d.conviction);
           if (p) {
+            bought = true;
             if (d.insiders) p.insiders = d.insiders;
             p.potential = potential;
             p.council = transcript;
@@ -708,8 +734,16 @@ class Swarm {
             this.say('manager', `${tok.symbol}: bought ${p.costSol} SOL (paper)${mc}`, tok.mint);
             alertHere(`Swarm bought ${tok.symbol} · paper`, `${p.costSol} SOL${mc} — ${d.why}`, 'buy');
             void tellWithCard(tok, p, `Bought — ${p.costSol} SOL (paper)`, `🐝 Swarm bought ${tok.symbol} (paper)${mc}\nPotential: ${potentialText(potential)}\nCouncil: ${verdict.summary}\n${transcript.join('\n')}\nPlan: ${this.plan()}`, solUsd, potentialBadge(potential));
-          }
-        } else this.say('manager', `${tok.symbol}: not bought — ${room ? `daily loss limit (${sw.manager.dailyLossSol} SOL) reached` : `${sw.manager.maxOpen} positions already open`}`, tok.mint);
+          } else held = 'no price to buy at';
+        }
+        if (bought || tries >= MAX_TRIES) {
+          this.traded.add(tok.mint);
+          this.retryAt.delete(tok.mint);
+          if (!bought) this.say('manager', `${tok.symbol}: not bought — ${held}; that was the last of ${MAX_TRIES} tries`, tok.mint);
+        } else {
+          this.retryAt.set(tok.mint, now + RETRY_MS);
+          this.say('manager', `${tok.symbol}: not bought — ${held}; the council sits again in ${RETRY_MS / 60_000} min if it still qualifies (try ${tries} of ${MAX_TRIES})`, tok.mint);
+        }
       } else if (!d.enter && v.verdict === 'pass' && a.heat >= 30 && !this.traded.has(tok.mint) && !this.controls.has(tok.mint) && now - this.lastControl > 30_000) {
         // the comparison sample: coins that passed but were not picked
         this.controls.add(tok.mint);

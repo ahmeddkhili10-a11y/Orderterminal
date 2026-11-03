@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SwarmFill, SwarmLimits } from '../../desktop/bridge';
 import { useMeme } from '../scanner';
+import { applyTrade } from '../token';
 import { markPrice, MILESTONES, newMilestone, type Position } from './book';
-import { runner } from './fixtures';
+import { runner, trade } from './fixtures';
 
 // the desktop bridge, faked: the swarm wallet's buy and sell
 const fake = vi.hoisted(() => ({
@@ -77,11 +78,27 @@ describe('the swarm, trading live', () => {
     useSwarm.setState((s) => ({ positions: [], manager: { ...s.manager, maxOpen: 4, dailyLossSol: 0.5 } }));
   });
 
+  it('a pick seen while the wallet was not armed is bought once it is armed — the council sits again', async () => {
+    const { tok, now } = setup(false);
+    fake.buy.mockRejectedValue(new Error('stop here'));
+    swarm.tick(now);
+    expect(fake.buy).not.toHaveBeenCalled();
+    useSwarm.setState((s) => ({ wallet: { ...s.wallet!, limits: { ...LIMITS, armed: true } } }));
+    let t = now;
+    for (let i = 0; i < 20; i++) applyTrade(tok, trade(tok, 'buy', `Arm${i}`, 0.15, (t += 3_000)));
+    swarm.tick(now + 30_000);
+    expect(fake.buy).not.toHaveBeenCalled();
+    swarm.tick(now + 62_000);
+    expect(fake.buy).toHaveBeenCalledTimes(1);
+    expect(fake.buy.mock.calls[0][0]).toBe(tok.mint);
+    await flush();
+  });
+
   it('does not buy unless the wallet is armed, and says why', () => {
     const { tok, now } = setup(false);
     swarm.tick(now);
     expect(fake.buy).not.toHaveBeenCalled();
-    expect(useSwarm.getState().log.map((l) => l.text)).toContain(`${tok.symbol}: not bought — live trading is not armed (Wallet tab)`);
+    expect(useSwarm.getState().log.map((l) => l.text)).toContain(`${tok.symbol}: not bought — live trading is not armed (Wallet tab); the council sits again in 1 min if it still qualifies (try 1 of 4)`);
   });
 
   it('takes profit with a real sell of the right share, books the SOL received, and retries a failed sell later', async () => {

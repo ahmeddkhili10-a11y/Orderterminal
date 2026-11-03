@@ -14,7 +14,8 @@ import { useSwarm } from '../meme/swarm/swarm';
 import type { MemeToken } from '../meme/token';
 import { useBoot } from '../app/boot';
 import { Canvas, font, type PointerState } from '../ui/canvas';
-import { rgba, type Palette } from '../ui/theme';
+import { FILTERS, rgba, THEME_IDS, THEMES, themeOf, type Palette } from '../ui/theme';
+import { useSettings } from '../store/settings';
 import { useTicker } from '../ui/controls';
 import { MemeScanner, MEME_SCANNER_DEFAULTS, type MemeScannerConfig } from '../panels/MemeScanner';
 import { MemeToken as MemeTokenPanel, MEME_TOKEN_DEFAULTS, type MemeTokenConfig } from '../panels/MemeToken';
@@ -247,22 +248,58 @@ function CoreView({ input, onSelect }: { input: React.MutableRefObject<CoreInput
   return <div className="cc3d" ref={host} />;
 }
 
-/**
- * One colour per gauge: ten hues, evenly spread and held to the same brightness
- * and saturation so none shouts — they read as a set on black and chrome.
- */
-export const GAUGE_COLORS = {
-  scout: '#3fd4f2', // cyan
-  sentinel: '#5b8def', // azure
-  herald: '#e8578f', // rose
-  strategist: '#36d6a0', // jade
-  insiders: '#a68cf2', // violet
-  forest: '#9ccc65', // sage
-  manager: '#e6b955', // gold
-  optimizer: '#dfe4ea', // platinum
-  loss: '#f07a5a', // coral
-  budget: '#8fa7c6', // steel
-} as const;
+/** The gauges' colours in the theme in use: one per gauge (see SwarmLook in ui/theme.ts). */
+export function gaugeColors(theme: string) {
+  const g = themeOf(theme).swarm.gauges;
+  return { scout: g[0], sentinel: g[1], herald: g[2], strategist: g[3], insiders: g[4], forest: g[5], manager: g[6], optimizer: g[7], loss: g[8], budget: g[9] };
+}
+
+/** Themes and filters, from the Command Center's own bar. */
+function ThemePicker() {
+  const theme = useSettings((st) => st.theme);
+  const filter = useSettings((st) => st.filter);
+  const set = useSettings((st) => st.set);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [open]);
+  return (
+    <div className="cc-theme">
+      <button className="chip cc-theme-btn" onClick={() => setOpen(!open)} title="Theme and filter">
+        <i style={{ background: THEMES[theme]?.swatch }} /> {THEMES[theme]?.name ?? 'Theme'}
+      </button>
+      {open && (
+        <div className="cc-theme-pop" onMouseLeave={() => setOpen(false)}>
+          <div className="cc-theme-head">Theme</div>
+          <div className="cc-theme-grid">
+            {THEME_IDS.map((id) => (
+              <button key={id} className={`cc-theme-item ${theme === id ? 'on' : ''}`} onClick={() => set({ theme: id })}>
+                <span className="cc-theme-sw" style={{ background: THEMES[id].swatch }} />
+                <span className="cc-theme-dots">
+                  {THEMES[id].swarm.gauges.slice(0, 6).map((c, k) => (
+                    <i key={k} style={{ background: c }} />
+                  ))}
+                </span>
+                <b>{THEMES[id].name}</b>
+              </button>
+            ))}
+          </div>
+          <div className="cc-theme-head">Filter</div>
+          <div className="cc-theme-filters">
+            {FILTERS.map((f) => (
+              <button key={f.id} className={`chip ${filter === f.id ? 'active' : ''}`} onClick={() => set({ filter: f.id })}>
+                {f.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** A dial in its own colour; `dim` when its condition is not met (a quieter glow, same hue). */
 function Gauge({ value, label, sub, color, dim, text }: { value: number | null; label: string; sub: string; color: string; dim?: boolean; text?: string }) {
@@ -341,6 +378,7 @@ export function CommandCenter() {
   useEffect(() => scanner.use(), []);
   const sw = useSwarm();
   const { tokens, solUsd, feed, select, selected } = useMeme();
+  const theme = useSettings((st) => st.theme);
   const now = Date.now();
   const st: CommandStats = useMemo(() => commandStats(sw.positions, tokens, solUsd, now), [sw.positions, tokens, solUsd, now]);
   const live = sw.mode === 'live';
@@ -391,6 +429,7 @@ export function CommandCenter() {
 
   const input = useRef<CoreInput>(null!);
   const ss = sw.stats;
+  const GC = gaugeColors(theme);
   const passRate = ss.sentinel.checked ? ss.sentinel.pass / ss.sentinel.checked : null;
   const viralShare = ss.herald.scored ? ss.herald.viral / ss.herald.scored : null;
   const held = new Set(sw.positions.filter((p) => !p.closedAt).map((p) => p.mint));
@@ -432,6 +471,7 @@ export function CommandCenter() {
         <div className="cc-brand">
           <span className="cc-brand-name">SWARM COMMAND</span>
           <span className={`cc-mode ${live ? (armed ? 'live' : 'unarmed') : 'paper'}`}>{live ? (armed ? '● LIVE · autonomous' : 'LIVE · not armed') : 'PAPER'}</span>
+          <ThemePicker />
         </div>
         <div className="cc-ticker" aria-label="Live feed">
           <div className="cc-ticker-track" style={{ animationDuration: `${Math.max(30, ticker.length * 6)}s` }}>
@@ -540,7 +580,7 @@ export function CommandCenter() {
       </div>
 
       <section className="cc-core cc-card" aria-label="Swarm core">
-        <CoreView input={input} onSelect={openCoin} />
+        <CoreView key={theme} input={input} onSelect={openCoin} />
         <div className="cc-core-agents">
           {(['scout', 'sentinel', 'herald', 'strategist', 'forest', 'manager', 'optimizer'] as const).map((a) => (
             <span key={a} className={`cc-agent ${sw.enabled ? 'on' : ''}`}>
@@ -616,16 +656,16 @@ export function CommandCenter() {
       <div className="cc-bottom">
         <Card n="08" title="Swarm gauges" className="cc-gauges-card">
           <div className="cc-gauges">
-            <Gauge value={Math.min(1, ss.scout.perMin / 30)} text={`${ss.scout.perMin}`} label="Scout" sub="new coins / min" color={GAUGE_COLORS.scout} />
-            <Gauge value={passRate} label="Sentinel" sub="pass rate" color={GAUGE_COLORS.sentinel} />
-            <Gauge value={viralShare} label="Herald" sub="viral share" color={GAUGE_COLORS.herald} />
-            <Gauge value={sw.reads.length ? bestRead / 100 : null} text={sw.reads.length ? String(bestRead) : '—'} label="Strategist" sub={`best read · buys ${sw.strategy.minConviction}+`} color={GAUGE_COLORS.strategist} dim={bestRead < sw.strategy.minConviction} />
-            <Gauge value={ss.strategist.insiderBest / 100} text={String(ss.strategist.insiderBest)} label="Insiders" sub={`${ss.strategist.proven} proven · buys ${sw.strategy.insiderMin}+`} color={GAUGE_COLORS.insiders} dim={!(sw.strategy.insiderMin > 0 && ss.strategist.insiderBest >= sw.strategy.insiderMin)} />
-            <Gauge value={st.open.length / Math.max(1, sw.manager.maxOpen)} text={`${st.open.length}/${sw.manager.maxOpen}`} label="Manager" sub="positions open" color={GAUGE_COLORS.manager} dim={!st.open.length} />
-            <Gauge value={ss.forest.best ? ss.forest.best.p2 : null} text={ss.forest.best ? `${Math.round(ss.forest.best.p2 * 100)}%` : '—'} label="Forest" sub={ss.forest.n ? `best P(2×) · trust ${Math.round(ss.forest.trust * 100)}%` : 'best P(2×) · learning'} color={GAUGE_COLORS.forest} dim={!(ss.forest.best && ss.forest.best.expMult >= 1.15)} />
-            <Gauge value={ss.optimizer ? ss.optimizer.health / 100 : null} text={ss.optimizer ? `${ss.optimizer.sizeMult.toFixed(2)}×` : '—'} label="Optimizer" sub={ss.optimizer ? `health ${ss.optimizer.health} · size` : 'risk & portfolio'} color={!ss.optimizer || ss.optimizer.health >= 40 ? GAUGE_COLORS.optimizer : GAUGE_COLORS.loss} dim={!!ss.optimizer && ss.optimizer.health < 70 && ss.optimizer.health >= 40} />
-            <Gauge value={sw.manager.dailyLossSol ? st.lostToday / sw.manager.dailyLossSol : null} label="Loss limit" sub={`${st.lostToday.toFixed(2)} / ${sw.manager.dailyLossSol} SOL`} color={GAUGE_COLORS.loss} dim={st.lostToday <= 0} />
-            <Gauge value={spentToday / budget} label="Budget" sub={`${spentToday.toFixed(2)} / ${budget} SOL`} color={GAUGE_COLORS.budget} />
+            <Gauge value={Math.min(1, ss.scout.perMin / 30)} text={`${ss.scout.perMin}`} label="Scout" sub="new coins / min" color={GC.scout} />
+            <Gauge value={passRate} label="Sentinel" sub="pass rate" color={GC.sentinel} />
+            <Gauge value={viralShare} label="Herald" sub="viral share" color={GC.herald} />
+            <Gauge value={sw.reads.length ? bestRead / 100 : null} text={sw.reads.length ? String(bestRead) : '—'} label="Strategist" sub={`best read · buys ${sw.strategy.minConviction}+`} color={GC.strategist} dim={bestRead < sw.strategy.minConviction} />
+            <Gauge value={ss.strategist.insiderBest / 100} text={String(ss.strategist.insiderBest)} label="Insiders" sub={`${ss.strategist.proven} proven · buys ${sw.strategy.insiderMin}+`} color={GC.insiders} dim={!(sw.strategy.insiderMin > 0 && ss.strategist.insiderBest >= sw.strategy.insiderMin)} />
+            <Gauge value={st.open.length / Math.max(1, sw.manager.maxOpen)} text={`${st.open.length}/${sw.manager.maxOpen}`} label="Manager" sub="positions open" color={GC.manager} dim={!st.open.length} />
+            <Gauge value={ss.forest.best ? ss.forest.best.p2 : null} text={ss.forest.best ? `${Math.round(ss.forest.best.p2 * 100)}%` : '—'} label="Forest" sub={ss.forest.n ? `best P(2×) · trust ${Math.round(ss.forest.trust * 100)}%` : 'best P(2×) · learning'} color={GC.forest} dim={!(ss.forest.best && ss.forest.best.expMult >= 1.15)} />
+            <Gauge value={ss.optimizer ? ss.optimizer.health / 100 : null} text={ss.optimizer ? `${ss.optimizer.sizeMult.toFixed(2)}×` : '—'} label="Optimizer" sub={ss.optimizer ? `health ${ss.optimizer.health} · size` : 'risk & portfolio'} color={!ss.optimizer || ss.optimizer.health >= 40 ? GC.optimizer : GC.loss} dim={!!ss.optimizer && ss.optimizer.health < 70 && ss.optimizer.health >= 40} />
+            <Gauge value={sw.manager.dailyLossSol ? st.lostToday / sw.manager.dailyLossSol : null} label="Loss limit" sub={`${st.lostToday.toFixed(2)} / ${sw.manager.dailyLossSol} SOL`} color={GC.loss} dim={st.lostToday <= 0} />
+            <Gauge value={spentToday / budget} label="Budget" sub={`${spentToday.toFixed(2)} / ${budget} SOL`} color={GC.budget} />
           </div>
         </Card>
         <Card n="09" title="Live feed" className="cc-log-card">

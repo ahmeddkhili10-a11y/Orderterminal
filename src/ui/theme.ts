@@ -1,6 +1,6 @@
 import { useSettings } from '../store/settings';
 
-export type ThemeId = 'void' | 'grey' | 'white' | 'black' | 'neon-green' | 'neon-orange';
+export type ThemeId = 'void' | 'solana' | 'gold' | 'arctic' | 'crimson' | 'synthwave' | 'grey' | 'white' | 'black' | 'neon-green' | 'neon-orange';
 export type FilterId = 'none' | 'vivid' | 'soft' | 'mono' | 'warm' | 'cool' | 'night' | 'crt';
 export type GlassLevel = 'off' | 'light' | 'medium' | 'heavy';
 
@@ -39,6 +39,21 @@ export interface Palette {
   dark: boolean;
 }
 
+/**
+ * How the swarm looks in a theme: the 3D core's two lights, its metal and its
+ * "up" colour; the chrome edges and type (CSS --chrome-*); and one colour per
+ * gauge (Scout, Sentinel, Herald, Strategist, Insiders, Forest, Manager,
+ * Optimizer, Loss limit, Budget — in that order).
+ */
+export interface SwarmLook {
+  a: string;
+  b: string;
+  metal: string;
+  up: string;
+  gauges: string[];
+  chrome: Record<string, string>;
+}
+
 export interface ThemeDef {
   id: ThemeId;
   name: string;
@@ -47,7 +62,24 @@ export interface ThemeDef {
   /** CSS custom properties applied to :root */
   css: Record<string, string>;
   pal: Palette;
+  swarm: SwarmLook;
 }
+
+/** the gauges' colours in the Void Chrome look: ten hues at one brightness */
+export const DEFAULT_GAUGES = ['#3fd4f2', '#5b8def', '#e8578f', '#36d6a0', '#a68cf2', '#9ccc65', '#e6b955', '#dfe4ea', '#f07a5a', '#8fa7c6'];
+
+const metal = (c1: string, c2: string, c3: string, c4: string, c5: string, glow: string, halo: string, text: string): Record<string, string> => ({
+  '--chrome-1': c1,
+  '--chrome-2': c2,
+  '--chrome-3': c3,
+  '--chrome-4': c4,
+  '--chrome-5': c5,
+  '--chrome-glow': glow,
+  '--chrome-halo': halo,
+  '--chrome-text': text,
+});
+const SILVER = metal('#ffffff', '#c7ccd4', '#6c737d', '#eef1f4', '#9aa0a8', 'rgba(226, 234, 248, 0.95)', 'rgba(186, 202, 230, 0.6)', 'linear-gradient(180deg, #ffffff 0%, #eef1f5 40%, #b9c0c9 100%)');
+const GRAPHITE = metal('#8a919b', '#4b525c', '#1f242b', '#7d848e', '#353b43', 'rgba(120, 132, 150, 0.45)', 'rgba(150, 165, 190, 0.3)', 'linear-gradient(180deg, #5b626c 0%, #2f353d 55%, #1c2027 100%)');
 
 const hexRgb = (h: string): RGB => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
@@ -99,6 +131,7 @@ interface Spec {
   focus: string;
   onAccent: string;
   ramp?: RGB[];
+  swarm?: Partial<SwarmLook>;
 }
 
 function build(s: Spec): ThemeDef {
@@ -163,7 +196,61 @@ function build(s: Spec): ThemeDef {
       ramp: s.ramp ?? DEFAULT_RAMP,
       dark: s.dark,
     },
+    swarm: {
+      a: s.swarm?.a ?? s.accent,
+      b: s.swarm?.b ?? s.sell,
+      metal: s.swarm?.metal ?? '#e4eaf4',
+      up: s.swarm?.up ?? s.buy,
+      gauges: s.swarm?.gauges ?? DEFAULT_GAUGES,
+      chrome: s.swarm?.chrome ?? (s.dark ? SILVER : GRAPHITE),
+    },
   };
+}
+
+/** A dark swarm theme from a few colours: black glass tinted by `tint`, with its own lights, metal and gauges. */
+function swarmTheme(o: { id: ThemeId; name: string; swatch: string; bg: string; glow1: string; glow2: string; tint: [number, number, number]; text: string; muted: string; faint: string; buy: string; sell: string; accent: string; warn: string; onAccent: string; look: SwarmLook; ramp: RGB[] }): ThemeDef {
+  const [r, g, b] = o.tint;
+  const t = (a: number) => `rgba(${r},${g},${b},${a})`;
+  return build({
+    id: o.id,
+    name: o.name,
+    swatch: o.swatch,
+    dark: true,
+    bg: o.bg,
+    bgImage: `radial-gradient(1200px 520px at 50% -18%, ${o.glow1}, transparent 70%), radial-gradient(900px 600px at 50% 120%, ${o.glow2}, transparent 70%), ${o.bg}`,
+    glass: 'rgba(5,5,7,0.94)',
+    glassStrong: 'rgba(7,7,9,0.97)',
+    glassBorder: t(0.14),
+    glassHi: t(0.06),
+    shadow: '0 1px 2px rgba(0,0,0,0.8), 0 10px 30px rgba(0,0,0,0.6)',
+    control: t(0.04),
+    raised: t(0.07),
+    border: t(0.11),
+    border2: t(0.22),
+    text: o.text,
+    muted: o.muted,
+    faint: o.faint,
+    buy: o.buy,
+    sell: o.sell,
+    accent: o.accent,
+    warn: o.warn,
+    poc: o.warn,
+    glow: t(0.3),
+    canvasTint: 'rgba(0,0,0,0)',
+    grid: t(0.05),
+    header: t(0.035),
+    rowAlt: t(0.016),
+    cell: 'rgba(0,0,0,0.4)',
+    cellSpread: t(0.05),
+    tooltip: 'rgba(6,6,8,0.97)',
+    tabbar: t(0.02),
+    rowLine: t(0.055),
+    accentSoft: t(0.1),
+    focus: t(0.3),
+    onAccent: o.onAccent,
+    ramp: o.ramp,
+    swarm: o.look,
+  });
 }
 
 export const THEMES: Record<ThemeId, ThemeDef> = {
@@ -212,6 +299,182 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
       [56, 225, 255],
       [210, 120, 255],
       [255, 61, 127],
+      [255, 255, 255],
+    ],
+    swarm: { a: '#38e1ff', b: '#ff3d7f', metal: '#e4eaf4', up: '#2cf0b0' },
+  }),
+  // Solana's own colours: violet into sea green
+  solana: swarmTheme({
+    id: 'solana',
+    name: 'Solana',
+    swatch: 'linear-gradient(135deg,#9945ff 0%,#5a3fd8 40%,#06040c 62%,#14f195 100%)',
+    bg: '#04030a',
+    glow1: 'rgba(153,69,255,0.10)',
+    glow2: 'rgba(20,241,149,0.05)',
+    tint: [176, 140, 255],
+    text: '#f0ecff',
+    muted: '#968fae',
+    faint: '#544d6b',
+    buy: '#14f195',
+    sell: '#ff4d8d',
+    accent: '#a479ff',
+    warn: '#ffd166',
+    onAccent: '#0d0420',
+    look: {
+      a: '#9945ff',
+      b: '#14f195',
+      metal: '#ece6ff',
+      up: '#14f195',
+      gauges: ['#b18cff', '#9a7bff', '#7d6cff', '#5f86ff', '#3fa4f5', '#22bfe0', '#19d6c0', '#14e8a2', '#14f195', '#ddd6ff'],
+      chrome: metal('#ffffff', '#d8ccff', '#5b4a8a', '#f1ecff', '#a99ad6', 'rgba(210, 190, 255, 0.95)', 'rgba(153, 69, 255, 0.5)', 'linear-gradient(180deg, #ffffff 0%, #ece6ff 40%, #b9aee0 100%)'),
+    },
+    ramp: [
+      [6, 4, 16],
+      [40, 20, 90],
+      [120, 60, 230],
+      [153, 69, 255],
+      [60, 170, 230],
+      [20, 241, 149],
+      [255, 255, 255],
+    ],
+  }),
+  // black and gold: champagne metal, warm lights
+  gold: swarmTheme({
+    id: 'gold',
+    name: 'Midnight Gold',
+    swatch: 'linear-gradient(135deg,#fff1c9 0%,#d4af37 32%,#050403 64%,#b38728 100%)',
+    bg: '#050403',
+    glow1: 'rgba(212,175,55,0.09)',
+    glow2: 'rgba(212,175,55,0.035)',
+    tint: [230, 196, 110],
+    text: '#f6efe0',
+    muted: '#a8997a',
+    faint: '#5e5440',
+    buy: '#5fd4a0',
+    sell: '#e0645a',
+    accent: '#e2bd55',
+    warn: '#f0c85a',
+    onAccent: '#1a1203',
+    look: {
+      a: '#e8c66a',
+      b: '#b88a2e',
+      metal: '#f7ead0',
+      up: '#f2d98f',
+      gauges: ['#f2d27a', '#e8b84a', '#d99a3d', '#c27c45', '#e3a68f', '#c9b27a', '#f0e2b6', '#fff3d6', '#d9735a', '#b49a6e'],
+      chrome: metal('#fff8e4', '#e2c27a', '#7a5a1a', '#f8ecc8', '#b8924a', 'rgba(255, 228, 160, 0.95)', 'rgba(212, 175, 55, 0.55)', 'linear-gradient(180deg, #fff8e4 0%, #f2dfa8 40%, #c9a456 100%)'),
+    },
+    ramp: [
+      [10, 8, 4],
+      [50, 36, 12],
+      [120, 88, 30],
+      [212, 175, 55],
+      [240, 210, 130],
+      [255, 238, 190],
+      [255, 255, 255],
+    ],
+  }),
+  // deep navy and ice
+  arctic: swarmTheme({
+    id: 'arctic',
+    name: 'Arctic',
+    swatch: 'linear-gradient(135deg,#ffffff 0%,#9be7ff 32%,#030810 64%,#4f8dff 100%)',
+    bg: '#02060d',
+    glow1: 'rgba(155,231,255,0.09)',
+    glow2: 'rgba(79,141,255,0.05)',
+    tint: [170, 215, 255],
+    text: '#eef6ff',
+    muted: '#8ea2b8',
+    faint: '#4a5a6c',
+    buy: '#7ff2d6',
+    sell: '#ff6b8a',
+    accent: '#8fdcff',
+    warn: '#ffd27a',
+    onAccent: '#021018',
+    look: {
+      a: '#9be7ff',
+      b: '#4f8dff',
+      metal: '#f2f8ff',
+      up: '#bff4ff',
+      gauges: ['#bfefff', '#8fd8ff', '#ff8fb0', '#7fe0d8', '#a9b8ff', '#9fe6b8', '#ffd98a', '#eef6ff', '#ff9a7a', '#7fa3cc'],
+      chrome: metal('#ffffff', '#d4ecff', '#5c7a99', '#eef7ff', '#9cb8d6', 'rgba(200, 235, 255, 0.95)', 'rgba(130, 200, 255, 0.55)', 'linear-gradient(180deg, #ffffff 0%, #e6f4ff 40%, #a9c4de 100%)'),
+    },
+    ramp: [
+      [2, 8, 18],
+      [10, 40, 80],
+      [40, 110, 200],
+      [120, 200, 255],
+      [190, 235, 255],
+      [235, 248, 255],
+      [255, 255, 255],
+    ],
+  }),
+  // black and blood red, silver type
+  crimson: swarmTheme({
+    id: 'crimson',
+    name: 'Crimson',
+    swatch: 'linear-gradient(135deg,#ffffff 0%,#ff2e4d 32%,#070203 64%,#8a0f22 100%)',
+    bg: '#060203',
+    glow1: 'rgba(255,46,77,0.08)',
+    glow2: 'rgba(255,46,77,0.035)',
+    tint: [255, 120, 140],
+    text: '#f6eef0',
+    muted: '#a58c91',
+    faint: '#5e4a4e',
+    buy: '#3ddc97',
+    sell: '#ff2e4d',
+    accent: '#ff4d68',
+    warn: '#ffb74d',
+    onAccent: '#1a0206',
+    look: {
+      a: '#ff3b5c',
+      b: '#c41230',
+      metal: '#ffe8eb',
+      up: '#ff9aa8',
+      gauges: ['#ff5a6e', '#ff8a7a', '#ff2e4d', '#e8e1e2', '#ffb3b8', '#c4a3a8', '#ff6f3c', '#f4ecee', '#b3132c', '#a8868c'],
+      chrome: metal('#ffffff', '#e2cfd2', '#6e2a33', '#f6eef0', '#ab8a90', 'rgba(255, 170, 180, 0.9)', 'rgba(255, 46, 77, 0.45)', 'linear-gradient(180deg, #ffffff 0%, #f6e8ea 40%, #c9a9ae 100%)'),
+    },
+    ramp: [
+      [12, 2, 4],
+      [60, 6, 14],
+      [140, 14, 32],
+      [255, 46, 77],
+      [255, 140, 150],
+      [255, 210, 214],
+      [255, 255, 255],
+    ],
+  }),
+  // a night drive: hot pink, violet, cyan, a sunset gold
+  synthwave: swarmTheme({
+    id: 'synthwave',
+    name: 'Synthwave',
+    swatch: 'linear-gradient(135deg,#ff3d9a 0%,#9d4dff 34%,#0b0414 62%,#2de2e6 100%)',
+    bg: '#07030f',
+    glow1: 'rgba(255,61,154,0.09)',
+    glow2: 'rgba(45,226,230,0.05)',
+    tint: [220, 140, 255],
+    text: '#fbeeff',
+    muted: '#a48fb4',
+    faint: '#5a4868',
+    buy: '#2de2e6',
+    sell: '#ff3d9a',
+    accent: '#ff5fb8',
+    warn: '#ffd23d',
+    onAccent: '#1a0412',
+    look: {
+      a: '#ff3d9a',
+      b: '#2de2e6',
+      metal: '#ffe8ff',
+      up: '#ffd23d',
+      gauges: ['#2de2e6', '#6a5cff', '#ff3d9a', '#3df2b1', '#c774e8', '#9dff6a', '#ffd23d', '#f5e6ff', '#ff9e3d', '#9d8cff'],
+      chrome: metal('#ffffff', '#f0c8ff', '#5a2a7a', '#fff0ff', '#c08ad8', 'rgba(255, 170, 245, 0.9)', 'rgba(255, 61, 154, 0.5)', 'linear-gradient(180deg, #ffffff 0%, #fbe6ff 40%, #d2a6e6 100%)'),
+    },
+    ramp: [
+      [10, 4, 20],
+      [60, 20, 110],
+      [157, 77, 255],
+      [255, 61, 154],
+      [255, 158, 61],
+      [255, 210, 61],
       [255, 255, 255],
     ],
   }),
@@ -290,6 +553,7 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
     accentSoft: 'rgba(37,99,235,0.1)',
     focus: 'rgba(37,99,235,0.22)',
     onAccent: '#ffffff',
+    swarm: { gauges: ['#0891b2', '#2563eb', '#db2777', '#059669', '#7c3aed', '#65a30d', '#ca8a04', '#475569', '#ea580c', '#64748b'] },
   }),
   black: build({
     id: 'black',
@@ -375,6 +639,7 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
       [235, 255, 0],
       [255, 255, 255],
     ],
+    swarm: { a: '#39ff14', b: '#e4ff3a', metal: '#d8f5dc', up: '#39ff14', gauges: ['#39ff14', '#2ee8a0', '#ff3d6e', '#7dff5a', '#14d4a0', '#b6ff3a', '#e4ff3a', '#d8f5dc', '#ff7a3d', '#6fcf97'] },
   }),
   'neon-orange': build({
     id: 'neon-orange',
@@ -422,6 +687,7 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
       [255, 230, 120],
       [255, 255, 255],
     ],
+    swarm: { a: '#ff7a00', b: '#ffd000', metal: '#fbe8d6', up: '#00e5c0', gauges: ['#ff9e3d', '#ffc14d', '#ff3b3b', '#00e5c0', '#ff5a36', '#c8e64a', '#ffd000', '#fbe8d6', '#e85d04', '#d49a6a'] },
   }),
 };
 
@@ -464,6 +730,7 @@ export function applyTheme(id: string, filter: FilterId, glass: GlassLevel) {
   const t = themeOf(id);
   const root = document.documentElement;
   for (const [k, v] of Object.entries(t.css)) root.style.setProperty(k, v);
+  for (const [k, v] of Object.entries(t.swarm.chrome)) root.style.setProperty(k, v);
   root.dataset.theme = t.id;
   root.dataset.filter = filter;
   root.dataset.glass = glass;

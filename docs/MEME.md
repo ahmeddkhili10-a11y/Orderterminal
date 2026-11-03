@@ -163,6 +163,12 @@ managed and sold. **Sell** on a trade, or **Sell everything**, exits now.
 
 No buy on one rule firing: for every pick, each bot gives its view and why, in the live feed — the Sentinel (clean, or a veto), the Herald (catching on or not; it abstains for the insider lane), the Strategist (its rules or the insider lane), the Forest (its odds and expected multiple) and the Optimizer (the size it allows, or a veto from a portfolio gate). The swarm buys only with no veto, the Strategist for, and the weighted votes for minus against at 1.5 or more. Once the forest has learned from enough coins to be trusted (30 %+), an expected loss or a likely death is a veto. A pick the council turns down is still followed for the hour, and **Results** compares the council's yes and no.
 
+### How the decisions fit together
+
+Every gate a coin passes, in order: the Sentinel (rugs and fakes — a reject ends it), the Herald, the Strategist (its entry rules, or the insider lane), the forest's odds, the council's votes (vetoes from the Sentinel, a trusted forest and the Optimizer), then the Manager's gates (a free slot, the daily loss limit, the wallet armed, a trade big enough for its fees). They are built to agree: a coin that passes every entry rule — or the insider lane — gets the forest's vote under its prior (it never vetoes them), and the council's weighted score cannot block a pick the rules passed; only a real veto can. Size multipliers (the Optimizer's, the conviction tilt, the forest's) are capped together at 0.25×–1.25× of the normal trade.
+
+Nothing that passes blocks a trade for good: a pick turned away by a veto that can lift, a full book, the daily limit or an unarmed wallet comes back to the council a minute later, up to four times — one research record per coin however often it sits. A coin it holds but has no price for yet (just after a restart) counts at what was paid, so it cannot trip the heat gate or read as a drawdown. A live buy that failed is not retried (it may have landed on-chain).
+
 ### Herald on X
 
 Optional, and paid by X (pay-per-use: about $0.005 for every post a search returns — check developer.x.com). Add an X API Bearer Token under Connect → X, then switch on, under Rules → Herald on X:
@@ -196,7 +202,7 @@ control row, the rules are not adding anything yet.
 
 ## Command Center
 
-The app opens on it: the meme terminal. **Wallet** and **Scanner** in the top
+The app opens on it: the meme terminal. **Theme** (on the Command Center bar, next to the mode) switches the whole look and a colour filter: Void Chrome, Solana (violet into sea green), Midnight Gold, Arctic, Crimson, Synthwave, Neon Green, Neon Orange, Grey, Black and White — each with its own 3D-core lights, metal edges and ten gauge colours; filters Vivid, Soft, Mono, Warm, Cool, Night, CRT. **Wallet** and **Scanner** in the top
 bar open a drawer over the right side (also the coin you click anywhere, and
 the Rules); Esc closes it. The classic order-flow terminal (footprint, DOM,
 AMT bots) is under Settings → Workspace. Black and chrome in the **Void

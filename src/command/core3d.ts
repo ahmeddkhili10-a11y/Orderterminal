@@ -12,6 +12,8 @@
 // Drag to orbit, scroll to zoom, double-click to reset; hover a coin for its
 // read, click it to open it. Falls back to the flat core (core.ts) when WebGL
 // is not available.
+import { getSettings } from '../store/settings';
+import { themeOf } from '../ui/theme';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
@@ -22,6 +24,7 @@ import type { CoreBlob, CoreInput, CoreNode } from './core';
 const A = 4.6; // lens half-length (world units)
 const B = 2.0; // lens half-height
 const SPAN_X = 7.1; // where the input and output nodes sit
+// the core's lights follow the theme (set when a core is built; the Command Center rebuilds it on a theme change)
 const CYAN = new THREE.Color('#38e1ff');
 const MAGENTA = new THREE.Color('#ff3d7f');
 const CHROME = new THREE.Color('#e4eaf4');
@@ -268,6 +271,11 @@ export class Core3D {
     private input: () => CoreInput,
     private onSelect: (id: string) => void,
   ) {
+    const look = themeOf(getSettings().theme).swarm;
+    CYAN.set(look.a);
+    MAGENTA.set(look.b);
+    CHROME.set(look.metal);
+    GREEN.set(look.up);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     const px = Math.min(2, window.devicePixelRatio || 1);
     this.renderer.setPixelRatio(px);
