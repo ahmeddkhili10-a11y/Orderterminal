@@ -22,6 +22,22 @@ export function sanitizeLimits(l) {
 const pos = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
 
 /**
+ * Orders CCXT would send wrong on one exchange, put right.
+ * Luno: a market BUY is sized in the quote currency (rands — Luno's
+ * counter_volume), while the app always sizes in the coin; the coin amount is
+ * turned into what it costs at the reference price, rounded down to the cent so
+ * it never spends more than asked.
+ */
+export function exchangeQuirks(exchangeId, o, refPrice) {
+  if (exchangeId === 'luno' && o.type === 'market' && o.side === 'buy') {
+    const cost = Math.floor(o.amount * refPrice * 100) / 100;
+    if (!(cost > 0)) throw new Error('order too small: under one cent');
+    return { ...o, params: { ...o.params, counter_volume: cost.toFixed(2) } };
+  }
+  return o;
+}
+
+/**
  * Turn a ticket request into CCXT createOrder arguments.
  *
  * req: { symbol, side, type, sizeMode: 'base'|'quote'|'contracts', size, price?,

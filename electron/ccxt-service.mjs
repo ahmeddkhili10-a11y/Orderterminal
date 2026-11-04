@@ -4,7 +4,10 @@
 // no CORS limits and keys never reach the renderer.
 import { clockSafe } from './clock.mjs';
 import { isKeyRejection, keyChecklist, publicIp } from './keyErrors.mjs';
-import { buildOrder, closeOrderFor, RateGate, sanitizeLimits, USD_QUOTES } from './trading.mjs';
+import { buildOrder, closeOrderFor, exchangeQuirks, RateGate, sanitizeLimits, USD_QUOTES } from './trading.mjs';
+
+/** exchanges whose candles need an API key */
+const AUTH_CANDLES = new Set(['luno']);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BOOK_DEPTH = 500;
@@ -131,11 +134,22 @@ export class CcxtService {
     const m = await ex.loadMarkets();
     return Object.values(m)
       .filter((x) => x.active !== false)
-      .map((x) => ({ symbol: x.symbol, base: x.base, quote: x.quote, type: x.type, contract: Boolean(x.contract), linear: x.linear }));
+      .map((x) => ({ symbol: x.symbol, base: x.base, quote: x.quote, type: x.type, contract: Boolean(x.contract), linear: x.linear, minAmount: x.limits?.amount?.min ?? null }));
+  }
+
+  /**
+   * The exchange to read candles from: the public one, except where candles
+   * need a key (Luno) — then the first saved key for that exchange.
+   */
+  candleExchange(id) {
+    if (!AUTH_CANDLES.has(id)) return this.publicExchange(id);
+    const k = this.vault.list().find((r) => r.kind === 'exchange' && r.exchange === id);
+    if (!k) throw new Error(`${id === 'luno' ? 'Luno' : id} only shares price candles with an API key — add your Luno key under Connect → Luno`);
+    return this.privateExchange(k.id);
   }
 
   async ohlcv(id, symbol, timeframe, limit) {
-    const ex = this.publicExchange(id);
+    const ex = this.candleExchange(id);
     await ex.loadMarkets();
     const tf = ex.timeframes && !ex.timeframes[timeframe] ? Object.keys(ex.timeframes)[0] : timeframe;
     const rows = await ex.fetchOHLCV(symbol, tf, undefined, limit);
@@ -144,7 +158,7 @@ export class CcxtService {
 
   /** Candles from `since` to now, paged (public data; e.g. years of daily candles for a backtest). */
   async history(id, symbol, timeframe, since, max = 6000) {
-    const ex = this.publicExchange(id);
+    const ex = this.candleExchange(id);
     await ex.loadMarkets();
     if (!ex.markets[symbol]) throw new Error(`${symbol} is not listed on ${ex.name}`);
     const step = ex.parseTimeframe(timeframe) * 1000;
@@ -508,7 +522,7 @@ export class CcxtService {
         /* try the next pair */
       }
     }
-    const inv = [`USDT/${quote}`, `USD/${quote}`].find((s) => ex.markets[s]);
+    const inv = [`USDT/${quote}`, `USDC/${quote}`, `USD/${quote}`].find((s) => ex.markets[s]);
     if (inv) return 1 / (await this.refPrice(ex, inv)).price;
     return NaN;
   }
@@ -641,7 +655,7 @@ export class CcxtService {
         if (!(req.size <= held * 1.000001)) throw new Error(`cannot sell ${req.size} ${market.base}: only ${held} held`);
         capExempt = true;
       }
-      const o = buildOrder(req, market, {
+      let o = buildOrder(req, market, {
         refPrice: price,
         quoteUsd,
         limits,
@@ -649,6 +663,7 @@ export class CcxtService {
         amountToPrecision: (x) => Number(ex.amountToPrecision(req.symbol, x)),
         priceToPrecision: (x) => Number(ex.priceToPrecision(req.symbol, x)),
       });
+      o = exchangeQuirks(ex.id, o, price);
       // reduce-only can never be larger than the position it reduces
       if (o.params.reduceOnly && market.contract && ex.has.fetchPositions) {
         const open = await this.positionContracts(ex, req.symbol, req.side === 'sell' ? 'long' : 'short').catch(() => null);

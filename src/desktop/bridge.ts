@@ -39,6 +39,8 @@ export interface CcxtMarket {
   type: string;
   contract: boolean;
   linear?: boolean;
+  /** smallest order, in base units (when the exchange says) */
+  minAmount?: number | null;
 }
 
 export interface CcxtTicker {
@@ -240,6 +242,8 @@ export interface AmtParams {
   /** % of the balance the target must move before it trades */
   rebalanceBand: number;
   trendShort: boolean;
+  /** live trend bots sharing one account's cash: the share of the free quote currency this one sizes from */
+  capitalShare: number;
   /** only trades that go with the coin's daily trend (every style but trend) */
   trendFilter: boolean;
   /** trade manager (every style but intraday; always on for adaptive) */

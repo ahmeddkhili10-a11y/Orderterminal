@@ -136,6 +136,10 @@ export const DEFAULT_AMT = {
   maxExposure: 1,
   rebalanceBand: 10,
   trendShort: false,
+  // live trend bots sharing one account's cash (several coins against rands on
+  // Luno): each sizes from this share of the free quote currency, so together
+  // they never spend more than the account holds
+  capitalShare: 1,
   // every intraday style: take only trades that go with the coin's daily
   // trend (20/60/120-day votes, the trend bot's evidence-based signal)
   trendFilter: false,

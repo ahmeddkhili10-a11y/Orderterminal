@@ -337,6 +337,9 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <button className="chip primary-chip chrome-chip" onClick={() => openDrawer('scanner')} title="Every meme coin the terminal can see, live">
             ⌕ <span className="lbl keep">Scanner</span>
           </button>
+          <button className="chip primary-chip chrome-chip" onClick={() => openDrawer('luno')} title="Optional: real crypto against rands on Luno — daily trend bots beside the swarm">
+            R <span className="lbl keep">Luno</span>
+          </button>
         </>
       ) : (
         <button className="chip primary-chip chrome-chip cc-toggle" onClick={() => setSettings({ view: 'command' })} title="Back to the meme terminal">

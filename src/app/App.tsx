@@ -3,6 +3,7 @@ import { Actions, DockLocation, ICloseType, Layout, Model, type BorderNode, type
 import 'flexlayout-react/style/dark.css';
 import { startAlerts, useToasts } from '../alerts/engine';
 import { startAmtService } from '../desktop/amt';
+import { startLunoAlerts } from '../luno/lane';
 import { CommandCenter } from '../command/CommandCenter';
 import { startSwarmService } from '../meme/swarm/swarm';
 import { startTelegramService } from '../desktop/telegram';
@@ -52,6 +53,7 @@ export function App() {
     startAlerts();
     startTelegramService();
     startAmtService();
+    startLunoAlerts();
     startSwarmService();
   }, []);
 

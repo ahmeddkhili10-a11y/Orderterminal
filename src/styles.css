@@ -4387,3 +4387,47 @@ table.grid.meme-tape td {
   flex-wrap: wrap;
   gap: 5px;
 }
+
+/* the Luno lane (Command Center drawer) */
+.luno-pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+.luno-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+.luno-pair:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.luno-pair.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.luno-pair.tight {
+  border-style: dashed;
+}
+.luno-pair b {
+  font-size: 12px;
+}
+.luno-table {
+  width: 100%;
+  font-size: 11px;
+}
+.luno-table td,
+.luno-table th {
+  padding: 3px 6px;
+  text-align: left;
+}

@@ -251,3 +251,40 @@ describe('CcxtService trading', () => {
     expect(info).toMatchObject({ trading: false, sandbox: false, contract: true, contractSize: 0.001, last: 50_000, bid: 49_990, ask: 50_010, freeQuote: 1234, canLeverage: true, limits: DEFAULT_LIMITS });
   });
 });
+
+describe('Luno quirk', () => {
+  it('a market buy on Luno is sent in rands (what the coin amount costs), rounded down to the cent; nothing else changes', async () => {
+    const { exchangeQuirks } = await import('./trading.mjs');
+    const buy = { symbol: 'BTC/ZAR', type: 'market', side: 'buy', amount: 0.0005, price: undefined, params: {} };
+    expect(exchangeQuirks('luno', buy, 1_850_123.456).params).toEqual({ counter_volume: '925.06' });
+    const sell = { ...buy, side: 'sell' };
+    expect(exchangeQuirks('luno', sell, 1_850_000)).toBe(sell);
+    const limit = { ...buy, type: 'limit', price: 1_800_000 };
+    expect(exchangeQuirks('luno', limit, 1_850_000)).toBe(limit);
+    expect(exchangeQuirks('binance', buy, 100_000)).toBe(buy);
+    expect(() => exchangeQuirks('luno', { ...buy, amount: 1e-12 }, 1)).toThrow('order too small');
+  });
+
+  it('Luno candles come through the saved Luno key, and say so when there is none', async () => {
+    const { lib } = fakeLib();
+    const seen = [];
+    class Luno extends lib.fakeex {
+      async fetchOHLCV() {
+        seen.push(this.cfg.apiKey ?? null);
+        return [[Date.UTC(2026, 9, 1), 1, 2, 0.5, 1.5, 10]];
+      }
+    }
+    lib.luno = Luno;
+    const dir = mkdtempSync(join(tmpdir(), 'novus-luno-'));
+    const db = new Db(join(dir, 't.sqlite'));
+    const vault = new Vault(db, { isEncryptionAvailable: () => false }, join(dir, 'vault.key'));
+    const svc = new CcxtService(vault, { db, lib });
+    await expect(svc.ohlcv('luno', 'BTC/ZAR', '1d', 10)).rejects.toThrow(/Luno only shares price candles with an API key/);
+    vault.save({ label: 'Luno', kind: 'exchange', exchange: 'luno', fields: { apiKey: 'lunoKeyId', secret: 's' } });
+    const rows = await svc.ohlcv('luno', 'BTC/ZAR', '1d', 10);
+    expect(rows[0]).toMatchObject({ close: 1.5 });
+    expect(seen).toEqual(['lunoKeyId']);
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

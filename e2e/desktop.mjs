@@ -514,6 +514,13 @@ try {
   const mode = await page.evaluate(() => (document.querySelector('.cc3d canvas') ? '3D' : 'flat'));
   await page.screenshot({ path: `${OUT}desktop-command.png` });
   expect(errors.length === errorsBefore, `the Command Center draws (${mode}) without errors`);
+  // the optional Luno lane: its drawer opens and offers the key (none saved for Luno here)
+  await page.click('.topbar button:has-text("Luno")');
+  await page.waitForSelector('.luno-lane', { timeout: 10_000 });
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${OUT}desktop-luno.png` });
+  expect((await page.locator('.luno-lane button:has-text("Connect → Luno")').count()) === 1 && errors.length === errorsBefore, 'the Luno lane opens and asks for the key');
+  await page.keyboard.press('Escape');
   await page.click('button[title="Settings"]');
   await page.click('.modal .chip:has-text("Classic order-flow terminal")');
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });

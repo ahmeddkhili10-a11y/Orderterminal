@@ -64,6 +64,21 @@ const NO_WITHDRAW = 'Never enable withdrawals or transfers.';
 
 export const QUICK: Quick[] = [
   {
+    id: 'luno',
+    name: 'Luno (ZAR)',
+    kind: 'exchange',
+    exchange: 'luno',
+    badge: 'L',
+    url: 'https://www.luno.com/wallet/security/api_keys',
+    steps: [
+      'South African: buy and sell crypto with rands. Your Luno account must be verified (as for any Luno trading).',
+      'On luno.com (the website, not the app): Settings → Security → API keys → Create API key.',
+      'Permissions: choose the one that can view balances and place and cancel orders (trading) — never one that can send, withdraw or transfer crypto. ' + NO_WITHDRAW,
+      'Luno shows a Key ID and a Secret once: paste the Key ID as apiKey and the Secret as secret below, then use “Test live”. Tick “Allow trading” only when you want the terminal to place orders.',
+      'Optional: if Luno gives trouble, nothing else depends on it — the meme swarm keeps trading from its Solana wallet.',
+    ],
+  },
+  {
     id: 'binance',
     name: 'Binance',
     kind: 'exchange',

@@ -282,6 +282,18 @@ slows right down when the system asks for reduced motion.
   study measures how well following them pays; **Results** will.
 - Filtering on "safe" launches alone still lost money in one backtest of 1,411 launches ([Arrow Algo](https://arrowalgo.com/solana-memecoin-trading/)) — which is why the swarm measures its own results instead of trusting its rules.
 
+## Luno lane (optional): real crypto against rands
+
+For trading the big coins — BTC, ETH, SOL, XRP and the rest of Luno's rand pairs — beside the meme swarm, without a Binance key. Open it from **Luno** on the Command Center bar (or the drawer's **R Luno** tab). Nothing runs until you start it, and the meme swarm does not depend on it.
+
+**The key.** On Luno: Security → API keys → create a key with trading permission (view balances, place and cancel orders) and **never** send, withdraw or transfer permission. In the terminal: Connect → Luno, paste the Key ID and the Secret. It is saved read-only; tick **Allow trading** on it only when you want the lane to trade live. Luno shares its price candles only with a key, so even paper needs one.
+
+**What it does.** Each pair you pick gets a spot trend bot — the daily time-series momentum strategy from the Bots panel: once a day, at the daily close, its 20-, 60- and 120-day trends vote; it holds the coin in proportion to how many point up (sized to a 60 % yearly volatility) and sells when they turn down. No leverage, no liquidation, a few trades a month. The rands are split evenly: each bot sizes from its share of the free ZAR on the account, so together they never spend more than is there. A bot treats all of its coin on the account as its own.
+
+**Luno specifics.** A market buy is sent in rands (what the coins cost, rounded down to the cent), as Luno requires. The terminal-wide order cap (ticket ⚙ limits) still applies, counted in dollars through Luno's USDT or USDC rand price. A pair whose share is under three of Luno's smallest orders is marked: on R500, two pairs trade more cleanly than four.
+
+**Alerts.** Each trade and each failed order: a toast and system notification here, and a Telegram message — the swarm's alert settings. The bots' full logs and a backtest on Luno's history are in the Bots panel (they are named "Luno lane · BTC/ZAR" and so on).
+
 ## Next steps
 
 2. **Trading by hand** from the token panel (preset SOL amounts) through the

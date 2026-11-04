@@ -679,7 +679,8 @@ export class BotManager {
   async trendPortfolio(b) {
     if (b.mode === 'paper') return { cash: b.paper.cash, units: b.paper.units, minNotional: 0 };
     const info = await this.ccxt.marketInfo(b.live.secretId, b.cfg.symbol);
-    const cash = Number(info.freeQuote ?? 0);
+    // its share of the free cash (several trend bots on one account split it), all of its own coin
+    const cash = Number(info.freeQuote ?? 0) * Math.min(1, Math.max(0.01, Number(b.params.capitalShare ?? 1)));
     const units = Number(info.freeBase ?? 0);
     b.liveUnits = units;
     b.liveEquity = cash + units * b.price;
@@ -692,7 +693,9 @@ export class BotManager {
     const buy = order.delta > 0;
     const units = Math.abs(order.delta);
     const notional = units * b.price;
-    const head = `${buy ? 'BUY' : 'SELL'} ${tidy(units)} ${b.base} ≈ $${notional.toFixed(2)} @ ${tidy(b.price)} → ${(order.target * 100).toFixed(0)}% of the balance in ${b.base} (was ${(order.held * 100).toFixed(0)}%)`;
+    const quote = b.cfg.symbol.split('/')[1]?.split(':')[0] ?? 'USD';
+    const money = /^(USD|USDT|USDC|FDUSD|BUSD)$/.test(quote) ? `$${notional.toFixed(2)}` : `${quote === 'ZAR' ? 'R' : `${quote} `}${notional.toFixed(2)}`;
+    const head = `${buy ? 'BUY' : 'SELL'} ${tidy(units)} ${b.base} ≈ ${money} @ ${tidy(b.price)} → ${(order.target * 100).toFixed(0)}% of the balance in ${b.base} (was ${(order.held * 100).toFixed(0)}%)`;
     if (b.mode === 'paper') {
       const fee = (notional * p.feeBps) / 1e4;
       b.paper.cash -= order.delta * b.price + fee;

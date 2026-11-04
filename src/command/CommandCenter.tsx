@@ -20,6 +20,7 @@ import { useTicker } from '../ui/controls';
 import { MemeScanner, MEME_SCANNER_DEFAULTS, type MemeScannerConfig } from '../panels/MemeScanner';
 import { MemeToken as MemeTokenPanel, MEME_TOKEN_DEFAULTS, type MemeTokenConfig } from '../panels/MemeToken';
 import { Rules, Wallet } from '../panels/MemeSwarm';
+import { LunoLane } from '../panels/LunoLane';
 import { coreMemory, drawCore, type CoreInput } from './core';
 import { Core3D, webglAvailable } from './core3d';
 import { commandStats, Rate, type CommandStats } from './stats';
@@ -326,12 +327,13 @@ function Gauge({ value, label, sub, color, dim, text }: { value: number | null; 
   );
 }
 
-export type DrawerTab = 'wallet' | 'scanner' | 'coin' | 'rules';
+export type DrawerTab = 'wallet' | 'scanner' | 'coin' | 'rules' | 'luno';
 const DRAWER_TABS: { id: DrawerTab; label: string }[] = [
   { id: 'wallet', label: '◎ Wallet' },
   { id: 'scanner', label: '⌕ Scanner' },
   { id: 'coin', label: 'Coin' },
   { id: 'rules', label: 'Rules' },
+  { id: 'luno', label: 'R Luno' },
 ];
 
 /** Open a Command Center drawer from anywhere (the top bar's Wallet and Scanner buttons). */
@@ -361,9 +363,10 @@ function Drawer({ tab, onTab, onClose }: { tab: DrawerTab; onTab: (t: DrawerTab)
           ✕
         </button>
       </header>
-      <div className={`cc-drawer-body${tab === 'wallet' || tab === 'rules' ? ' padded' : ''}`}>
+      <div className={`cc-drawer-body${tab === 'wallet' || tab === 'rules' || tab === 'luno' ? ' padded' : ''}`}>
         {tab === 'wallet' && <Wallet />}
         {tab === 'rules' && <Rules />}
+        {tab === 'luno' && <LunoLane />}
         {tab === 'scanner' && <MemeScanner config={scan} setConfig={(p) => setScan((c) => ({ ...c, ...p }))} nodeId="cc-scanner" />}
         {tab === 'coin' && <MemeTokenPanel config={coin} setConfig={(p) => setCoin((c) => ({ ...c, ...p }))} nodeId="cc-coin" />}
       </div>

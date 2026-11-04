@@ -182,6 +182,20 @@ describe('BotManager', () => {
       await m.stop(id, { reason: 'test' });
     });
 
+    it('live on Luno: two bots sharing the rands each buy from their own half, and say it in rands', async () => {
+      const now = Date.UTC(2026, 9, 24, 10);
+      const ccxt = trendCcxt(now);
+      ccxt.marketInfo = vi.fn(async () => ({ exchangeId: 'luno', trading: true, sandbox: false, contract: false, taker: 0.006, minCost: null, minAmount: 0.0001, freeQuote: 500, freeBase: 0, limits: { maxOrderUsd: 300 } }));
+      const m = new BotManager({ ccxt, db, emit: () => {}, now: () => now });
+      const id = m.save({ mode: 'live', secretId: 'k1', symbol: 'BTC/ZAR', params: { ...m.presets().trend, capitalShare: 0.5, accountUsd: 250 } });
+      await m.start(id);
+      await vi.waitFor(() => expect(ccxt.orders.length).toBe(1));
+      expect(ccxt.orders[0]).toMatchObject({ symbol: 'BTC/ZAR', side: 'buy', type: 'market', sizeMode: 'quote' });
+      expect(ccxt.orders[0].size).toBeLessThanOrEqual(250);
+      expect(m.eventsFor(id).find((e) => e.kind === 'trade').text).toMatch(/^BUY .* BTC ≈ R\d+\.\d\d @/);
+      await m.stop(id, { reason: 'test' });
+    });
+
     it('backtests on the exchange history', async () => {
       const now = Date.UTC(2026, 9, 24, 10);
       const ccxt = trendCcxt(now);
