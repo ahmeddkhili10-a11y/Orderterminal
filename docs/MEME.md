@@ -117,9 +117,25 @@ swarm has **a wallet of its own** (Meme Swarm → **Wallet**):
    confirm. From then on the Strategist's picks are bought, managed and sold
    with no approval clicks, also while the terminal is locked.
 
+**From your phone.** Clicking the swarm wallet's address copies it and, with
+Telegram connected, sends it to your Telegram too (at most once a minute);
+**📱 Send to my phone** does it on purpose. In Telegram, tap the address to copy
+it, then in Phantom: Send → Solana → paste. With bot commands on, `/wallet` in
+your bot's chat answers with the address any time the app is open.
+
 **Phantom stays your main wallet.** Under Wallet → **Home wallet — your
-Phantom**: **Connect Phantom…** (sign the connect message in Phantom), then
-**Use as home…** (a system dialog confirms it). From then on the swarm wallet
+Phantom**, either:
+- **📱 Verify Phantom from my phone…** — no extension needed. After a system
+  dialog confirms it, send the exact small amount it shows (0.001001–0.001999
+  SOL, also sent to your Telegram) from Phantom to the swarm wallet within 30
+  minutes. Only the owner of a wallet can send from it, so the wallet it comes
+  from is proven yours and becomes home. It must come from Phantom: a sender
+  holding over 5,000 SOL (an exchange such as Luno) or owned by a program is
+  refused. The amount stays in the swarm wallet. Or:
+- **Connect Phantom on this computer…** (sign the connect message in the
+  Phantom browser extension), then **Use as home…** (a system dialog confirms it).
+
+From then on the swarm wallet
 can send SOL to that address only — checked in the main process, so not even
 the window can point it anywhere else:
 - **Send to Phantom…** moves an amount (the fee reserve stays), or **Send

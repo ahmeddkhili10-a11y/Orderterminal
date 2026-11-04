@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fmtAgo, fmtTime, fmtUsd } from '../core/format';
-import { desktop, type SecretRecord, type WalletRecord } from '../desktop/bridge';
+import { desktop, type PhoneProof, type SecretRecord, type WalletRecord } from '../desktop/bridge';
+import { phoneReady, proofMessage, sendAddressToPhone, tellPhone } from '../meme/swarm/phone';
 import { vault } from '../desktop/vault';
 import { useSettings } from '../store/settings';
 import { useMeme } from '../meme/scanner';
@@ -417,6 +418,8 @@ export function Wallet() {
   const [phantoms, setPhantoms] = useState<WalletRecord[]>([]);
   const [homePick, setHomePick] = useState('');
   const [sendAmt, setSendAmt] = useState(0.1);
+  const [copied, setCopied] = useState('');
+  const [proof, setProof] = useState<PhoneProof | null>(null);
   const loadPhantoms = () =>
     desktop?.wallet
       .list()
@@ -427,6 +430,28 @@ export function Wallet() {
       })
       .catch(() => undefined);
   useEffect(() => void loadPhantoms(), []);
+  // a phone verification still waiting (the drawer was closed meanwhile), and its result
+  useEffect(() => {
+    desktop?.swarm
+      .verifyState()
+      .then(setProof)
+      .catch(() => undefined);
+    const done = () => {
+      setProof(null);
+      void loadPhantoms();
+    };
+    window.addEventListener('novus:phantom-verified', done);
+    return () => window.removeEventListener('novus:phantom-verified', done);
+  }, []);
+  const copyAddress = (address: string) => {
+    void navigator.clipboard.writeText(address);
+    setCopied('copied');
+    // and to the phone, where Phantom is
+    sendAddressToPhone(address, true)
+      .then((sent) => setCopied(sent ? 'copied · sent to your Telegram' : 'copied'))
+      .catch(() => setCopied('copied'));
+    setTimeout(() => setCopied(''), 4000);
+  };
   // the balance while the wallet is on screen, whether or not the swarm runs (a deposit shows within seconds)
   useEffect(() => {
     void swarm.refreshWallet();
@@ -486,9 +511,15 @@ export function Wallet() {
         <>
           <div className="swarm-wallet">
             <div>
-              <div className="muted">Address — to fund it, in Phantom: Send → paste this address (click it to copy)</div>
-              <div className="mono swarm-address" onClick={() => navigator.clipboard.writeText(w.address)} title="Copy">
+              <div className="muted">Address — to fund it, in Phantom: Send → paste this address (click it to copy{phoneReady() ? ' — it goes to your Telegram too' : ''})</div>
+              <div className="mono swarm-address" onClick={() => copyAddress(w.address)} title="Copy (and send to your Telegram)">
                 {w.address}
+              </div>
+              <div className="swarm-phone">
+                <button className="chip" disabled={!!busy || !phoneReady()} onClick={() => run('phone', async () => (await sendAddressToPhone(w.address), setCopied('sent to your Telegram — tap the address there to copy it')))} title={phoneReady() ? 'Send the address to your Telegram, to paste into Phantom on your phone' : 'Connect Telegram first (Connect → Telegram)'}>
+                  📱 Send to my phone
+                </button>
+                {copied ? <span className="up">✓ {copied}</span> : !phoneReady() && <span className="muted">connect Telegram to get it on your phone</span>}
               </div>
             </div>
             <div>
@@ -599,10 +630,42 @@ export function Wallet() {
                 </>
               ) : (
                 <>
-                  <button className="chip swarm-arm-btn" disabled={!!busy} onClick={() => run('connect', async () => (await desktop!.wallet.connectPhantom(), await loadPhantoms()))}>
-                    Connect Phantom…
+                  <button className="chip" disabled={!!busy} onClick={() => run('connect', async () => (await desktop!.wallet.connectPhantom(), await loadPhantoms()))}>
+                    Connect Phantom on this computer…
                   </button>
-                  <span className="muted">Sign the connect message in Phantom (it opens in your browser); the swarm can then send its profits home to it.</span>
+                  <span className="muted">needs the Phantom browser extension here — or verify from your phone below</span>
+                </>
+              )}
+            </div>
+          )}
+          {!w.home && (
+            <div className="swarm-arm">
+              {proof ? (
+                <>
+                  <span>
+                    📱 From Phantom on your phone, send exactly <b className="mono">{proof.sol} SOL</b> to the address above before {new Date(proof.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
+                  </span>
+                  <span className="muted">{phoneReady() ? 'The steps are on your Telegram.' : ''} Checking every 15 s — the wallet it comes from becomes home.</span>
+                  <button className="chip" disabled={!!busy} onClick={() => run('proof', async () => (await desktop!.swarm.verifyCancel(), setProof(null)))}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="chip swarm-arm-btn"
+                    disabled={!!busy}
+                    onClick={() =>
+                      run('proof', async () => {
+                        const p = await desktop!.swarm.verifyPhone(swarmRpc());
+                        setProof(p);
+                        if (p && phoneReady()) await tellPhone(proofMessage(p));
+                      })
+                    }
+                  >
+                    📱 Verify Phantom from my phone…
+                  </button>
+                  <span className="muted">No extension needed: send a tiny exact amount (about 0.0015 SOL) from Phantom on your phone to the swarm wallet. Only the owner can send from a wallet, so that proves it is yours — it becomes home, where profits go. {phoneReady() ? 'The steps come to your Telegram.' : 'Connect Telegram to get the steps on your phone.'}</span>
                 </>
               )}
             </div>

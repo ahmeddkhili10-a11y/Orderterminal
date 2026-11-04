@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { BotManager } from './amt/bots.mjs';
 import { Db } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
+import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
 import { DEFAULT_RPC, recentActivity, SOL_MINT, tokenInfo, walletBalances } from '../src/shared/solana.ts';
 import { TelegramCommands, tgDetectChat, tgMe, tgSendLong, tgSendPhoto } from '../src/shared/telegram.ts';
 import { parseSearch, searchUrl } from '../src/shared/xapi.ts';
@@ -552,6 +553,70 @@ function registerIpc() {
     db.set('swarmHome', address);
     return address;
   });
+  // Phantom verified from the phone: a small exact deposit from it proves the address.
+  // Started here (the computer asks to confirm), checked every 15 s for 30 minutes.
+  const swarmAddress = () => {
+    const id = swarmWalletId();
+    if (!id) throw new Error('no swarm trading wallet — create or import one first');
+    return vault.reveal(id).fields.address;
+  };
+  let proof = null;
+  let proofTimer = null;
+  const proofEvent = (msg) => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send('swarm:verified', msg);
+  };
+  const stopProof = () => {
+    clearInterval(proofTimer);
+    proofTimer = null;
+    proof = null;
+  };
+  handle('swarm:verifyPhone', async (_e, rpcSecretId) => {
+    const address = swarmAddress();
+    const lamports = proofAmount((() => {
+      const b = randomBytes(4);
+      return () => b.readUInt32BE(0) / 2 ** 32;
+    })());
+    const sol = proofSol(lamports);
+    const r = await dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: ['Cancel', 'Start'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Verify Phantom from your phone',
+      message: `From Phantom on your phone, send exactly ${sol} SOL to the swarm wallet within 30 minutes.`,
+      detail: `${address}\n\nThe Phantom wallet that sends it becomes the swarm's home — the only address the swarm wallet ever sends SOL to. Send it from Phantom, not from Luno or another exchange. The ${sol} SOL stays in the swarm wallet.`,
+    });
+    if (r.response !== 1) return null;
+    stopProof();
+    proof = new DepositVerifier({ rpc: swarmRpc(rpcSecretId), address: swarmAddress });
+    const p = proof.start(lamports);
+    let busy = false;
+    proofTimer = setInterval(async () => {
+      if (busy || !proof) return;
+      busy = true;
+      try {
+        const res = await proof.poll();
+        if (!res) return;
+        if (res.address) {
+          db.putWallet(res.address, 'solana', true);
+          db.set('swarmHome', res.address);
+          log('info', `swarm: Phantom ${res.address} verified by a ${sol} SOL deposit — now home`);
+        }
+        stopProof();
+        proofEvent(res);
+      } catch (e) {
+        log('warn', `swarm: phone verification check failed: ${e?.message ?? e}`);
+      } finally {
+        busy = false;
+      }
+    }, 15_000);
+    return { sol, address, until: p.until };
+  });
+  handle('swarm:verifyCancel', () => {
+    stopProof();
+    return true;
+  });
+  handle('swarm:verifyState', () => (proof?.pending ? { sol: proofSol(proof.pending.lamports), address: swarmAddress(), until: proof.pending.until } : null));
   // by hand: an amount, or 'all' (the wallet emptied, fee reserve included)
   handle('swarm:withdraw', async (_e, sol, rpcSecretId) => {
     const home = swarmHome();
@@ -762,7 +827,17 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
   function startCommands(id) {
     const s = tg(id);
     if (!s.fields.chatId) throw new Error('detect the chat first');
-    commands = new TelegramCommands(s.fields.token, s.fields.chatId, () => tgStatus, fetch, (e) => console.warn('telegram', e?.message ?? e));
+    // /wallet: the swarm wallet's address, to paste into Phantom (answered in the configured chat only)
+    const walletReply = () => {
+      try {
+        const a = swarmAddress();
+        const home = swarmHome();
+        return `<b>Swarm wallet</b> — tap the address to copy it, then in Phantom: Send → Solana → paste.\n\n<code>${a}</code>\n\nSolana network only. Send a small test first.${home ? `\nProfits go home to ${home.slice(0, 4)}…${home.slice(-4)}.` : ''}`;
+      } catch {
+        return 'No swarm wallet yet — create one in Novus Ordo (Wallet).';
+      }
+    };
+    commands = new TelegramCommands(s.fields.token, s.fields.chatId, () => ({ ...tgStatus, wallet: walletReply() }), fetch, (e) => console.warn('telegram', e?.message ?? e));
     void commands.run();
   }
   handle('telegram:commands', (_e, id) => {

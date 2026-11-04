@@ -82,6 +82,18 @@ describe('Telegram', () => {
     expect(calls.every((c) => c.body.chat_id === '42')).toBe(true);
     expect((bot as any).offset).toBe(14);
   });
+
+  it('/wallet answers with the swarm wallet address, in the configured chat only', async () => {
+    const { calls, fetchImpl } = botApi({ sendMessage: {} });
+    const bot = new TelegramCommands(TOKEN, '42', () => ({ price: 'p', status: 's', wallet: 'Swarm wallet <code>ADDR</code>' }), fetchImpl);
+    const replies = await bot.handle([
+      { update_id: 1, message: { chat: { id: 42 }, text: '/wallet' } },
+      { update_id: 2, message: { chat: { id: 7 }, text: '/wallet' } },
+      { update_id: 3, message: { chat: { id: 42 }, text: '/address' } },
+    ]);
+    expect(replies).toEqual(['Swarm wallet <code>ADDR</code>', 'Swarm wallet <code>ADDR</code>']);
+    expect(calls.every((c) => c.body.chat_id === '42')).toBe(true);
+  });
 });
 
 describe('Solana activity', () => {

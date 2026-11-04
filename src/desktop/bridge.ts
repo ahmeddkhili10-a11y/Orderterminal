@@ -508,6 +508,13 @@ export interface SwarmLimits {
   sweepAboveSol: number;
 }
 
+/** A pending phone verification: send exactly `sol` SOL to `address` before `until`. */
+export interface PhoneProof {
+  sol: string;
+  address: string;
+  until: number;
+}
+
 /** A confirmed swap: the real SOL and token changes (raw units) in the wallet. */
 export interface SwarmFill {
   signature: string;
@@ -626,6 +633,11 @@ export interface NovusApi {
     setLimits(p: Partial<SwarmLimits>): Promise<SwarmLimits>;
     /** the owner's verified Phantom wallet as home (null to clear) */
     setHome(address: string | null): Promise<string | null>;
+    /** verify Phantom from the phone: it sends exactly `sol` to the swarm wallet (asks to confirm here) */
+    verifyPhone(rpcSecretId?: string): Promise<PhoneProof | null>;
+    verifyCancel(): Promise<boolean>;
+    verifyState(): Promise<PhoneProof | null>;
+    onVerified(fn: (r: { address?: string; expired?: boolean; refused?: string }) => void): () => void;
     withdraw(sol: number | 'all', rpcSecretId?: string): Promise<(SwarmFill & { sol: number }) | null>;
     sweep(rpcSecretId?: string): Promise<(SwarmFill & { sol: number }) | null>;
     balance(rpcSecretId?: string): Promise<{ sol: number; spentToday: number; limits: SwarmLimits }>;

@@ -4431,3 +4431,12 @@ table.grid.meme-tape td {
   padding: 3px 6px;
   text-align: left;
 }
+
+/* the swarm wallet address to the phone */
+.swarm-phone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}

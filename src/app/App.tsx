@@ -4,6 +4,7 @@ import 'flexlayout-react/style/dark.css';
 import { startAlerts, useToasts } from '../alerts/engine';
 import { startAmtService } from '../desktop/amt';
 import { startLunoAlerts } from '../luno/lane';
+import { startPhoneLink } from '../meme/swarm/phone';
 import { CommandCenter } from '../command/CommandCenter';
 import { startSwarmService } from '../meme/swarm/swarm';
 import { startTelegramService } from '../desktop/telegram';
@@ -54,6 +55,7 @@ export function App() {
     startTelegramService();
     startAmtService();
     startLunoAlerts();
+    startPhoneLink();
     startSwarmService();
   }, []);
 

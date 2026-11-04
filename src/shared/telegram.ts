@@ -84,7 +84,7 @@ export async function tgSendPhoto(token: string, chatId: string, png: Uint8Array
   if (!j.ok) throw new Error(j.description ?? 'Telegram sendPhoto failed');
 }
 
-export const HELP_TEXT = '<b>Novus Ordo bot</b>\n/price — primary instrument price\n/status — price, funding, open interest and feeds\n/help — this message';
+export const HELP_TEXT = '<b>Novus Ordo bot</b>\n/wallet — the swarm wallet address, to paste into Phantom\n/price — primary instrument price\n/status — price, funding, open interest and feeds\n/help — this message';
 
 /**
  * Long-polls getUpdates and answers /price, /status and /help using the
@@ -97,7 +97,7 @@ export class TelegramCommands {
   constructor(
     private token: string,
     private chatId: string,
-    private status: () => { price: string; status: string },
+    private status: () => { price: string; status: string; wallet?: string },
     private fetchImpl: FetchLike = fetch,
     private onError: (e: unknown) => void = () => undefined,
   ) {}
@@ -111,7 +111,7 @@ export class TelegramCommands {
       if (!msg?.text || String(msg.chat?.id) !== this.chatId) continue;
       const cmd = msg.text.trim().split(/[\s@]/)[0].toLowerCase();
       const snap = this.status();
-      const reply = cmd === '/price' ? snap.price : cmd === '/status' ? snap.status : cmd === '/help' || cmd === '/start' ? HELP_TEXT : null;
+      const reply = cmd === '/price' ? snap.price : cmd === '/status' ? snap.status : (cmd === '/wallet' || cmd === '/address') && snap.wallet ? snap.wallet : cmd === '/help' || cmd === '/start' ? HELP_TEXT : null;
       if (!reply) continue;
       await tgSend(this.token, this.chatId, reply, this.fetchImpl);
       replies.push(reply);

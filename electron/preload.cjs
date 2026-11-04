@@ -19,6 +19,8 @@ const listen = (set, fn) => {
   set.add(fn);
   return () => set.delete(fn);
 };
+const verifiedListeners = new Set();
+ipcRenderer.on('swarm:verified', (_e, msg) => verifiedListeners.forEach((fn) => fn(msg)));
 ipcRenderer.on('ccxt:event', (_e, msg) => {
   for (const fn of ccxtListeners) fn(msg);
 });
@@ -41,6 +43,10 @@ contextBridge.exposeInMainWorld('novus', {
     remove: () => call('swarm:walletRemove'),
     setLimits: (p) => call('swarm:setLimits', p),
     setHome: (address) => call('swarm:setHome', address),
+    verifyPhone: (rpcSecretId) => call('swarm:verifyPhone', rpcSecretId),
+    verifyCancel: () => call('swarm:verifyCancel'),
+    verifyState: () => call('swarm:verifyState'),
+    onVerified: (fn) => listen(verifiedListeners, fn),
     withdraw: (sol, rpcSecretId) => call('swarm:withdraw', sol, rpcSecretId),
     sweep: (rpcSecretId) => call('swarm:sweep', rpcSecretId),
     balance: (rpcSecretId) => call('swarm:balance', rpcSecretId),

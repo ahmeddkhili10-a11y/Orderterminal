@@ -70,6 +70,26 @@ try {
   await page.click('.cc-wallet-btn');
   await page.waitForSelector('.cc-drawer .swarm-rules');
   expect(true, 'Wallet in the top bar opens the swarm wallet');
+  // the phone side: the address to Telegram, and Phantom verified by a small deposit from the phone
+  await page.click('.cc-drawer button:has-text("Create swarm wallet")');
+  await page.waitForSelector('.cc-drawer .swarm-address', { timeout: 10_000 });
+  expect((await page.locator('.cc-drawer button:has-text("Send to my phone")').count()) === 1 && (await page.locator('.cc-drawer button:has-text("Verify Phantom from my phone")').count()) === 1, 'the swarm wallet offers the phone: address to Telegram, verify Phantom from the phone');
+  await app.evaluate(({ dialog }) => {
+    globalThis.__realBox = dialog.showMessageBox;
+    dialog.showMessageBox = async () => ({ response: 1 });
+  });
+  await page.click('.cc-drawer button:has-text("Verify Phantom from my phone")');
+  await page.waitForSelector('.cc-drawer .swarm-arm:has-text("send exactly")', { timeout: 10_000 });
+  await page.screenshot({ path: `${OUT}desktop-wallet-phone.png` });
+  const pending = await page.evaluate(() => window.novus.swarm.verifyState());
+  expect(/^0\.001\d{3}$/.test(pending?.sol ?? '') && pending.until > Date.now(), `phone verification waits for exactly ${pending?.sol} SOL`);
+  await page.click('.cc-drawer .swarm-arm button:has-text("Cancel")');
+  expect((await page.evaluate(() => window.novus.swarm.verifyState())) === null, 'phone verification cancels');
+  // the later checks expect an empty vault: the test swarm wallet goes again
+  await page.evaluate(() => window.novus.swarm.remove());
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = globalThis.__realBox;
+  });
   await page.keyboard.press('Escape');
   // the rest checks the classic order-flow terminal: Settings → Workspace
   await page.click('button[title="Settings"]');
