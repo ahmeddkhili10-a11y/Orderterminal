@@ -113,29 +113,37 @@ expect 20–60 minutes before their first proposals.
 
 ## The market island
 
-The crypto tab opens on the market island: the whole terminal is one 3D scene.
+The crypto tab opens on the market island: the whole terminal is one 3D world
+you move through. No panels on it — only the small market card (top left), the
+connectors (top bar) and the money (bottom centre).
 
-- **The island is the order book.** Across is price (around the market), back
-  to front is time (15 minutes ago to now), height is the liquidity resting at
-  that price at that time: walls of orders rise as mountains, thin books are low
-  green land. **The glowing river is the price**, carved into the valley between
-  the walls, ending at the orb of the price now. **Trades are lights** where and
+- **The lake in the middle is the order book.** Across is price, back to front
+  is time (15 minutes ago to now), height is the liquidity resting at that price
+  at that time: walls of orders rise as hills. **The glowing river is the
+  price**, flowing to the orb of the price now. **Trades are lights** where and
   when they printed: gold for buyers, red for sellers.
-- **Landmarks** on pads around it: the **order book** (bids cyan, asks orange),
-  the **volume profile** (a ridge of bars over time; the brightest is the point
-  of control), **volatility** (a ribbon through the 1, 5 and 15-minute moves) and
-  the **tape** (every recent trade in a cube — time, price, size).
-- **The swarm** lives behind the island: its **council hall**, and each agent a
-  beacon whose rainbow ring is its gauge. A spark flies to the hall when an agent
-  speaks; the council's line runs to the price.
-- **Explore**: hover anything for a peek (the depth at any point of a mountain,
-  any trade, any agent); click it and the camera flies there and its card opens
-  beside it — the book's spread and depth, the point of control, volatility, the
-  tape's flow, what each agent has been saying, the council's discussion and the
-  open trades. Click the sea or press Esc to fly back. Drag to look around,
-  scroll to zoom.
-- **The money** is the only thing on screen: a strip at the bottom centre with
-  the swarm (start/stop), the account, today, the open position and the floor.
+- **The Exchange** (west) is the live book as a city: a tower per price level,
+  bids cyan on one side of the avenue, asks orange on the other, nearest the
+  price at the front. Towers grow and shrink as the book changes.
+- **The Fields** (east) are the volume profile: a crop row per price, as tall
+  as the volume traded there; the point of control is the golden row.
+- **The Harbor** (south-east) is the tape: big trades sail in as boats, a gold
+  lamp for a buyer, red for a seller.
+- **The Lighthouse** (south-west) is volatility: the faster the market, the
+  faster its beam turns and the higher the sea.
+- **The Council** (north) is the swarm: a domed hall with its minions on the
+  plaza, one per agent, each with a ring of light on the ground as its gauge.
+  When an agent proposes a trade it walks to the podium and says so; the others
+  step forward to vote. The council's verdict lights the hall — green for a
+  trade, red for a pass — and every minion jumps. While the swarm is stopped the
+  minions sleep.
+- **Explore**: click a place or a minion and the camera flies there; its reading
+  appears beside it as a hologram, with a line to what it describes. Hover
+  anything for a peek. Drag to look round, scroll to zoom, **W A S D** or the
+  arrows to glide over the island, **Q / E** to turn; click the sea or press
+  **Esc** to fly home.
+- **The money** is a slim strip at the bottom centre: the swarm (wake / stop),
+  the account, today, the open position and the floor.
 - **▦ Panels** on the top bar switches to the classic panels (footprint,
   heatmap, DOM, bots, the Crypto Swarm panel); **◈ Island** brings it back.
 
