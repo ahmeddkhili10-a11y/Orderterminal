@@ -167,6 +167,8 @@ export interface KeyTest {
   permissions: { reading: boolean; spotTrading: boolean; futures: boolean; withdrawals: boolean; ipRestricted: boolean } | null;
   /** the public IP the exchange sees */
   ip: string | null;
+  /** exchange-specific checks (Hyperliquid: the API wallet is approved for the account) */
+  checks?: { ok: boolean | null; text: string }[] | null;
 }
 
 export interface AmtParams {

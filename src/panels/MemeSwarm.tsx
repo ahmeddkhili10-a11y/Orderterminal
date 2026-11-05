@@ -419,6 +419,18 @@ export function Wallet() {
   const [homePick, setHomePick] = useState('');
   const [sendAmt, setSendAmt] = useState(0.1);
   const [copied, setCopied] = useState('');
+  const [checkedAt, setCheckedAt] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  /** look at the balance now (after sending SOL) */
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await swarm.refreshWallet();
+      setCheckedAt(Date.now());
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const [proof, setProof] = useState<PhoneProof | null>(null);
   const loadPhantoms = () =>
     desktop?.wallet
@@ -454,8 +466,8 @@ export function Wallet() {
   };
   // the balance while the wallet is on screen, whether or not the swarm runs (a deposit shows within seconds)
   useEffect(() => {
-    void swarm.refreshWallet();
-    const id = setInterval(() => void swarm.refreshWallet(), 10_000);
+    void refresh();
+    const id = setInterval(() => void refresh(), 10_000);
     return () => clearInterval(id);
   }, []);
   useEffect(() => {
@@ -525,6 +537,12 @@ export function Wallet() {
             <div>
               <div className="muted">Balance</div>
               <div className="mono swarm-balance">{w.sol === null ? '—' : `${w.sol.toFixed(4)} SOL`}</div>
+              <div className="swarm-phone">
+                <button className="chip" disabled={refreshing} onClick={() => void refresh()} title="Check the balance now — after you send SOL, it shows once the network confirms it (a few seconds)">
+                  {refreshing ? '↻ Checking…' : '↻ Refresh'}
+                </button>
+                <span className="muted">{w.sol === null ? 'cannot reach the Solana network — try again' : checkedAt ? `checked ${new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}</span>
+              </div>
             </div>
             <div>
               <div className="muted">Spent today</div>

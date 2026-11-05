@@ -5,6 +5,7 @@ import { startAlerts, useToasts } from '../alerts/engine';
 import { startAmtService } from '../desktop/amt';
 import { startLunoAlerts } from '../luno/lane';
 import { startPhoneLink } from '../meme/swarm/phone';
+import { startBotAlerts } from '../desktop/botAlerts';
 import { CommandCenter } from '../command/CommandCenter';
 import { startSwarmService } from '../meme/swarm/swarm';
 import { startTelegramService } from '../desktop/telegram';
@@ -56,6 +57,7 @@ export function App() {
     startAmtService();
     startLunoAlerts();
     startPhoneLink();
+    startBotAlerts();
     startSwarmService();
   }, []);
 

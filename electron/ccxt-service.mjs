@@ -5,6 +5,7 @@
 import { clockSafe } from './clock.mjs';
 import { isKeyRejection, keyChecklist, publicIp } from './keyErrors.mjs';
 import { buildOrder, closeOrderFor, exchangeQuirks, RateGate, sanitizeLimits, USD_QUOTES } from './trading.mjs';
+import { assertAgentKey, capLeverage, HL, hyperliquidKeyChecks } from './hyperliquid.mjs';
 
 /** exchanges whose candles need an API key */
 const AUTH_CANDLES = new Set(['luno']);
@@ -105,12 +106,34 @@ export class CcxtService {
     return ex;
   }
 
+  /** The address of a Hyperliquid private key (its API wallet). */
+  agentAddress(ex, privateKey) {
+    try {
+      return ex.ethGetAddressFromPrivateKey(String(privateKey ?? '').trim());
+    } catch {
+      throw new Error('Hyperliquid: the private key is not valid — paste the API wallet’s private key (0x followed by 64 characters)');
+    }
+  }
+
+  /** Is this Hyperliquid agent approved for the account? Read-only info requests. */
+  async hyperliquidChecks(ex, fields) {
+    const account = String(fields.walletAddress ?? '').trim();
+    const agent = this.agentAddress(ex, fields.privateKey);
+    const [agents, role] = await Promise.all([
+      ex.publicPostInfo({ type: 'extraAgents', user: account }).catch(() => null),
+      ex.publicPostInfo({ type: 'userRole', user: agent }).catch(() => null),
+    ]);
+    return hyperliquidKeyChecks({ account, agent, agents, role });
+  }
+
   /** An authenticated client for a revealed key, on the live exchange or its testnet. */
   buildPrivate(s, sandbox) {
     if (s.kind !== 'exchange' || !s.exchange) throw new Error('this key is not an exchange key');
     const Cls = this.lib[s.exchange];
     if (!Cls) throw new Error(`unknown exchange ${s.exchange}`);
     const ex = clockSafe(new Cls({ enableRateLimit: true, ...credentialsFrom(s.fields) }), (diff) => this.onClock?.(ex.name ?? s.exchange, diff));
+    // Hyperliquid: an API wallet's key only — never the main wallet's, which can withdraw
+    if (s.exchange === HL) assertAgentKey(s.fields.walletAddress, this.agentAddress(ex, s.fields.privateKey));
     if (sandbox) {
       // never fall back to the live exchange when a testnet key was asked for
       try {
@@ -393,7 +416,11 @@ export class CcxtService {
         throw await this.explainKeyError(secretId, e, { sandbox });
       }
       const assets = Object.entries(bal.total ?? {}).filter(([, v]) => v).length;
-      const out = { ok: true, exchange: ex.name, environment, saved, assets, futures: null, futuresError: null, permissions: null, ip: null };
+      const out = { ok: true, exchange: ex.name, environment, saved, assets, futures: null, futuresError: null, permissions: null, ip: null, checks: null };
+      if (ex.id === HL) {
+        out.checks = await this.hyperliquidChecks(ex, s.fields);
+        if (out.checks.some((c) => c.ok === false)) out.ok = false;
+      }
       if (ex.id === 'binance') {
         try {
           await ex.fetchBalance({ type: 'future' });
@@ -556,6 +583,7 @@ export class CcxtService {
       ask: px.ask,
       maker: m.maker ?? null,
       taker: m.taker ?? null,
+      maxLeverage: m.limits?.leverage?.max ?? null,
       canLeverage: Boolean(m.contract && ex.has.setLeverage),
       stops: Boolean(ex.has.createTriggerOrder ?? ex.has.createStopOrder ?? true),
       freeBase: null,
@@ -604,7 +632,10 @@ export class CcxtService {
     const m = ex.markets[symbol];
     if (!m?.contract) return [];
     const notes = [];
-    if (ex.has.setMarginMode) {
+    // Hyperliquid sets isolated margin together with the leverage (below)
+    if (ex.id === HL) {
+      /* applyLeverage does both */
+    } else if (ex.has.setMarginMode) {
       try {
         await ex.setMarginMode('isolated', symbol);
       } catch (e) {
@@ -626,7 +657,9 @@ export class CcxtService {
     if (!market.contract) throw new Error('leverage applies to derivatives; this is a spot market');
     if (!ex.has.setLeverage) throw new Error(`${ex.name} does not support setting leverage through its API — set it on the exchange, then clear the leverage field`);
     try {
-      await ex.setLeverage(lev, market.symbol);
+      // Hyperliquid: cross margin unless asked, and never above the coin's cap
+      if (ex.id === HL) await ex.setLeverage(capLeverage(lev, market), market.symbol, { marginMode: 'isolated' });
+      else await ex.setLeverage(lev, market.symbol);
     } catch (e) {
       const msg = String(e?.message ?? e);
       // exchanges report "already at this leverage" as an error
@@ -780,11 +813,12 @@ export class CcxtService {
       if (!ex.has.fetchPositions) throw new Error(`${ex.name} does not report positions through CCXT`);
       const ps = await ex.fetchPositions([symbol]);
       const p = ps.find((x) => x.symbol === symbol && Math.abs(x.contracts ?? 0) > 0 && (!side || x.side === side));
-      const o = closeOrderFor(p);
-      o.amount = Number(ex.amountToPrecision(symbol, o.amount));
+      const c = closeOrderFor(p);
+      c.amount = Number(ex.amountToPrecision(symbol, c.amount));
+      const o = exchangeQuirks(ex.id, c, ex.id === HL ? (await this.refPrice(ex, symbol)).price : undefined);
       Object.assign(row, { side: o.side, amount: o.amount });
       row.status = 'error';
-      const res = await ex.createOrder(o.symbol, o.type, o.side, o.amount, undefined, o.params);
+      const res = await ex.createOrder(o.symbol, o.type, o.side, o.amount, o.price, o.params);
       row.status = 'placed';
       row.orderId = res?.id ?? null;
       return { id: res?.id ?? null, side: o.side, amount: o.amount };

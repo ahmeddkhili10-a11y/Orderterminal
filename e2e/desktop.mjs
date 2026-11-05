@@ -73,6 +73,10 @@ try {
   // the phone side: the address to Telegram, and Phantom verified by a small deposit from the phone
   await page.click('.cc-drawer button:has-text("Create swarm wallet")');
   await page.waitForSelector('.cc-drawer .swarm-address', { timeout: 10_000 });
+  expect((await page.locator('.cc-drawer button:has-text("Refresh")').count()) === 1, 'the swarm wallet balance has a Refresh button');
+  await page.click('.cc-drawer button:has-text("Refresh")');
+  await page.waitForSelector('.cc-drawer button:has-text("Refresh"):not([disabled])', { timeout: 40_000 });
+  expect(true, 'Refresh checks the balance and comes back');
   expect((await page.locator('.cc-drawer button:has-text("Send to my phone")').count()) === 1 && (await page.locator('.cc-drawer button:has-text("Verify Phantom from my phone")').count()) === 1, 'the swarm wallet offers the phone: address to Telegram, verify Phantom from the phone');
   await app.evaluate(({ dialog }) => {
     globalThis.__realBox = dialog.showMessageBox;
@@ -91,11 +95,10 @@ try {
     dialog.showMessageBox = globalThis.__realBox;
   });
   await page.keyboard.press('Escape');
-  // the rest checks the classic order-flow terminal: Settings → Workspace
-  await page.click('button[title="Settings"]');
-  await page.click('.modal .chip:has-text("Classic order-flow terminal")');
+  // the rest checks the order-flow terminal: one click from the meme terminal's bar
+  await page.click('.cc-orderflow-btn');
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });
-  expect(true, 'Settings switches to the classic order-flow terminal');
+  expect(true, 'Order flow on the top bar switches to the order-flow terminal');
 
   step('window fills the screen');
   const win = await app.evaluate(({ BrowserWindow, screen }) => {
@@ -159,6 +162,17 @@ try {
   await page.click('button[title^="Connections"]');
   expect((await page.locator('.quick-tile').count()) >= 10, 'quick-connect tiles for exchanges and Telegram');
   await page.screenshot({ path: `${OUT}desktop-connections.png` });
+  // Hyperliquid: the API-wallet guide and its two fields, named for which wallet each is
+  await page.click('.quick-tile[title="Connect Hyperliquid"]');
+  await page.waitForSelector('.key-guide');
+  const hlGuide = await page.locator('.key-guide').innerText();
+  const hlForm = await page.locator('.vault-form').innerText();
+  expect(/More → API/.test(hlGuide) && /never withdraw/.test(hlGuide) && hlForm.includes('Main wallet address') && hlForm.includes('API wallet private key'), 'Hyperliquid guide and its fields (main wallet address, API wallet private key)');
+  await page.screenshot({ path: `${OUT}desktop-hyperliquid.png` });
+  // back to the tiles: close and open Connections again
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.quick-tile', { state: 'detached' }).catch(() => undefined);
+  await page.click('button[title^="Connections"]');
   await page.click('.quick-tile[title="Connect Binance"]');
   expect(/API Management/.test(await page.locator('.key-guide').innerText()), 'Binance key guide shown');
   const exInput = page.locator('input[list="ccxt-exchanges"]');

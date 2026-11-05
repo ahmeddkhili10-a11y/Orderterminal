@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { desktop, isDesktop, type CcxtExchangeInfo, type KeyTest, type SecretKind, type SecretRecord } from '../desktop/bridge';
 import { vault } from '../desktop/vault';
 import { getSettings } from '../store/settings';
@@ -63,6 +63,21 @@ interface Quick {
 const NO_WITHDRAW = 'Never enable withdrawals or transfers.';
 
 export const QUICK: Quick[] = [
+  {
+    id: 'hyperliquid',
+    name: 'Hyperliquid',
+    kind: 'exchange',
+    exchange: 'hyperliquid',
+    badge: 'HL',
+    url: 'https://app.hyperliquid.xyz/API',
+    steps: [
+      'Crypto futures — BTC, ETH, SOL and most altcoins, long or short — with no account form and no documents: your account is a wallet (Binance Wallet, Phantom, MetaMask…). Its money is USDC.',
+      'Fund it first: get USDC on the Arbitrum network into YOUR wallet (from Binance: withdraw USDC on “Arbitrum One” to your Binance Wallet address — never straight to Hyperliquid), then on app.hyperliquid.xyz connect that wallet and press Deposit. At least 5 USDC, or it is lost.',
+      'Make the trading key: app.hyperliquid.xyz → More → API → name it (e.g. Novus Ordo) → Generate → Authorize API Wallet (your wallet asks you to sign). Copy the private key it shows — only once. This API wallet can trade but can never withdraw.',
+      'Below: Wallet address = your MAIN wallet’s address (the one you deposited with, 0x…). Private key = the API wallet’s key you just copied. Never paste your main wallet’s own key or recovery phrase — the terminal refuses it.',
+      'Use “Test live”: it checks the API wallet is approved for your account. Tick “Allow trading” when you want bots or the ticket to place orders. To practise first, tick “testnet / sandbox” and use a testnet API wallet from app.hyperliquid-testnet.xyz (its faucet gives test USDC).',
+    ],
+  },
   {
     id: 'luno',
     name: 'Luno (ZAR)',
@@ -179,17 +194,25 @@ export const QUICK: Quick[] = [
 const OTHER_EXCHANGE: Quick = { id: 'other', name: 'Other exchange', kind: 'exchange', badge: '+', url: 'https://docs.ccxt.com/#/Exchange-Markets', steps: ['Search any of the 100+ exchanges CCXT supports. Create a read-only API key on the exchange (add trade permission only if you will trade). ' + NO_WITHDRAW] };
 const OTHER_API: Quick = { id: 'api', name: 'Other API key', kind: 'api', badge: '…', url: '', steps: ['Any other key you want kept encrypted, with your own field names.'] };
 
+/** Hyperliquid's two fields say exactly which wallet each one is. */
+function fieldLabel(exchange: string, field: string): string {
+  if (exchange === 'hyperliquid' && field === 'walletAddress') return 'Main wallet address';
+  if (exchange === 'hyperliquid' && field === 'privateKey') return 'API wallet private key';
+  return FIELD_LABEL[field] ?? field;
+}
+
 /** Fill the credential fields an exchange needs, keeping anything already typed. */
 function withExchange(draft: Draft, id: string, exchanges: CcxtExchangeInfo[], name?: string): Draft {
   const info = exchanges.find((e) => e.id === id);
-  const want = info?.credentials.length ? info.credentials : ['apiKey', 'secret'];
+  // Hyperliquid: the account first, then the API wallet's key
+  const want = id === 'hyperliquid' ? ['walletAddress', 'privateKey'] : info?.credentials.length ? info.credentials : ['apiKey', 'secret'];
   const keep = draft.fields.filter((f) => f.value || f.stored);
   const names = new Set(keep.map((f) => f.name));
   return { ...draft, exchange: id, label: draft.label || name || info?.name || id, fields: [...keep, ...want.filter((n) => !names.has(n)).map((name) => ({ name, value: '' }))] };
 }
 
 /** Secrets that span several lines (PEM private keys) need a text area: an input drops the line breaks. */
-const multiline = (draft: Draft, field: string) => field === 'privateKey' || (field === 'secret' && draft.exchange.startsWith('coinbase'));
+const multiline = (draft: Draft, field: string) => (field === 'privateKey' && draft.exchange !== 'hyperliquid') || (field === 'secret' && draft.exchange.startsWith('coinbase'));
 
 function KeyTestCard({ state, onSaveAs }: { state: { env: 'live' | 'testnet'; busy: boolean; result?: KeyTest; error?: string }; onSaveAs: (env: 'live' | 'testnet') => void }) {
   const where = state.env === 'live' ? 'LIVE' : 'TESTNET';
@@ -209,7 +232,7 @@ function KeyTestCard({ state, onSaveAs }: { state: { env: 'live' | 'testnet'; bu
     </li>
   );
   return (
-    <div className={`key-test ${t.futures === false || p?.withdrawals ? 'warn' : 'good'}`}>
+    <div className={`key-test ${t.futures === false || p?.withdrawals || t.checks?.some((c) => c.ok === false) ? 'warn' : 'good'}`}>
       <ul>
         {row(true, <>Connected to {t.exchange} <b>{where}</b> — {t.assets} asset{t.assets === 1 ? '' : 's'} with a balance{t.assets === 0 && t.environment === 'live' ? ' (fine before your first deposit: the key itself works)' : ''}</>)}
         {t.futures !== null && row(t.futures, t.futures ? 'Futures access works' : `Futures: ${t.futuresError}`)}
@@ -224,6 +247,7 @@ function KeyTestCard({ state, onSaveAs }: { state: { env: 'live' | 'testnet'; bu
         )}
         {t.ip && <li className="muted">· {t.exchange} sees this computer as <b className="mono">{t.ip}</b>{p?.ipRestricted ? ' — it is on the key’s trusted list (the test passed). Add each place you trade from (home, work).' : ' — add it to the key’s trusted IPs if you restrict by IP.'}</li>}
       </ul>
+      {t.checks && t.checks.length > 0 && <ul>{t.checks.map((c, i) => <Fragment key={i}>{row(c.ok, c.text)}</Fragment>)}</ul>}
       {t.environment !== t.saved && (
         <div className="confirm-actions">
           <span>This key is saved as {t.saved.toUpperCase()} but works on {where}.</span>
@@ -466,7 +490,7 @@ export function KeysModal({ onClose, onOpenPanel }: { onClose: () => void; onOpe
               {draft.kind === 'api' ? (
                 <input className="ctl" value={f.name} placeholder="field name" onChange={(e) => setDraft({ ...draft, fields: draft.fields.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
               ) : (
-                <span>{FIELD_LABEL[f.name] ?? f.name}</span>
+                <span>{fieldLabel(draft.exchange, f.name)}</span>
               )}
               <div style={{ display: 'flex', gap: 6 }}>
                 {multiline(draft, f.name) ? (
@@ -482,11 +506,11 @@ export function KeysModal({ onClose, onOpenPanel }: { onClose: () => void; onOpe
                 ) : (
                   <input
                     className="ctl mono"
-                    type={f.name === 'url' || f.name === 'chatId' ? 'text' : 'password'}
+                    type={f.name === 'url' || f.name === 'chatId' || f.name === 'walletAddress' ? 'text' : 'password'}
                     autoComplete="off"
                     spellCheck={false}
                     value={f.value}
-                    placeholder={f.stored ? `stored: ${f.stored} — leave blank to keep` : ''}
+                    placeholder={f.stored ? `stored: ${f.stored} — leave blank to keep` : draft.exchange === 'hyperliquid' ? (f.name === 'walletAddress' ? '0x… the wallet you deposited with' : '0x… the API wallet’s key (64 characters)') : ''}
                     onChange={(e) => setDraft({ ...draft, fields: draft.fields.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })}
                   />
                 )}

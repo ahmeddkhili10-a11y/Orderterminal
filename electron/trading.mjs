@@ -2,6 +2,8 @@
 // supplies the market, reference price and precision helpers, so every rule
 // here is unit-tested without touching an exchange.
 
+import { HL, hyperliquidOrder } from './hyperliquid.mjs';
+
 export const ORDER_TYPES = ['market', 'limit', 'stop-market', 'stop-limit'];
 export const TIFS = ['GTC', 'IOC', 'FOK'];
 
@@ -29,6 +31,7 @@ const pos = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
  * it never spends more than asked.
  */
 export function exchangeQuirks(exchangeId, o, refPrice) {
+  if (exchangeId === HL) return hyperliquidOrder(o, refPrice);
   if (exchangeId === 'luno' && o.type === 'market' && o.side === 'buy') {
     const cost = Math.floor(o.amount * refPrice * 100) / 100;
     if (!(cost > 0)) throw new Error('order too small: under one cent');

@@ -151,6 +151,8 @@ export class BotManager {
       // 2 % headroom: the order is re-valued at the ticker price, which may have ticked up
       params.maxPositionUsd = Math.min(params.maxPositionUsd, info.limits.maxOrderUsd * 0.98);
       if (!info.contract) params.allowShort = false;
+      // never above what the exchange allows on this coin (Hyperliquid: 3×–50× by coin)
+      if (info.maxLeverage > 0 && params.maxLeverage > info.maxLeverage) params.maxLeverage = info.maxLeverage;
       if (info.taker) params.feeBps = Math.max(params.feeBps, info.taker * 1e4);
       if (Number.isFinite(info.maker)) params.makerFeeBps = info.maker * 1e4;
       if (params.sizing === 'balance') {

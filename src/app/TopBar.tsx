@@ -340,6 +340,9 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <button className="chip primary-chip chrome-chip" onClick={() => openDrawer('luno')} title="Optional: real crypto against rands on Luno — daily trend bots beside the swarm">
             R <span className="lbl keep">Luno</span>
           </button>
+          <button className="chip primary-chip chrome-chip cc-orderflow-btn" onClick={() => setSettings({ view: 'terminal' })} title="The order-flow terminal: footprint, heatmap, DOM and volume profile across Binance, Bybit, OKX, Coinbase and Hyperliquid — and the order-flow bots">
+            ▥ <span className="lbl keep">Order flow</span>
+          </button>
         </>
       ) : (
         <button className="chip primary-chip chrome-chip cc-toggle" onClick={() => setSettings({ view: 'command' })} title="Back to the meme terminal">

@@ -90,8 +90,11 @@ export function TelegramPanel(_: PanelProps<TelegramConfig>) {
         <Check checked={s.telegramSwarm} onChange={(telegramSwarm) => s.set({ telegramSwarm })}>
           <b>Swarm trades on Telegram</b> <span className="muted">— every buy with the coin's chart and why it bought, each new multiple (2×, 5×, 10× …), and every sell with the result</span>
         </Check>
+        <Check checked={s.telegramBots} onChange={(telegramBots) => s.set({ telegramBots })}>
+          <b>Order-flow bot trades on Telegram</b> <span className="muted">— each entry and why, when the trade is safe, each exit with its result, and any failure (Hyperliquid or any exchange)</span>
+        </Check>
         <Check checked={s.swarmDesktopAlerts} onChange={(swarmDesktopAlerts) => s.set({ swarmDesktopAlerts })}>
-          <b>Pop-up and sound here</b> <span className="muted">— when the swarm buys or closes a trade, on this computer too</span>
+          <b>Pop-up and sound here</b> <span className="muted">— when the swarm or a bot opens or closes a trade, on this computer too</span>
         </Check>
         <label className="check">
           <input type="checkbox" checked={s.telegramCommands} disabled={!chatId} onChange={(e) => s.set({ telegramCommands: e.target.checked })} /> Answer <span className="mono">/price</span>,{' '}
