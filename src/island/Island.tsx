@@ -171,7 +171,7 @@ export function Island() {
       if (trades.length) lastTrade.current = trades[trades.length - 1].time;
       const avg = inf.avgUsd ?? 0;
       const boats = fresh
-        .map((t) => ({ buy: t.side === 'buy', usd: t.price * t.qty }))
+        .map((t) => ({ buy: t.side === 'buy', usd: t.price * t.qty, price: t.price, qty: t.qty, time: t.time }))
         .filter((b) => b.usd >= avg * 1.5)
         .sort((a, b) => b.usd - a.usd)
         .slice(0, 3);
@@ -191,6 +191,11 @@ export function Island() {
         ridge,
         vol: wave.realized,
         boats,
+        tape: {
+          buyUsd: last60.reduce((a, t) => a + (t.side === 'buy' ? t.price * t.qty : 0), 0),
+          sellUsd: last60.reduce((a, t) => a + (t.side === 'sell' ? t.price * t.qty : 0), 0),
+        },
+        moves: inf.rets,
         tags: {
           exchange: spread !== null ? `spread ${spread.toFixed(1)} bps` : '',
           fields: inf.poc !== null ? `POC ${fmt(inf.poc)}` : '',
@@ -349,7 +354,7 @@ function Reading({ sel, info, g, feed }: { sel: Place; info: Info | null; g: Gau
         {['1 min', '5 min', '15 min'].map((h, k) => (
           <Row key={h} k={`Move over ${h}`} v={`${(i.rets[k] ?? 0) >= 0 ? '+' : ''}${(i.rets[k] ?? 0).toFixed(1)} bps`} tone={(i.rets[k] ?? 0) >= 0 ? 'up' : 'down'} />
         ))}
-        <p className="muted">The beam turns faster, and the sea runs higher, as the market gets wilder.</p>
+        <p className="muted">The three rings on the tower are the 1, 5 and 15-minute moves (top is the fastest): green up, red down, brighter for bigger. The beam turns faster and warms to red, the sea runs higher, and clouds and rain gather as the market gets wilder; a hard 1-minute move brings lightning. While you are here the beam follows your pointer.</p>
       </div>
     );
   if (sel === 'harbor')
@@ -359,7 +364,7 @@ function Reading({ sel, info, g, feed }: { sel: Place; info: Info | null; g: Gau
         <Row k="Buying" v={i.buy1 !== null ? `${Math.round(i.buy1 * 100)}%` : '—'} tone={i.buy1 !== null ? (i.buy1 >= 0.5 ? 'up' : 'down') : ''} />
         <Row k="Average trade" v={i.avgUsd !== null ? `$${i.avgUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—'} />
         {i.biggest && <Row k="Biggest, 15 min" v={`${i.biggest.side === 'buy' ? 'BUY' : 'SELL'} $${(i.biggest.price * i.biggest.qty).toLocaleString('en-US', { maximumFractionDigits: 0 })} · ${clock(i.biggest.time)}`} tone={i.biggest.side === 'buy' ? 'up' : 'down'} />}
-        <p className="muted">Every big trade sails in as a boat: gold lights for buyers, red for sellers, bigger boats for bigger trades.</p>
+        <p className="muted">Every big trade sails in as a boat, bigger for bigger trades: gold sails moor west of the pier (buyers), red sails east (sellers), and the crane swings the cargo ashore. The crates in the yard are the last minute's buying (west) and selling (east); the buoys light green while buyers lead, red while sellers do. Hover a boat for its trade.</p>
       </div>
     );
   return (

@@ -14,8 +14,10 @@
 //                 asks orange), each tower as tall as the depth at its level
 //   the Fields    terraced crops that grow with the volume traded at each
 //                 price; the busiest row (the point of control) glows gold
-//   the Harbor    big trades sail in as lit boats (gold buys, red sells)
-//   the Lighthouse its beam turns faster, and the sea runs higher, as
+//   the Harbor    big trades sail in (gold sails buy, red sell), a crane unloads
+//                 them, crates in the yard are the minute's buying and selling
+//   the Lighthouse rings for the 1/5/15-minute moves; the beam turns faster, the
+//                 weather turns stormy (rain, lightning on hard moves) as
 //                 volatility rises
 //
 // Hover anything to peek, click it to fly there (its reading floats beside it);
@@ -77,9 +79,20 @@ export interface IslandFrame {
   /** realised volatility, a year (0.6 = 60 %) */
   vol: number | null;
   /** the biggest trades of the last second, for the harbour */
-  boats: { buy: boolean; usd: number }[];
+  boats: IslandBoat[];
+  /** dollars bought and sold in the last minute (the harbour's yard) */
+  tape: { buyUsd: number; sellUsd: number };
+  /** the 1, 5 and 15-minute moves in bps (the lighthouse's rings) */
+  moves: number[];
   /** one line under each place's name */
   tags: Partial<Record<Place, string>>;
+}
+export interface IslandBoat {
+  buy: boolean;
+  usd: number;
+  price: number;
+  qty: number;
+  time: number;
 }
 export interface Peek {
   x: number;
@@ -126,7 +139,7 @@ const SITES = {
   council: new THREE.Vector3(0, 0, -14.6),
   exchange: new THREE.Vector3(-15.5, 0, -2),
   fields: new THREE.Vector3(15.5, 0, -3),
-  harbor: new THREE.Vector3(9, 0, 15.5),
+  harbor: new THREE.Vector3(17.2, 0, 13.6),
   lighthouse: new THREE.Vector3(-17, 0, 11),
 };
 const PODIUM = 2.9; // the council's podium, in front of the hall
@@ -135,6 +148,7 @@ const FLAT: [THREE.Vector3, number][] = [
   [SITES.exchange, 4.6],
   [SITES.fields, 4.4],
   [SITES.lighthouse, 2.2],
+  [new THREE.Vector3(17.2, 0, 12.6), 3.0],
 ];
 
 /** The island's height at x, z (world units; the sea is 0). */
@@ -211,10 +225,18 @@ function glowPoints(scale: number) {
 
 interface Minion {
   id: string;
+  name: string;
   group: THREE.Group;
-  body: THREE.Mesh;
-  eye: THREE.Mesh;
+  rig: THREE.Group;
+  head: THREE.Group;
+  armL: THREE.Group;
+  armR: THREE.Group;
+  stripe: THREE.Mesh;
+  bulb: THREE.Mesh;
+  jet: THREE.Mesh;
   arc: THREE.Mesh;
+  pulse: THREE.Mesh;
+  face: { ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; key: string };
   home: THREE.Vector3;
   target: THREE.Vector3;
   hue: THREE.Color;
@@ -222,6 +244,11 @@ interface Minion {
   tag: HTMLDivElement;
   bubble: HTMLDivElement;
   hop: number;
+  pose: string;
+  poseUntil: number;
+  /** how it voted on the debate in progress: for, against, abstain, veto */
+  stance: string;
+  blink: number;
 }
 interface Boat {
   mesh: THREE.Group;
@@ -229,6 +256,24 @@ interface Boat {
   to: THREE.Vector3;
   t: number;
   dur: number;
+  trade: IslandBoat;
+  docked: boolean;
+}
+interface Link {
+  sparks: THREE.Points;
+  line: THREE.Line;
+  from: () => THREE.Vector3;
+  to: () => THREE.Vector3;
+  born: number;
+  until: number;
+  untilVerdict: boolean;
+  color: THREE.Color;
+}
+const esc = (x: string) => x.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+/** a vote line starts with its mark: ✓ for, ✗ against, – abstain, ⛔ veto */
+export function stanceOf(text: string): string {
+  const c = text.trim()[0];
+  return c === '✓' ? 'for' : c === '✗' ? 'against' : c === '⛔' ? 'veto' : 'abstain';
 }
 
 export class Island {
@@ -263,6 +308,21 @@ export class Island {
   private speaking: { i: number; until: number } | null = null;
   private running = false;
   private boats: Boat[] = [];
+  private crates!: { mesh: THREE.InstancedMesh; buy: number; sell: number; shown: Float32Array };
+  private crane!: { jib: THREE.Group; hook: THREE.Mesh; aim: number; busy: number; buy?: boolean };
+  private buoys: THREE.Group[] = [];
+  private floaters: { el: HTMLDivElement; p: THREE.Vector3; t0: number }[] = [];
+  private bands: THREE.Mesh[] = [];
+  private lantern!: THREE.Mesh;
+  private beamMat!: THREE.ShaderMaterial;
+  private lampLight!: THREE.PointLight;
+  private beamAim: number | null = null;
+  private storm!: { clouds: THREE.Group; puff: THREE.MeshStandardMaterial; rain: THREE.Points; bolt: THREE.Line; flash: THREE.PointLight; level: number; strike: number; nextStrike: number };
+  private links: Link[] = [];
+  private lastSail = 0;
+  private debate: { proposer: number } | null = null;
+  private clearStances = 0;
+  private spot!: THREE.Mesh;
   private boatPool: THREE.Group[] = [];
   private picks: THREE.Object3D[] = [];
   private frame: IslandFrame | null = null;
@@ -351,7 +411,9 @@ export class Island {
         .replace('#include <common>', '#include <common>\nuniform float uTime; uniform float uAmp;')
         .replace('#include <begin_vertex>', `#include <begin_vertex>
           float w = sin(position.x * 0.32 + uTime * 0.9) * 0.5 + sin(position.z * 0.41 + uTime * 1.2) * 0.35 + sin((position.x - position.z) * 0.9 + uTime * 2.0) * 0.15;
-          transformed.y += w * uAmp;`);
+          // calm inside the island (the lake), full swell offshore
+          float e = length(vec2(position.x / 30.0, position.z / 21.0));
+          transformed.y += w * uAmp * smoothstep(0.75, 1.08, e);`);
     };
     const sea = new THREE.Mesh(seaGeo, this.seaMat);
     sea.userData.peek = 'sea';
@@ -391,6 +453,21 @@ export class Island {
     this.buildHarbor();
     this.buildLighthouse();
     this.buildCouncil();
+    // the stage light that falls on whoever is speaking
+    this.spot = new THREE.Mesh(
+      new THREE.ConeGeometry(0.5, 2.6, 32, 1, true),
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: { uColor: { value: new THREE.Color(1, 1, 1) } },
+        vertexShader: 'varying float vY; void main(){ vY = position.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        fragmentShader: 'varying float vY; uniform vec3 uColor; void main(){ float a = smoothstep(1.3, -1.3, vY); gl_FragColor = vec4(mix(uColor, vec3(1.0), 0.4), 0.16 * a * a); }',
+      }),
+    );
+    this.spot.visible = false;
+    this.scene.add(this.spot);
 
     el.addEventListener('pointermove', this.onMove);
     el.addEventListener('pointerdown', this.onDown);
@@ -402,6 +479,8 @@ export class Island {
     this.ro.observe(host);
     this.resize();
     this.raf = requestAnimationFrame(this.loop);
+    // development only: lets the visual checks reach the scene
+    if (import.meta.env.DEV) (window as unknown as { __island?: Island }).__island = this;
   }
 
   private tag(cls: string) {
@@ -588,51 +667,249 @@ export class Island {
 
   private buildHarbor() {
     const at = SITES.harbor;
-    // a pier from the beach out over the water
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.18, 6.5), new THREE.MeshStandardMaterial({ color: 0x5a4430, roughness: 0.9 }));
-    pier.position.set(at.x, 0.35, at.z + 1.5);
-    this.scene.add(pier);
-    for (let k = 0; k < 6; k++)
+    const wood = new THREE.MeshStandardMaterial({ color: 0x6a4e34, roughness: 0.85 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.9 });
+    // a pier from the beach out to sea, with a T-head where the boats moor
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.12, 6.4), wood);
+    deck.position.set(at.x, 0.62, at.z + 3.0);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.12, 1.0), wood);
+    head.position.set(at.x, 0.62, at.z + 6.4);
+    this.scene.add(deck, head);
+    for (let k = 0; k < 7; k++)
       for (const s of [-1, 1]) {
-        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0x3a2a1c }));
-        post.position.set(at.x + s * 0.5, -0.1, at.z - 1.3 + k * 1.15);
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.8, 6), dark);
+        post.position.set(at.x + s * 0.55, -0.2, at.z + 0.6 + k * 0.95);
         this.scene.add(post);
       }
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffd28a }));
-    lamp.position.set(at.x, 1.3, at.z + 4.6);
-    const lampPost = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1, 6), new THREE.MeshStandardMaterial({ color: 0x222 }));
-    lampPost.position.set(at.x, 0.8, at.z + 4.6);
-    this.scene.add(lamp, lampPost);
-    // a pool of boats
-    for (let k = 0; k < 24; k++) {
+    for (const s of [-1, 1]) {
+      const lampPost = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0x1e232c }));
+      lampPost.position.set(at.x + s * 1.9, 1.2, at.z + 6.6);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffd28a }));
+      lamp.position.set(at.x + s * 1.9, 1.8, at.z + 6.6);
+      this.scene.add(lampPost, lamp);
+    }
+    const glow = new THREE.PointLight(0xffc27a, 4, 9, 1.6);
+    glow.position.set(at.x, 2.2, at.z + 5.5);
+    this.scene.add(glow);
+    // buoys at the harbour mouth: their lights say who is winning the tape
+    for (const s of [-1, 1]) {
+      const g = new THREE.Group();
+      const float = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.4, 10), new THREE.MeshStandardMaterial({ color: 0xc8303a, roughness: 0.6 }));
+      const top = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      top.position.y = 0.42;
+      top.name = 'light';
+      g.add(float, top);
+      g.position.set(at.x + s * 3.4, 0.1, at.z + 9.5);
+      this.scene.add(g);
+      this.buoys.push(g);
+    }
+    // the yard: crates of what was bought (west) and sold (east) in the last minute
+    const crate = new THREE.BoxGeometry(0.42, 0.42, 0.42);
+    const mesh = new THREE.InstancedMesh(crate, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, emissive: 0x111111 }), 24);
+    const c = new THREE.Color();
+    for (let i = 0; i < 24; i++) mesh.setColorAt(i, i < 12 ? c.set('#ffb54a') : c.set('#d93448'));
+    this.scene.add(mesh);
+    this.crates = { mesh, buy: 0, sell: 0, shown: new Float32Array(24) };
+    for (const [side, dx] of [['buy', -2.6], ['sell', 2.6]] as [string, number][]) {
+      const yard = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 1.2, 10), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+      yard.position.set(at.x + dx, landHeight(at.x + dx, at.z - 1.2) + 0.6, at.z - 1.2);
+      yard.userData = { peek: 'yard', side, first: true };
+      this.scene.add(yard);
+      this.picks.push(yard);
+    }
+    // a crane at the root of the pier swings each boat's cargo ashore
+    const crane = new THREE.Group();
+    const cy = landHeight(at.x + 1.4, at.z - 0.2);
+    crane.position.set(at.x + 1.4, cy, at.z - 0.2);
+    const steel = new THREE.MeshStandardMaterial({ color: 0xffb020, roughness: 0.5, metalness: 0.3 });
+    const mast = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.8, 0.18), steel);
+    mast.position.y = 1.4;
+    const jib = new THREE.Group();
+    jib.position.y = 2.75;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 3.0), steel);
+    arm.position.z = 1.0;
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.4), new THREE.MeshStandardMaterial({ color: 0x2a2f3a }));
+    counter.position.z = -0.7;
+    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.4, 4), new THREE.MeshBasicMaterial({ color: 0x222831 }));
+    cable.position.set(0, -0.7, 2.3);
+    const hook = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.MeshStandardMaterial({ color: 0xffb54a, emissive: 0x442200 }));
+    hook.position.set(0, -1.5, 2.3);
+    hook.name = 'cargo';
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3030 }));
+    tip.position.set(0, 0.12, 2.5);
+    jib.add(arm, counter, cable, hook, tip);
+    crane.add(mast, jib);
+    this.scene.add(crane);
+    this.crane = { jib, hook, aim: 0, busy: 0 };
+    // a pool of boats: hull, cabin, mast and a sail in the trade's colour, a wake behind
+    const hullShape = new THREE.Shape();
+    hullShape.moveTo(-0.22, -0.5);
+    hullShape.lineTo(0.22, -0.5);
+    hullShape.quadraticCurveTo(0.27, 0.15, 0, 0.58);
+    hullShape.quadraticCurveTo(-0.27, 0.15, -0.22, -0.5);
+    const hullGeo = new THREE.ExtrudeGeometry(hullShape, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 2 });
+    hullGeo.rotateX(Math.PI / 2);
+    hullGeo.translate(0, 0.16, 0);
+    const sailShape = new THREE.Shape();
+    sailShape.moveTo(0, 0);
+    sailShape.lineTo(0, 0.85);
+    sailShape.lineTo(0.5, 0.05);
+    sailShape.lineTo(0, 0);
+    const sailGeo = new THREE.ShapeGeometry(sailShape);
+    sailGeo.rotateY(Math.PI / 2);
+    const wakeMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uTime: this.seaUniforms.uTime, uOn: { value: 1 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: `varying vec2 vUv; uniform float uTime; uniform float uOn;
+        void main(){
+          // a soft V of foam behind the boat: narrow at the stern, wider and fainter behind
+          float d = vUv.y;
+          float hw = 0.08 + 0.4 * d;
+          float x = abs(vUv.x - 0.5);
+          float rim = smoothstep(hw, hw * 0.55, x) * smoothstep(hw * 0.1, hw * 0.5, x);
+          float a = rim * pow(1.0 - d, 1.6) * (0.85 + 0.15 * sin(d * 18.0 - uTime * 6.0));
+          gl_FragColor = vec4(vec3(0.85, 0.95, 1.0), a * 0.35 * uOn); }`,
+    });
+    for (let k = 0; k < 16; k++) {
       const b = new THREE.Group();
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.95), new THREE.MeshStandardMaterial({ color: 0xd8dde6, roughness: 0.6 }));
-      const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.34), new THREE.MeshStandardMaterial({ color: 0x2a3446 }));
-      cabin.position.set(0, 0.15, -0.1);
-      const light = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffb54a }));
-      light.position.set(0, 0.32, -0.1);
+      const hull = new THREE.Mesh(hullGeo, new THREE.MeshStandardMaterial({ color: 0xf2f4f8, roughness: 0.5 }));
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.16, 0.3), new THREE.MeshStandardMaterial({ color: 0x24324a, roughness: 0.4 }));
+      cabin.position.set(0, 0.24, -0.18);
+      const mastM = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.95, 6), new THREE.MeshStandardMaterial({ color: 0x8a6a48 }));
+      mastM.position.set(0, 0.62, 0.08);
+      const sail = new THREE.Mesh(sailGeo, new THREE.MeshStandardMaterial({ color: 0xffc04d, emissive: 0xffc04d, emissiveIntensity: 0.35, side: THREE.DoubleSide, roughness: 0.7 }));
+      sail.position.set(0, 0.2, 0.1);
+      sail.name = 'sail';
+      const light = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffb54a }));
+      light.position.set(0, 1.12, 0.08);
       light.name = 'light';
-      b.add(hull, cabin, light);
+      const wake = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.7), wakeMat.clone());
+      (wake.material as THREE.ShaderMaterial).uniforms.uTime = this.seaUniforms.uTime;
+      wake.rotation.x = -Math.PI / 2;
+      wake.position.set(0, 0.04, -1.25);
+      wake.name = 'wake';
+      const hitBox = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.3, 1.3), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+      hitBox.position.y = 0.5;
+      hitBox.userData = { peek: 'boat', first: true };
+      b.add(hull, cabin, mastM, sail, light, wake, hitBox);
       b.visible = false;
       this.scene.add(b);
       this.boatPool.push(b);
+      this.picks.push(hitBox);
     }
-    this.hit(new THREE.Vector3(at.x, 0, at.z + 1.5), 'harbor', 3.4, 2.5);
+    this.hit(new THREE.Vector3(at.x, 0.6, at.z + 3.2), 'harbor', 3.2, 2.5);
   }
 
-  private sail(buy: boolean, usd: number) {
+  private sail(trade: IslandBoat) {
     const b = this.boatPool.find((x) => !x.visible);
-    if (!b) return;
+    if (!b || this.boats.length >= 6) return;
     const at = SITES.harbor;
-    const a = Math.PI * 0.5 + (Math.random() - 0.5) * 1.6;
-    const from = new THREE.Vector3(at.x + Math.cos(a) * 32, 0.12, at.z + Math.sin(a) * 26);
-    const to = new THREE.Vector3(at.x + (Math.random() > 0.5 ? 0.9 : -0.9), 0.12, at.z + 1 + Math.random() * 3.2);
-    const s = clamp(0.7 + Math.log10(Math.max(10, usd)) * 0.12, 0.8, 1.6);
+    // buyers moor on the west of the pier, sellers on the east (as the book: bids west, asks east)
+    const side = trade.buy ? -1 : 1;
+    const slot = this.boats.filter((x) => x.trade.buy === trade.buy).length % 4;
+    const to = new THREE.Vector3(at.x + side * (0.95 + (slot % 2) * 0.0), 0.12, at.z + 2.0 + slot * 1.15);
+    if (slot === 3) to.set(at.x + side * 2.6, 0.12, at.z + 7.4);
+    const a = Math.PI * 0.5 + side * (0.25 + Math.random() * 0.45);
+    const from = new THREE.Vector3(at.x + Math.cos(a) * 30, 0.12, at.z + Math.sin(a) * 26);
+    const s = clamp(0.75 + Math.log10(Math.max(10, trade.usd)) * 0.1, 0.85, 1.6);
     b.scale.setScalar(s);
-    ((b.getObjectByName('light') as THREE.Mesh).material as THREE.MeshBasicMaterial).color.set(buy ? '#ffb54a' : '#ff4a6a');
+    const tint = new THREE.Color(trade.buy ? '#ffc04d' : '#ff4a6a');
+    const sail = (b.getObjectByName('sail') as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    sail.color.copy(tint);
+    sail.emissive.copy(tint);
+    ((b.getObjectByName('light') as THREE.Mesh).material as THREE.MeshBasicMaterial).color.copy(tint);
+    for (const ch of b.children) if (ch.userData.peek === 'boat') ch.userData.trade = trade;
     b.visible = true;
     b.position.copy(from);
-    this.boats.push({ mesh: b, from, to, t: 0, dur: 6 + Math.random() * 2 });
+    b.rotation.set(0, Math.atan2(to.x - from.x, to.z - from.z), 0);
+    this.boats.push({ mesh: b, from, to, t: 0, dur: 7 + Math.random() * 2, trade, docked: false });
+  }
+
+  private animateHarbor(dt: number, t: number) {
+    const at = SITES.harbor;
+    // boats sail in with a wake, turn alongside, unload, and leave
+    this.boats = this.boats.filter((b) => {
+      b.t += dt / b.dur;
+      const k = Math.min(1, b.t);
+      const e = 1 - (1 - k) ** 2.2;
+      const prev = b.mesh.position.clone();
+      b.mesh.position.lerpVectors(b.from, b.to, e);
+      b.mesh.position.y = 0.1 + Math.sin(t * 2.2 + b.from.x) * 0.05 + this.seaUniforms.uAmp.value * 0.25;
+      const v = Math.hypot(b.mesh.position.x - prev.x, b.mesh.position.z - prev.z) / Math.max(dt, 1e-3);
+      if (k < 0.97) {
+        const ang = Math.atan2(b.to.x - b.mesh.position.x, b.to.z - b.mesh.position.z);
+        b.mesh.rotation.y += (((ang - b.mesh.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * (1 - Math.exp(-dt * 3));
+      } else {
+        // moored: bow toward the shore
+        b.mesh.rotation.y += (((Math.PI - b.mesh.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * (1 - Math.exp(-dt * 2));
+      }
+      b.mesh.rotation.z = Math.sin(t * 1.7 + b.from.z) * 0.06 * (1 + this.seaUniforms.uAmp.value);
+      const wake = b.mesh.getObjectByName('wake') as THREE.Mesh;
+      (wake.material as THREE.ShaderMaterial).uniforms.uOn.value = clamp((v - 0.3) / 3, 0, 1);
+      if (!b.docked && k >= 1) {
+        b.docked = true;
+        this.crane.aim = Math.atan2(b.to.x - (at.x + 1.4), b.to.z - (at.z - 0.2));
+        this.crane.busy = 2.2;
+        this.crane.buy = b.trade.buy;
+        const usd = b.trade.usd >= 1e6 ? `$${(b.trade.usd / 1e6).toFixed(2)}M` : b.trade.usd >= 1e3 ? `$${(b.trade.usd / 1e3).toFixed(1)}k` : `$${b.trade.usd.toFixed(0)}`;
+        const el = this.tag(`island-float ${b.trade.buy ? 'buy' : 'sell'}`);
+        el.textContent = `${b.trade.buy ? 'BOUGHT' : 'SOLD'} ${usd}`;
+        this.floaters.push({ el, p: b.to.clone().add(new THREE.Vector3(0, 1.4, 0)), t0: performance.now() });
+      }
+      if (b.t > 2.2) {
+        b.mesh.visible = false;
+        return false;
+      }
+      if (b.t > 1.8) b.mesh.position.y -= (b.t - 1.8) * 1.2; // slips away under the night
+      return true;
+    });
+    // the crane swings to the boat, then to the yard
+    const C = this.crane;
+    C.busy = Math.max(0, C.busy - dt);
+    const yard = Math.atan2((C.buy ? -2.6 : 2.6) - 1.4, -1.2 + 0.2);
+    const goal = C.busy > 1.1 ? C.aim : C.busy > 0 ? yard : Math.sin(t * 0.25) * 0.4 + Math.PI;
+    C.jib.rotation.y += (((goal - C.jib.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * (1 - Math.exp(-dt * 2.2));
+    C.hook.visible = C.busy > 0 && C.busy < 1.6;
+    ((C.hook.material as THREE.MeshStandardMaterial).color as THREE.Color).set(C.buy ? '#ffb54a' : '#ff4a6a');
+    // crates: as many as the minute's buying and selling, stacked 3 × 2, two high
+    const M = this.crates;
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < 24; i++) {
+      const buy = i < 12;
+      const k = i % 12;
+      const want = k < (buy ? M.buy : M.sell) ? 1 : 0;
+      M.shown[i] += (want - M.shown[i]) * (1 - Math.exp(-dt * 4));
+      const s = M.shown[i] < 0.02 ? 0.0001 : M.shown[i];
+      const x = at.x + (buy ? -2.6 : 2.6) + ((k % 3) - 1) * 0.46;
+      const z = at.z - 1.2 + (Math.floor(k / 3) % 2) * 0.46 - 0.23;
+      const y = landHeight(at.x + (buy ? -2.6 : 2.6), at.z - 1.2) + 0.21 + Math.floor(k / 6) * 0.44;
+      m.makeScale(s, s, s).setPosition(x, y + (1 - s) * 0.6, z);
+      M.mesh.setMatrixAt(i, m);
+    }
+    M.mesh.instanceMatrix.needsUpdate = true;
+    // buoys bob and blink: green while buyers lead, red while sellers lead
+    const lead = M.buy + M.sell > 0 ? (M.buy - M.sell) / (M.buy + M.sell) : 0;
+    for (const [i, g] of this.buoys.entries()) {
+      g.position.y = 0.05 + Math.sin(t * 1.9 + i) * 0.08 * (1 + this.seaUniforms.uAmp.value * 2);
+      g.rotation.z = Math.sin(t * 1.3 + i * 2) * 0.12;
+      const l = (g.getObjectByName('light') as THREE.Mesh).material as THREE.MeshBasicMaterial;
+      l.color.set(lead > 0.15 ? '#3dff9a' : lead < -0.15 ? '#ff4a6a' : '#fff4d0').multiplyScalar(0.4 + 0.6 * (Math.sin(t * 4 + i * 1.5) > 0 ? 1 : 0.2));
+    }
+    // floating "BOUGHT $x" tags rise and fade over the pier
+    const now = performance.now();
+    this.floaters = this.floaters.filter((fl) => {
+      const k = (now - fl.t0) / 2600;
+      if (k >= 1) {
+        fl.el.remove();
+        return false;
+      }
+      this.place(fl.el, fl.p.clone().add(new THREE.Vector3(0, k * 1.2, 0)));
+      fl.el.style.opacity = String(k < 0.15 ? k / 0.15 : 1 - Math.max(0, k - 0.6) / 0.4);
+      return true;
+    });
   }
 
   private buildLighthouse() {
@@ -640,38 +917,138 @@ export class Island {
     at.y = landHeight(at.x, at.z);
     const g = new THREE.Group();
     g.position.copy(at);
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.5, 3.4, 16), new THREE.MeshStandardMaterial({ color: 0xeef2f7, roughness: 0.5 }));
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.52, 3.4, 20), new THREE.MeshStandardMaterial({ color: 0xeef2f7, roughness: 0.5 }));
     tower.position.y = 1.7;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.43, 0.46, 0.6, 16), new THREE.MeshStandardMaterial({ color: 0xc8303a, roughness: 0.5 }));
-    band.position.y = 1.2;
-    const band2 = band.clone();
-    band2.position.y = 2.6;
-    band2.scale.setScalar(0.85);
-    const room = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.45, 16), new THREE.MeshBasicMaterial({ color: 0xfff1b8 }));
-    room.position.y = 3.65;
+    // three rings of light up the tower: the 15, 5 and 1-minute moves (the top is the fastest)
+    this.bands = [];
+    for (let k = 0; k < 3; k++) {
+      const y = 0.75 + k * 0.85;
+      const r = 0.52 - (y / 3.4) * 0.2 + 0.03;
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(r, r + 0.02, 0.22, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0x334055, side: THREE.DoubleSide }));
+      band.position.y = y;
+      band.userData = { peek: 'band', k: 2 - k, first: true };
+      g.add(band);
+      this.picks.push(band);
+      this.bands.push(band);
+    }
+    const gallery = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.06, 20), new THREE.MeshStandardMaterial({ color: 0x2a2f3a }));
+    gallery.position.y = 3.4;
+    this.lantern = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.45, 16), new THREE.MeshBasicMaterial({ color: 0xfff1b8 }));
+    this.lantern.position.y = 3.65;
     const roof = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.45, 16), new THREE.MeshStandardMaterial({ color: 0x2a2f3a }));
     roof.position.y = 4.1;
     this.beam = new THREE.Group();
     this.beam.position.y = 3.65;
-    // a beam that fades out with distance (no hard end)
-    const beamMat = new THREE.ShaderMaterial({
+    // a beam that fades out with distance (no hard end); its colour warms to red in a storm
+    this.beamMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
+      uniforms: { uColor: { value: new THREE.Color(1, 0.94, 0.7) } },
       vertexShader: 'varying float vY; void main(){ vY = position.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'varying float vY; void main(){ float a = smoothstep(-5.5, 4.5, vY); gl_FragColor = vec4(1.0, 0.94, 0.7, 0.2 * a * a); }',
+      fragmentShader: 'varying float vY; uniform vec3 uColor; void main(){ float a = smoothstep(-6.5, 5.5, vY); gl_FragColor = vec4(uColor, 0.22 * a * a); }',
     });
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.4, 11, 24, 1, true), beamMat);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.5, 13, 24, 1, true), this.beamMat);
     cone.rotation.z = Math.PI / 2;
-    cone.position.x = 5.5;
+    cone.position.x = 6.5;
     this.beam.add(cone);
-    g.add(tower, band, band2, room, roof, this.beam);
-    const l = new THREE.PointLight(0xffe7a0, 3, 8, 1.5);
-    l.position.y = 3.7;
-    g.add(l);
+    g.add(tower, gallery, this.lantern, roof, this.beam);
+    this.lampLight = new THREE.PointLight(0xffe7a0, 3, 9, 1.5);
+    this.lampLight.position.y = 3.7;
+    g.add(this.lampLight);
     this.scene.add(g);
+    // the weather over the lighthouse: clouds and rain gather as volatility rises
+    const storm = new THREE.Group();
+    storm.position.set(at.x, at.y + 7.5, at.z);
+    const puffMat = new THREE.MeshStandardMaterial({ color: 0x9aa6bd, roughness: 1, flatShading: true, transparent: true, opacity: 0, emissive: 0x1c2436, depthWrite: false });
+    for (let k = 0; k < 22; k++) {
+      const p = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45 + hash(k, 2) * 0.55, 1), puffMat);
+      p.position.set((hash(k, 5) - 0.5) * 8, (hash(k, 8) - 0.5) * 0.7, (hash(k, 11) - 0.5) * 6);
+      p.scale.set(1.4, 0.55, 1);
+      storm.add(p);
+    }
+    const n = 420;
+    const rp = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) rp.set([(hash(i, 1.7) - 0.5) * 12, hash(i, 3.1) * 7.5, (hash(i, 9.2) - 0.5) * 9], i * 3);
+    const rg = new THREE.BufferGeometry();
+    rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+    const rain = new THREE.Points(rg, new THREE.PointsMaterial({ color: 0x9fc4ff, size: 0.06, transparent: true, opacity: 0, depthWrite: false }));
+    rain.position.set(at.x, at.y, at.z);
+    const bolt = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xe8f0ff, transparent: true, opacity: 0 }));
+    const flash = new THREE.PointLight(0xcfe0ff, 0, 30, 1.2);
+    flash.position.set(at.x, at.y + 6, at.z);
+    this.scene.add(storm, rain, bolt, flash);
+    this.storm = { clouds: storm, puff: puffMat, rain, bolt, flash, level: 0, strike: 0, nextStrike: 0 };
     this.hit(at, 'lighthouse', 1.4, 4.4);
+  }
+
+  /** a lightning strike near the lighthouse: the market just moved hard */
+  private strike() {
+    const S = this.storm;
+    const at = SITES.lighthouse;
+    const y0 = landHeight(at.x, at.z);
+    const x = at.x + (Math.random() - 0.5) * 6;
+    const z = at.z + (Math.random() - 0.5) * 4;
+    const pts: THREE.Vector3[] = [];
+    for (let k = 0; k <= 8; k++) pts.push(new THREE.Vector3(x + (k && k < 8 ? (Math.random() - 0.5) * 0.9 : 0), y0 + 7.2 - (k / 8) * 7.2, z + (k && k < 8 ? (Math.random() - 0.5) * 0.6 : 0)));
+    S.bolt.geometry.dispose();
+    S.bolt.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+    S.strike = 0.35;
+  }
+
+  private animateLighthouse(dt: number, t: number) {
+    const f = this.frame;
+    const S = this.storm;
+    const vn = f?.vol !== null && f?.vol !== undefined ? clamp((f.vol - 0.2) / 1.0, 0, 1) : 0.2;
+    // the beam: sweeps, or follows your pointer while you visit
+    if (this.selected === 'lighthouse' && this.beamAim !== null) {
+      this.beam.rotation.y += (((this.beamAim - this.beam.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * (1 - Math.exp(-dt * 5));
+    } else this.beam.rotation.y += dt * this.beamSpeed;
+    const calm = new THREE.Color(1, 0.94, 0.7);
+    const wild = new THREE.Color(1, 0.35, 0.22);
+    (this.beamMat.uniforms.uColor.value as THREE.Color).copy(calm).lerp(wild, smooth(0.45, 0.95, vn));
+    (this.lantern.material as THREE.MeshBasicMaterial).color.copy(calm).lerp(wild, smooth(0.45, 0.95, vn)).multiplyScalar(0.85 + 0.15 * Math.sin(t * 6));
+    this.lampLight.color.copy((this.lantern.material as THREE.MeshBasicMaterial).color);
+    // the move rings
+    const moves = f?.moves ?? [0, 0, 0];
+    const scale = Math.max(12, ...moves.map(Math.abs));
+    this.bands.forEach((b) => {
+      const v = moves[b.userData.k as number] ?? 0;
+      const k = Math.min(1, Math.abs(v) / scale);
+      const col = v >= 0 ? new THREE.Color('#3dff9a') : new THREE.Color('#ff4a6a');
+      (b.material as THREE.MeshBasicMaterial).color.copy(new THREE.Color('#2a3448')).lerp(col, 0.25 + 0.75 * k).multiplyScalar(0.7 + 0.5 * k + 0.15 * Math.sin(t * 3 + (b.userData.k as number)));
+    });
+    // the weather follows volatility; a hard 1-minute move brings lightning
+    S.level += (smooth(0.35, 0.9, vn) - S.level) * (1 - Math.exp(-dt * 0.8));
+    S.puff.opacity = S.level * 0.7;
+    S.clouds.visible = S.level > 0.02;
+    S.clouds.rotation.y += dt * 0.05;
+    S.clouds.position.y = landHeight(SITES.lighthouse.x, SITES.lighthouse.z) + 7.5 + Math.sin(t * 0.4) * 0.2;
+    const rm = S.rain.material as THREE.PointsMaterial;
+    rm.opacity = clamp((S.level - 0.25) * 1.4, 0, 0.8);
+    S.rain.visible = rm.opacity > 0.01;
+    if (S.rain.visible) {
+      const p = S.rain.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        let y = p.getY(i) - dt * 9;
+        if (y < 0) y += 7.5;
+        p.setY(i, y);
+      }
+      p.needsUpdate = true;
+    }
+    const now = performance.now();
+    const hard = Math.abs(moves[0]) >= Math.max(20, scale * 0.9) && Math.abs(moves[0]) >= 20;
+    if (now > S.nextStrike && (hard || (S.level > 0.6 && Math.random() < dt * 0.15))) {
+      this.strike();
+      S.nextStrike = now + 5000;
+    }
+    S.strike = Math.max(0, S.strike - dt);
+    const fl = S.strike > 0 ? (Math.sin(S.strike * 60) > 0 ? 1 : 0.3) * (S.strike / 0.35) : 0;
+    (S.bolt.material as THREE.LineBasicMaterial).opacity = fl;
+    S.bolt.visible = fl > 0;
+    S.flash.intensity = fl * 40;
+    S.puff.emissive.setRGB(0.11 + fl * 0.6, 0.14 + fl * 0.6, 0.21 + fl * 0.6);
   }
 
   private buildCouncil() {
@@ -708,18 +1085,34 @@ export class Island {
     this.hit(new THREE.Vector3(at.x, at.y, at.z), 'council', 4.2, 4.5);
   }
 
-  /** The council's agents, as minions on the plaza. */
+  /** The council's agents: little hovering robots on the plaza. */
   private ensureMinions(agents: IslandAgent[]) {
-    if (this.minions.length === agents.length) return;
+    if (this.minions.length === agents.length && this.minions.every((m, i) => m.id === agents[i].id)) return;
     for (const m of this.minions) {
       this.scene.remove(m.group);
       m.tag.remove();
       m.bubble.remove();
+      m.face.tex.dispose();
     }
     this.picks = this.picks.filter((p) => !p.userData.minion);
     const at = SITES.council.clone();
     at.y = landHeight(at.x, at.z);
     const center = new THREE.Vector3(at.x, at.y + 0.1, at.z + PODIUM);
+    const torsoGeo = new THREE.LatheGeometry(
+      [
+        [0, 0],
+        [0.1, 0.01],
+        [0.17, 0.06],
+        [0.2, 0.16],
+        [0.2, 0.27],
+        [0.17, 0.38],
+        [0.11, 0.44],
+        [0, 0.46],
+      ].map(([x, y]) => new THREE.Vector2(x, y)),
+      28,
+    );
+    const shell = new THREE.MeshStandardMaterial({ color: 0xe9edf5, roughness: 0.28, metalness: 0.35 });
+    const joint = new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.5, metalness: 0.5 });
     this.minions = agents.map((a, i) => {
       const n = agents.length;
       // a half circle behind the podium, facing the island
@@ -727,34 +1120,406 @@ export class Island {
       const home = center.clone().add(new THREE.Vector3(-Math.cos(ang) * 3.0, 0, -Math.sin(ang) * 1.45 + 0.35));
       const hue = new THREE.Color(HUES[i % HUES.length]);
       const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.32, 4, 12), new THREE.MeshStandardMaterial({ color: hue, roughness: 0.45, metalness: 0.1, emissive: hue, emissiveIntensity: 0.15 }));
-      body.position.y = 0.36;
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 14), new THREE.MeshStandardMaterial({ color: 0xf2f4f8, roughness: 0.35 }));
-      head.position.y = 0.78;
-      const visor = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.06), new THREE.MeshBasicMaterial({ color: 0x0a0f1c }));
-      visor.position.set(0, 0.8, 0.15);
-      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.025, 0.065), new THREE.MeshBasicMaterial({ color: hue }));
-      eye.position.set(0, 0.8, 0.155);
-      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.18, 6), new THREE.MeshStandardMaterial({ color: 0xc0c6d0 }));
-      antenna.position.y = 1.0;
-      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshBasicMaterial({ color: hue }));
-      bulb.position.y = 1.1;
-      // the gauge: a thin ring of light on the ground, as full as the reading
+      const rig = new THREE.Group(); // floats and leans; the ground gauge stays put
+      g.add(rig);
+      const torso = new THREE.Mesh(torsoGeo, shell);
+      torso.position.y = 0.2;
+      const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.203, 0.203, 0.045, 28, 1, true), new THREE.MeshStandardMaterial({ color: hue, emissive: hue, emissiveIntensity: 0.6, side: THREE.DoubleSide }));
+      stripe.position.y = 0.42;
+      const core = new THREE.Mesh(new THREE.CircleGeometry(0.05, 20), new THREE.MeshBasicMaterial({ color: hue }));
+      core.position.set(0, 0.5, 0.196);
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.06, 12), joint);
+      neck.position.y = 0.68;
+      const head = new THREE.Group();
+      head.position.y = 0.86;
+      const skull = new THREE.Mesh(new THREE.SphereGeometry(0.19, 28, 20), shell);
+      skull.scale.set(1.12, 0.92, 1);
+      // the face: a screen that shows how it feels about the trade
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const screen = new THREE.Mesh(new THREE.SphereGeometry(0.196, 28, 16, Math.PI / 2 - 0.8, 1.6, Math.PI / 2 - 0.45, 0.9), new THREE.MeshBasicMaterial({ map: tex }));
+      screen.scale.set(1.12, 0.92, 1);
+      const ears = [-1, 1].map((s) => {
+        const e = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.05, 16), new THREE.MeshStandardMaterial({ color: hue, emissive: hue, emissiveIntensity: 0.4 }));
+        e.rotation.z = Math.PI / 2;
+        e.position.x = s * 0.215;
+        return e;
+      });
+      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.16, 6), joint);
+      antenna.position.y = 0.24;
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshBasicMaterial({ color: hue }));
+      bulb.position.y = 0.33;
+      head.add(skull, screen, ...ears, antenna, bulb);
+      // arms on shoulder pivots: they wave, raise a hand to vote for, cross to vote against
+      const arms = [-1, 1].map((s) => {
+        const pivot = new THREE.Group();
+        pivot.position.set(s * 0.215, 0.52, 0);
+        const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.17, 4, 8), shell);
+        upper.position.y = -0.13;
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), new THREE.MeshStandardMaterial({ color: hue, emissive: hue, emissiveIntensity: 0.3 }));
+        hand.position.y = -0.27;
+        pivot.add(upper, hand);
+        return pivot;
+      });
+      // it hovers: a glowing jet under it
+      const jet = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 16, 1, true), new THREE.MeshBasicMaterial({ color: hue, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      jet.rotation.x = Math.PI;
+      jet.position.y = 0.1;
+      rig.add(torso, stripe, core, neck, head, ...arms, jet);
+      // the gauge: a ring of light on the ground, as full as the reading
       const track = new THREE.Mesh(new THREE.RingGeometry(0.33, 0.36, 64), new THREE.MeshBasicMaterial({ color: 0x2a3550, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
       track.rotation.x = -Math.PI / 2;
       track.position.y = 0.02;
       const arc = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.38, 64, 1, Math.PI / 2, 0.01), new THREE.MeshBasicMaterial({ color: hue, side: THREE.DoubleSide }));
       arc.rotation.x = -Math.PI / 2;
       arc.position.y = 0.03;
-      const hitBox = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.3, 10), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+      const pulse = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.42, 48), new THREE.MeshBasicMaterial({ color: hue, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      pulse.rotation.x = -Math.PI / 2;
+      pulse.position.y = 0.04;
+      const hitBox = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 1.3, 10), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
       hitBox.position.y = 0.6;
       hitBox.userData = { place: `agent:${a.id}`, minion: true };
-      g.add(body, head, visor, eye, antenna, bulb, track, arc, hitBox);
+      g.add(track, arc, pulse, hitBox);
       g.position.copy(home);
+      rig.scale.setScalar(1.15);
       this.scene.add(g);
       this.picks.push(hitBox);
-      return { id: a.id, group: g, body, eye, arc, home, target: home.clone(), hue, value: -1, tag: this.tag('island-minion'), bubble: this.tag('island-bubble'), hop: 0 };
+      const m: Minion = {
+        id: a.id,
+        name: a.name,
+        group: g,
+        rig,
+        head,
+        armL: arms[0],
+        armR: arms[1],
+        stripe,
+        bulb,
+        jet,
+        arc,
+        pulse,
+        face: { ctx, tex, key: '' },
+        home,
+        target: home.clone(),
+        hue,
+        value: -1,
+        tag: this.tag('island-minion'),
+        bubble: this.tag('island-bubble'),
+        hop: 0,
+        pose: 'idle',
+        poseUntil: 0,
+        stance: '',
+        blink: 2 + Math.random() * 3,
+      };
+      this.drawFace(m, 'idle', 0);
+      return m;
     });
+  }
+
+  /** the robot's face screen: eyes and a mouth in its colour */
+  private drawFace(m: Minion, mood: string, mouth: number) {
+    const key = `${mood}:${mouth}`;
+    if (m.face.key === key) return;
+    m.face.key = key;
+    const c = m.face.ctx;
+    c.fillStyle = '#060a14';
+    c.fillRect(0, 0, 128, 64);
+    const col = mood === 'sleep' ? '#2c3a55' : mood === 'for' ? '#3dff9a' : mood === 'against' || mood === 'veto' ? '#ff4a6a' : `#${m.hue.getHexString()}`;
+    c.strokeStyle = col;
+    c.fillStyle = col;
+    c.lineWidth = 6;
+    c.lineCap = 'round';
+    c.shadowColor = col;
+    c.shadowBlur = 8;
+    const eye = (x: number) => {
+      c.beginPath();
+      if (mood === 'sleep' || mood === 'blink') {
+        c.moveTo(x - 10, 28);
+        c.lineTo(x + 10, 28);
+      } else if (mood === 'for') {
+        c.moveTo(x - 11, 32);
+        c.quadraticCurveTo(x, 16, x + 11, 32);
+      } else if (mood === 'veto') {
+        c.moveTo(x - 9, 18);
+        c.lineTo(x + 9, 36);
+        c.moveTo(x + 9, 18);
+        c.lineTo(x - 9, 36);
+      } else if (mood === 'abstain') {
+        c.moveTo(x - 11, 27);
+        c.lineTo(x + 11, 27);
+        c.moveTo(x - 5, 33);
+        c.lineTo(x + 5, 33);
+      } else {
+        c.roundRect(x - 8, 16, 16, 22, 7);
+        c.fill();
+        return;
+      }
+      c.stroke();
+    };
+    eye(42);
+    eye(86);
+    if (mood === 'against') {
+      // brows down
+      c.beginPath();
+      c.moveTo(30, 12);
+      c.lineTo(52, 18);
+      c.moveTo(98, 12);
+      c.lineTo(76, 18);
+      c.stroke();
+    }
+    c.beginPath();
+    if (mood === 'talk') {
+      c.roundRect(52, 44, 24, 4 + mouth * 3, 4);
+      c.fill();
+    } else if (mood === 'for') {
+      c.moveTo(52, 46);
+      c.quadraticCurveTo(64, 56, 76, 46);
+      c.stroke();
+    } else if (mood === 'against' || mood === 'veto') {
+      c.moveTo(52, 52);
+      c.quadraticCurveTo(64, 43, 76, 52);
+      c.stroke();
+    } else if (mood !== 'sleep') {
+      c.moveTo(56, 49);
+      c.lineTo(72, 49);
+      c.stroke();
+    }
+    m.face.tex.needsUpdate = true;
+  }
+
+  /** a link of light between two speakers: a stream of sparks along a curve */
+  private link(from: () => THREE.Vector3, to: () => THREE.Vector3, color: string, life: number, untilVerdict: boolean) {
+    const n = 26;
+    const pts = new THREE.BufferGeometry();
+    pts.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    const c = new THREE.Color(color);
+    pts.setAttribute('color', new THREE.BufferAttribute(new Float32Array(Array.from({ length: n }, () => [c.r, c.g, c.b]).flat()), 3));
+    pts.setAttribute('size', new THREE.BufferAttribute(new Float32Array(n).fill(0.55), 1));
+    const sparks = new THREE.Points(pts, glowPoints(220));
+    const line = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(33 * 3), 3)), new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.scene.add(sparks, line);
+    this.links.push({ sparks, line, from, to, born: performance.now(), until: performance.now() + life, untilVerdict, color: c });
+  }
+
+  private animateLinks(t: number, now: number) {
+    const curve = new THREE.QuadraticBezierCurve3();
+    this.links = this.links.filter((L) => {
+      const left = (L.until - now) / 900;
+      if (left <= 0) {
+        this.scene.remove(L.sparks, L.line);
+        L.sparks.geometry.dispose();
+        L.line.geometry.dispose();
+        (L.line.material as THREE.Material).dispose();
+        return false;
+      }
+      const a = L.from();
+      const b = L.to();
+      const mid = a.clone().lerp(b, 0.5);
+      mid.y += 0.8 + a.distanceTo(b) * 0.28;
+      curve.v0.copy(a);
+      curve.v1.copy(mid);
+      curve.v2.copy(b);
+      const grow = Math.min(1, (now - L.born) / 500);
+      const fade = Math.min(1, left);
+      const lp = L.line.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i <= 32; i++) {
+        const p = curve.getPoint((i / 32) * grow);
+        lp.setXYZ(i, p.x, p.y, p.z);
+      }
+      lp.needsUpdate = true;
+      (L.line.material as THREE.LineBasicMaterial).opacity = 0.8 * fade;
+      const sp = L.sparks.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const sz = L.sparks.geometry.getAttribute('size') as THREE.BufferAttribute;
+      for (let i = 0; i < sp.count; i++) {
+        const s = ((i / sp.count + t * 0.55) % 1) * grow;
+        const p = curve.getPoint(s);
+        sp.setXYZ(i, p.x, p.y, p.z);
+        sz.setX(i, (0.6 + 0.7 * Math.sin(s * Math.PI)) * fade);
+      }
+      sp.needsUpdate = true;
+      sz.needsUpdate = true;
+      return true;
+    });
+  }
+
+  private animateCouncil(dt: number, t: number, now: number) {
+    if (!this.minions.length) return;
+    const at = SITES.council;
+    const y0 = landHeight(at.x, at.z);
+    const center = new THREE.Vector3(at.x, y0 + 0.1, at.z + PODIUM);
+    const hall = new THREE.Vector3(at.x, y0 + 3.2, at.z - 1.6);
+    const headOf = (m: Minion) => () => m.group.position.clone().add(new THREE.Vector3(0, 1.0, 0));
+    // one speaker at a time: walk to the podium (or step up), speak, walk back
+    if (this.speaking && now > this.speaking.until) {
+      const m = this.speaking.i >= 0 ? this.minions[this.speaking.i] : null;
+      if (m) {
+        m.target.copy(m.home);
+        m.bubble.style.display = 'none';
+      }
+      this.speaking = null;
+    }
+    if (!this.speaking && this.queue.length && this.running) {
+      const s = this.queue.shift()!;
+      const pace = this.queue.length > 10 ? 0.5 : 1;
+      if (s.kind === 'verdict') {
+        const trade = /TRADE/.test(s.text);
+        this.verdict = { trade, until: now + 4500, text: s.text };
+        for (const m of this.minions) m.hop = 1;
+        // every link flashes the verdict's colour, then fades
+        for (const L of this.links) {
+          L.untilVerdict = false;
+          L.until = now + 2600;
+          const c = new THREE.Color(trade ? '#3dff9a' : '#ff4a6a');
+          (L.line.material as THREE.LineBasicMaterial).color.copy(c);
+          const col = L.sparks.geometry.getAttribute('color') as THREE.BufferAttribute;
+          for (let i = 0; i < col.count; i++) col.setXYZ(i, c.r, c.g, c.b);
+          col.needsUpdate = true;
+        }
+        this.debate = null;
+        this.clearStances = now + 4000;
+        this.speaking = { i: -1, until: now + 2600 * pace };
+      } else {
+        const m = this.minions[s.i];
+        const dir = new THREE.Vector3().subVectors(m.home, center).setY(0).normalize();
+        const stance = s.kind === 'vote' ? stanceOf(s.text) : '';
+        if (s.kind === 'propose') {
+          // a new debate: the proposer takes the podium and links to the hall
+          this.debate = { proposer: s.i };
+          for (const o of this.minions) o.stance = '';
+          m.target.copy(center).add(new THREE.Vector3(0, 0, 0.75));
+          this.link(headOf(m), () => hall, `#${m.hue.getHexString()}`, 60000, true);
+        } else if (s.kind === 'trade') {
+          // the order goes to the market: a golden link to the price
+          m.target.copy(m.home).add(dir.clone().multiplyScalar(-0.6));
+          this.link(headOf(m), () => (this.orb.visible ? this.orb.position.clone() : new THREE.Vector3(0, 1, 0)), '#ffc04d', 5000, false);
+        } else {
+          m.target.copy(m.home).add(dir.clone().multiplyScalar(-0.9));
+        }
+        if (stance) {
+          m.stance = stance;
+          const p = this.debate ? this.minions[this.debate.proposer] : null;
+          const color = stance === 'for' ? '#3dff9a' : stance === 'against' ? '#ff4a6a' : stance === 'veto' ? '#c060ff' : '#8a96aa';
+          this.link(headOf(m), p && p !== m ? headOf(p) : () => hall, color, 60000, true);
+        }
+        m.pose = s.kind === 'vote' ? (stance || 'abstain') : 'talk';
+        m.poseUntil = now + (s.kind === 'propose' ? 3600 : 2400) * pace;
+        m.hop = 1;
+        const txt = s.text.length > 120 ? `${s.text.slice(0, 117)}…` : s.text;
+        const verb = s.kind === 'propose' ? 'proposes' : s.kind === 'trade' ? 'sends the order' : stance === 'for' ? 'votes for' : stance === 'against' ? 'votes against' : stance === 'veto' ? 'vetoes' : s.kind === 'vote' ? 'abstains' : 'says';
+        const to = s.kind === 'vote' && this.debate && this.minions[this.debate.proposer] !== m ? ` → ${this.minions[this.debate.proposer].name}` : '';
+        m.bubble.innerHTML = `<i style="color:#${m.hue.getHexString()}">${esc(m.name)} · ${verb}${esc(to)}</i>${esc(txt.replace(/^[✓✗–⛔]\s*/, ''))}`;
+        m.bubble.className = `island-bubble ${s.kind} ${stance}`;
+        m.bubble.style.borderColor = `#${m.hue.getHexString()}`;
+        this.speaking = { i: s.i, until: now + (s.kind === 'propose' ? 3600 : 2400) * pace };
+      }
+    }
+    if (this.clearStances && now > this.clearStances) {
+      for (const m of this.minions) m.stance = '';
+      this.clearStances = 0;
+    }
+    // a debate that never got its verdict lets go after a while
+    for (const L of this.links) if (L.untilVerdict && now - L.born > 25000) L.until = Math.min(L.until, now + 900);
+    const speaker = this.speaking && this.speaking.i >= 0 ? this.minions[this.speaking.i] : null;
+    for (const m of this.minions) {
+      const prev = m.group.position.clone();
+      m.group.position.x += (m.target.x - m.group.position.x) * (1 - Math.exp(-dt * 3.5));
+      m.group.position.z += (m.target.z - m.group.position.z) * (1 - Math.exp(-dt * 3.5));
+      const moving = prev.distanceTo(m.group.position) > 0.003;
+      m.hop = Math.max(0, m.hop - dt * 0.9);
+      m.group.position.y = m.home.y;
+      // the robot hovers; it leans as it glides and jumps for the verdict
+      const awake = this.running;
+      const float = awake ? 0.12 + Math.sin(t * 2.2 + m.home.x * 3) * 0.04 : 0.02;
+      const jump = m.hop > 0 ? Math.abs(Math.sin(m.hop * Math.PI * 3)) * 0.3 * m.hop : 0;
+      m.rig.position.y += (float + jump - m.rig.position.y) * (1 - Math.exp(-dt * 8));
+      m.rig.rotation.x += ((moving ? 0.22 : 0) - m.rig.rotation.x) * (1 - Math.exp(-dt * 5));
+      // face the speaker (or the podium); the speaker faces the island
+      const look = m === speaker ? new THREE.Vector3(m.group.position.x, 0, m.group.position.z + 5) : speaker ? speaker.group.position : center;
+      const ang = Math.atan2(look.x - m.group.position.x, look.z - m.group.position.z);
+      m.group.rotation.y += (((ang - m.group.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * (1 - Math.exp(-dt * 6));
+      // the pose: talk with the hands, raise one to vote for, cross arms against
+      if (now > m.poseUntil) m.pose = awake ? 'idle' : 'sleep';
+      const P = m.pose;
+      let lx = 0;
+      let lz = -0.12 - Math.sin(t * 1.3 + m.home.x) * 0.04;
+      let rx = 0;
+      let rz = 0.12 + Math.sin(t * 1.3 + m.home.x) * 0.04;
+      if (P === 'talk') {
+        rx = -0.9 + Math.sin(t * 6) * 0.45;
+        rz = 0.35;
+        lx = -0.4 + Math.sin(t * 4 + 1) * 0.25;
+        lz = -0.3;
+      } else if (P === 'for') {
+        rz = 2.7 + Math.sin(t * 9) * 0.15;
+      } else if (P === 'against') {
+        lx = -1.35;
+        lz = 0.75;
+        rx = -1.35;
+        rz = -0.75;
+      } else if (P === 'veto') {
+        lz = -2.5;
+        rz = 2.5 + Math.sin(t * 10) * 0.1;
+      } else if (P === 'abstain') {
+        lz = -0.6;
+        rz = 0.6;
+        lx = rx = -0.4;
+      } else if (P === 'sleep') {
+        lz = -0.05;
+        rz = 0.05;
+      }
+      const k = 1 - Math.exp(-dt * 8);
+      m.armL.rotation.x += (lx - m.armL.rotation.x) * k;
+      m.armL.rotation.z += (lz - m.armL.rotation.z) * k;
+      m.armR.rotation.x += (rx - m.armR.rotation.x) * k;
+      m.armR.rotation.z += (rz - m.armR.rotation.z) * k;
+      m.head.rotation.z = P === 'abstain' ? 0.18 : P === 'sleep' ? 0.3 : Math.sin(t * 0.9 + m.home.z) * 0.05;
+      m.head.rotation.x = P === 'sleep' ? 0.35 : P === 'talk' ? Math.sin(t * 5) * 0.06 : 0;
+      // the face
+      m.blink -= dt;
+      const blinking = m.blink < 0.12 && m.blink > 0;
+      if (m.blink < 0) m.blink = 2 + Math.random() * 4;
+      const mood = !awake ? 'sleep' : P === 'talk' ? 'talk' : P === 'for' || P === 'against' || P === 'veto' || P === 'abstain' ? P : m.stance && m.stance !== 'abstain' ? m.stance : blinking ? 'blink' : 'idle';
+      this.drawFace(m, mood, mood === 'talk' ? Math.round(Math.abs(Math.sin(t * 11)) * 3) : 0);
+      // lights: the speaker glows, its bulb blinks, its ring pulses outward
+      const talking = m === speaker;
+      m.tag.classList.toggle('speaking', talking);
+      (m.stripe.material as THREE.MeshStandardMaterial).emissiveIntensity = !awake ? 0.05 : talking ? 1.2 + 0.5 * Math.sin(t * 8) : 0.5;
+      (m.bulb.material as THREE.MeshBasicMaterial).color.copy(m.hue).multiplyScalar(!awake ? 0.2 : talking ? (Math.sin(t * 14) > 0 ? 1.4 : 0.3) : 0.9);
+      const jm = m.jet.material as THREE.MeshBasicMaterial;
+      jm.opacity = awake ? 0.35 + 0.25 * Math.sin(t * 20 + m.home.x) : 0;
+      m.jet.scale.y = awake ? 0.8 + 0.3 * Math.sin(t * 17 + m.home.z) : 0.1;
+      const pm = m.pulse.material as THREE.MeshBasicMaterial;
+      if (talking) {
+        const ph = (t * 1.2) % 1;
+        m.pulse.scale.setScalar(1 + ph * 1.8);
+        pm.opacity = (1 - ph) * 0.8;
+      } else pm.opacity = 0;
+    }
+    // the stage light falls on whoever is speaking
+    if (speaker) {
+      this.spot.visible = true;
+      this.spot.position.lerp(speaker.group.position.clone().add(new THREE.Vector3(0, 2.6, 0)), 1 - Math.exp(-dt * 10));
+      (this.spot.material as THREE.ShaderMaterial).uniforms.uColor.value.copy(speaker.hue);
+      this.place(speaker.bubble, speaker.group.position.clone().add(new THREE.Vector3(0, 1.85, 0)));
+    } else this.spot.visible = false;
+    this.animateLinks(t, now);
+    // the verdict: the hall flashes green or red, the banner says it
+    const v = this.verdict && now < this.verdict.until ? this.verdict : null;
+    const base = new THREE.Color(0x6fb0ff);
+    const flash = v ? new THREE.Color(v.trade ? 0x3dff9a : 0xff4a6a) : base;
+    this.hallLight.color.lerp(flash, 1 - Math.exp(-dt * 6));
+    this.hallLight.intensity = v ? 9 + 4 * Math.sin(t * 10) : 5;
+    (this.hallDome.material as THREE.MeshStandardMaterial).emissive.lerp(v ? flash.clone().multiplyScalar(0.5) : new THREE.Color(0x1d4aa8), 1 - Math.exp(-dt * 4));
+    const spire = this.scene.getObjectByName('spire');
+    if (spire) spire.rotation.y = t * 0.8;
+    if (v) {
+      this.banner.textContent = v.text;
+      this.banner.className = `island-banner ${v.trade ? 'trade' : 'pass'}`;
+      this.place(this.banner, new THREE.Vector3(at.x, y0 + 5.6, at.z - 1.6));
+    } else this.banner.style.display = 'none';
   }
 
   // ---------- going places ----------
@@ -768,7 +1533,7 @@ export class Island {
     const a = this.anchorOf(place);
     if (!a) return;
     this.selected = place;
-    const d = place === 'council' ? 11.5 : place.startsWith('agent:') ? 5 : place === 'price' ? 9 : place === 'lighthouse' ? 10 : 11;
+    const d = place === 'council' ? 10 : place.startsWith('agent:') ? 5 : place === 'price' ? 9 : place === 'lighthouse' ? 10 : 11;
     // look from the island's side (front), a little above
     const from = new THREE.Vector3(a.x * 0.15, 0, 1).normalize();
     this.flyTo(a.clone().add(from.multiplyScalar(d)).add(new THREE.Vector3(0, d * 0.62, 0)), a.clone());
@@ -793,8 +1558,8 @@ export class Island {
     const s = SITES[place as keyof typeof SITES];
     if (!s) return null;
     const y = landHeight(s.x, s.z);
-    const lift = place === 'council' ? 1.4 : place === 'lighthouse' ? 2.2 : place === 'exchange' ? 1.8 : 0.8;
-    return new THREE.Vector3(s.x, Math.max(0.3, y) + lift, s.z + (place === 'harbor' ? 1.5 : 0));
+    const lift = place === 'council' ? 1.1 : place === 'lighthouse' ? 2.2 : place === 'exchange' ? 1.8 : 0.8;
+    return new THREE.Vector3(s.x, Math.max(0.3, y) + lift, s.z + (place === 'harbor' ? 3.2 : 0));
   }
 
   // ---------- data ----------
@@ -846,7 +1611,15 @@ export class Island {
     this.beamSpeed = 0.35 + vn * 2.6;
     this.seaUniforms.uAmp.value = 0.12 + vn * 0.55;
     // the harbour: big trades sail in
-    for (const b of f.boats.slice(0, 3)) this.sail(b.buy, b.usd);
+    // the biggest trade sails in; one boat every few seconds keeps the harbour readable
+    const now = performance.now();
+    if (f.boats.length && now - this.lastSail > 2500) {
+      this.sail(f.boats[0]);
+      this.lastSail = now;
+    }
+    const most = Math.max(f.tape.buyUsd, f.tape.sellUsd);
+    this.crates.buy = most > 0 ? Math.max(f.tape.buyUsd > 0 ? 1 : 0, Math.round((f.tape.buyUsd / most) * 12)) : 0;
+    this.crates.sell = most > 0 ? Math.max(f.tape.sellUsd > 0 ? 1 : 0, Math.round((f.tape.sellUsd / most) * 12)) : 0;
     // the council
     this.ensureMinions(f.agents);
     f.agents.forEach((a, i) => {
@@ -857,22 +1630,22 @@ export class Island {
         m.arc.geometry = new THREE.RingGeometry(0.32, 0.38, 64, 1, Math.PI / 2, -v2 * Math.PI * 2);
         m.value = v2;
       }
-      m.tag.innerHTML = `<b>${a.name}</b><span>${a.text}</span>`;
+      const mark = m.stance === 'for' ? '✓' : m.stance === 'against' ? '✗' : m.stance === 'veto' ? '⛔' : m.stance === 'abstain' ? '–' : '';
+      m.tag.innerHTML = `<b>${esc(a.name)}${mark ? ` <i class="st ${m.stance}">${mark}</i>` : ''}</b><span>${esc(a.text)}</span>`;
     });
     if (!f.running) {
       this.queue = [];
     } else
       for (const s of f.said) {
         if (s.agent === 'council') {
-          const trade = /TRADE/.test(s.text);
-          this.verdict = { trade, until: performance.now() + 5000, text: s.text };
-          for (const m of this.minions) m.hop = 1;
+          // the verdict waits its turn, after the votes are acted out
+          this.queue.push({ i: -1, text: s.text, kind: 'verdict' });
           continue;
         }
         const i = this.minions.findIndex((m) => m.id === s.agent);
         if (i >= 0) this.queue.push({ i, text: s.text, kind: s.kind });
       }
-    if (this.queue.length > 8) this.queue = this.queue.slice(-8);
+    if (this.queue.length > 40) this.queue = this.queue.slice(-40);
     for (const [place, el] of this.placeTags) {
       const sub = f.tags[place];
       el.innerHTML = `<b>${PLACE_NAME[place] ?? place}</b><em>${PLACE_ROLE[place] ?? ''}${sub ? ` · ${sub}` : ''}</em>`;
@@ -1073,8 +1846,13 @@ export class Island {
     const ndc = new THREE.Vector2((this.pointer.x / this.w) * 2 - 1, -(this.pointer.y / this.h) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     this.raycaster.params.Points = { threshold: 0.1 };
-    const hits = this.raycaster.intersectObjects([...this.picks, ...this.fences.children, this.lights], false);
-    return hits.find((h) => h.object.userData.place) ?? hits[0] ?? null;
+    const shown = (o: THREE.Object3D) => {
+      for (let x: THREE.Object3D | null = o; x; x = x.parent) if (!x.visible) return false;
+      return true;
+    };
+    const hits = this.raycaster.intersectObjects([...this.picks, ...this.fences.children, this.lights], false).filter((h) => shown(h.object));
+    // small things (a boat, a ring on the lighthouse, the crates) win over the place around them
+    return hits.find((h) => h.object.userData.first) ?? hits.find((h) => h.object.userData.place) ?? hits[0] ?? null;
   }
 
   private peekNow() {
@@ -1083,16 +1861,38 @@ export class Island {
     const at = { x: this.pointer.x, y: this.pointer.y };
     const place = hit?.object.userData.place as Place | undefined;
     this.renderer.domElement.style.cursor = place ? 'pointer' : '';
+    // visiting the lighthouse, the beam follows the pointer like a searchlight
+    if (this.selected === 'lighthouse' && hit) {
+      const L = SITES.lighthouse;
+      this.beamAim = Math.atan2(-(hit.point.z - L.z), hit.point.x - L.x);
+    } else this.beamAim = null;
     if (!f || !hit) return this.onPeek(null);
     const o = hit.object;
     if (place) {
       if (place === this.selected) return this.onPeek(null);
       if (place.startsWith('agent:')) {
         const a = f.agents.find((x) => `agent:${x.id}` === place);
-        return this.onPeek({ ...at, title: a?.name ?? place, lines: [a ? `${a.text} — ${a.sub}` : '', 'click to visit'], tone: 'info' });
+        const m = this.minions.find((x) => `agent:${x.id}` === place);
+        const st = m?.stance ? ({ for: 'voted for this trade', against: 'voted against this trade', veto: 'vetoed this trade', abstain: 'abstained' } as Record<string, string>)[m.stance] : '';
+        return this.onPeek({ ...at, title: a?.name ?? place, lines: [a ? `${a.text} — ${a.sub}` : '', ...(st ? [st] : []), 'click to visit'], tone: 'info' });
       }
       if (place === 'price' && f.price) return this.onPeek({ ...at, title: `Price now ${fmt(f.price)}`, lines: ['the river is the price, flowing through the book', 'click to visit'] });
       return this.onPeek({ ...at, title: PLACE_NAME[place] ?? place, lines: [`${PLACE_ROLE[place] ?? ''}${f.tags[place] ? ` · ${f.tags[place]}` : ''}`, 'click to visit'] });
+    }
+    if (o.userData.peek === 'boat' && o.userData.trade) {
+      const b = o.userData.trade as IslandBoat;
+      return this.onPeek({ ...at, title: `${b.buy ? 'BOUGHT' : 'SOLD'} $${b.usd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`, lines: [`${b.qty.toPrecision(4)} @ ${fmt(b.price)} · ${clock(b.time)}`, b.buy ? 'a big buyer: moors west of the pier' : 'a big seller: moors east of the pier'], tone: b.buy ? 'buy' : 'sell' });
+    }
+    if (o.userData.peek === 'yard') {
+      const buy = o.userData.side === 'buy';
+      const usd = buy ? f.tape.buyUsd : f.tape.sellUsd;
+      const all = f.tape.buyUsd + f.tape.sellUsd;
+      return this.onPeek({ ...at, title: `${buy ? 'Bought' : 'Sold'} in the last minute`, lines: [`$${usd.toLocaleString('en-US', { maximumFractionDigits: 0 })}${all > 0 ? ` · ${Math.round((usd / all) * 100)}% of the tape` : ''}`, 'one crate for each twelfth of the bigger side'], tone: buy ? 'buy' : 'sell' });
+    }
+    if (o.userData.peek === 'band') {
+      const k = o.userData.k as number;
+      const v = f.moves[k] ?? 0;
+      return this.onPeek({ ...at, title: `${['1-minute', '5-minute', '15-minute'][k]} move ${v >= 0 ? '+' : ''}${v.toFixed(1)} bps`, lines: [['the top ring', 'the middle ring', 'the bottom ring'][k] + ': green up, red down, brighter for bigger'], tone: v >= 0 ? 'buy' : 'sell' });
     }
     if (o.userData.peek === 'position') return this.onPeek({ ...at, title: `${o.userData.what.toUpperCase()} ${fmt(o.userData.price)}`, lines: [o.userData.label], tone: o.userData.what === 'stop' ? 'sell' : 'buy' });
     if (o === this.lights && hit.index !== undefined) {
@@ -1142,23 +1942,10 @@ export class Island {
     this.riverMat.uniforms.uTime.value = t;
     this.placeTowers(dt);
     this.placeCrops(dt, t);
-    this.beam.rotation.y += dt * this.beamSpeed;
     const flies = this.scene.getObjectByName('flies');
     if (flies) flies.position.y = Math.sin(t * 0.7) * 0.25;
-    // boats sail in, bob, and fade at the pier
-    this.boats = this.boats.filter((b) => {
-      b.t += dt / b.dur;
-      const k = Math.min(1, b.t);
-      const e = 1 - (1 - k) ** 2;
-      b.mesh.position.lerpVectors(b.from, b.to, e);
-      b.mesh.position.y = 0.12 + Math.sin(t * 2.4 + b.from.x) * 0.06;
-      b.mesh.lookAt(b.to.x, b.mesh.position.y, b.to.z);
-      if (b.t > 1.35) {
-        b.mesh.visible = false;
-        return false;
-      }
-      return true;
-    });
+    this.animateHarbor(dt, t);
+    this.animateLighthouse(dt, t);
     this.animateCouncil(dt, t, now);
 
     // labels follow their objects
@@ -1203,67 +1990,6 @@ export class Island {
     }
     this.composer.render();
   };
-
-  private animateCouncil(dt: number, t: number, now: number) {
-    if (!this.minions.length) return;
-    const at = SITES.council;
-    const center = new THREE.Vector3(at.x, landHeight(at.x, at.z) + 0.1, at.z + PODIUM);
-    // one speaker at a time: walk to the podium, speak, walk back
-    if (this.speaking && now > this.speaking.until) {
-      const m = this.minions[this.speaking.i];
-      m.target.copy(m.home);
-      m.bubble.style.display = 'none';
-      this.speaking = null;
-    }
-    if (!this.speaking && this.queue.length && this.running) {
-      const s = this.queue.shift()!;
-      const m = this.minions[s.i];
-      const dir = new THREE.Vector3().subVectors(m.home, center).setY(0).normalize();
-      // the proposer takes the podium, a voter steps forward
-      if (s.kind === 'propose') m.target.copy(center).add(new THREE.Vector3(0, 0, 0.75));
-      else m.target.copy(m.home).add(dir.multiplyScalar(-0.9));
-      m.hop = 1;
-      const txt = s.text.length > 110 ? `${s.text.slice(0, 107)}…` : s.text;
-      m.bubble.textContent = txt;
-      m.bubble.className = `island-bubble ${s.kind}`;
-      this.speaking = { i: s.i, until: now + (s.kind === 'propose' ? 3600 : 2400) };
-    }
-    const speaker = this.speaking ? this.minions[this.speaking.i] : null;
-    for (const m of this.minions) {
-      const prev = m.group.position.clone();
-      m.group.position.x += (m.target.x - m.group.position.x) * (1 - Math.exp(-dt * 3.5));
-      m.group.position.z += (m.target.z - m.group.position.z) * (1 - Math.exp(-dt * 3.5));
-      const moving = prev.distanceTo(m.group.position) > 0.003;
-      m.hop = Math.max(0, m.hop - dt * 0.9);
-      const bob = this.running ? Math.sin(t * 2 + m.home.x) * 0.02 : 0;
-      const step = moving ? Math.abs(Math.sin(t * 12)) * 0.06 : 0;
-      const jump = m.hop > 0 ? Math.abs(Math.sin(m.hop * Math.PI * 3)) * 0.28 * m.hop : 0;
-      m.group.position.y = m.home.y + bob + step + jump;
-      // face the speaker (or the podium), the speaker faces the island
-      const look = m === speaker ? new THREE.Vector3(m.group.position.x, m.group.position.y, m.group.position.z + 5) : speaker ? speaker.group.position : center;
-      const ang = Math.atan2(look.x - m.group.position.x, look.z - m.group.position.z);
-      m.group.rotation.y += (((ang - m.group.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * (1 - Math.exp(-dt * 6));
-      // asleep while the swarm is stopped: dim and still
-      const mat = m.body.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = this.running ? (m === speaker ? 0.6 + 0.3 * Math.sin(t * 8) : 0.15) : 0.02;
-      (m.eye.material as THREE.MeshBasicMaterial).color.copy(m.hue).multiplyScalar(this.running ? 1 : 0.25);
-    }
-    if (speaker) this.place(speaker.bubble, speaker.group.position.clone().add(new THREE.Vector3(0, 1.75, 0)));
-    // the verdict: the hall flashes green or red, the banner says it
-    const v = this.verdict && now < this.verdict.until ? this.verdict : null;
-    const base = new THREE.Color(0x6fb0ff);
-    const flash = v ? new THREE.Color(v.trade ? 0x3dff9a : 0xff4a6a) : base;
-    this.hallLight.color.lerp(flash, 1 - Math.exp(-dt * 6));
-    this.hallLight.intensity = v ? 9 + 4 * Math.sin(t * 10) : 5;
-    (this.hallDome.material as THREE.MeshStandardMaterial).emissive.lerp(v ? flash.clone().multiplyScalar(0.5) : new THREE.Color(0x1d4aa8), 1 - Math.exp(-dt * 4));
-    const spire = this.scene.getObjectByName('spire');
-    if (spire) spire.rotation.y = t * 0.8;
-    if (v) {
-      this.banner.textContent = v.text;
-      this.banner.className = `island-banner ${v.trade ? 'trade' : 'pass'}`;
-      this.place(this.banner, new THREE.Vector3(at.x, landHeight(at.x, at.z) + 6.2, at.z - 1.6));
-    } else this.banner.style.display = 'none';
-  }
 
   private place(el: HTMLDivElement, p: THREE.Vector3 | null, text?: string) {
     if (!p) {

@@ -127,16 +127,36 @@ connectors (top bar) and the money (bottom centre).
   price at the front. Towers grow and shrink as the book changes.
 - **The Fields** (east) are the volume profile: a crop row per price, as tall
   as the volume traded there; the point of control is the golden row.
-- **The Harbor** (south-east) is the tape: big trades sail in as boats, a gold
-  lamp for a buyer, red for a seller.
-- **The Lighthouse** (south-west) is volatility: the faster the market, the
-  faster its beam turns and the higher the sea.
-- **The Council** (north) is the swarm: a domed hall with its minions on the
-  plaza, one per agent, each with a ring of light on the ground as its gauge.
-  When an agent proposes a trade it walks to the podium and says so; the others
-  step forward to vote. The council's verdict lights the hall — green for a
-  trade, red for a pass — and every minion jumps. While the swarm is stopped the
-  minions sleep.
+- **The Harbor** (the south-east bay) is the tape. The biggest trades sail in
+  as boats with a wake behind them, bigger for bigger trades: gold sails moor
+  west of the pier (buyers), red sails east (sellers), as in the book. When one
+  docks, "BOUGHT $x" or "SOLD $x" rises over the pier and the crane swings its
+  cargo ashore. The crates in the yard are the last minute's buying (west) and
+  selling (east); the buoys at the harbour mouth blink green while buyers lead,
+  red while sellers do. Hover a boat for its trade, the crates for the minute's
+  flow.
+- **The Lighthouse** (south-west) is volatility. Three rings of light up the
+  tower are the 1, 5 and 15-minute moves (the top is the fastest): green up,
+  red down, brighter for bigger. As the market gets wilder the beam turns
+  faster and warms from white to red, the swell rises, clouds gather and rain
+  falls; a hard 1-minute move brings lightning. While you visit, the beam
+  follows your pointer like a searchlight. Hover a ring for its move.
+- **The Council** (north) is the swarm: a domed hall with a robot on the plaza
+  for each agent, hovering on a small jet, with a ring of light on the ground
+  as its gauge and a face screen that shows how it feels. The debate is acted
+  out in order:
+  - the **proposer** takes the podium under a stage light, talks with its
+    hands, and a link of light runs from it to the hall;
+  - each **voter** steps forward in turn and links to the proposer: green
+    sparks and a raised hand for, red sparks and crossed arms against, grey for
+    an abstention, purple and both arms up for a veto. Its bubble says who it
+    answers ("CROWD · votes against → TREND") and a ✓ / ✗ / – stays by its name
+    until the verdict;
+  - the **verdict** turns every link and the hall green (trade) or red (pass),
+    the banner says why, and every robot jumps. When the order goes out, a gold
+    link runs from the proposer to the price.
+  The speaker's name glows and its ring pulses, so you always know who is
+  talking. While the swarm is stopped the robots power down.
 - **Explore**: click a place or a minion and the camera flies there; its reading
   appears beside it as a hologram, with a line to what it describes. Hover
   anything for a peek. Drag to look round, scroll to zoom, **W A S D** or the

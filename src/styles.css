@@ -5080,3 +5080,66 @@ table.grid.meme-tape td {
     grid-template-columns: minmax(220px, 30%) 1fr minmax(220px, 30%);
   }
 }
+
+/* the council, acted out: who speaks, to whom, and how they voted */
+.island-labels > .island-bubble {
+  border: 2px solid transparent;
+}
+.island-bubble i {
+  display: block;
+  margin-bottom: 2px;
+  font: 800 9.5px var(--sans);
+  font-style: normal;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  filter: brightness(0.75) saturate(1.4);
+}
+.island-bubble.for {
+  background: #e6fff1;
+}
+.island-bubble.against,
+.island-bubble.veto {
+  background: #ffe9ee;
+}
+.island-bubble.trade {
+  background: #fff3d1;
+}
+.island-minion {
+  padding: 2px 7px;
+  border-radius: 999px;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.island-minion.speaking {
+  background: rgba(10, 20, 40, 0.75);
+  box-shadow: 0 0 0 1px rgba(160, 210, 255, 0.7), 0 0 16px rgba(110, 180, 255, 0.55);
+  color: #fff;
+  transform-origin: center;
+}
+.island-minion .st {
+  font-style: normal;
+  font-weight: 900;
+}
+.island-minion .st.for {
+  color: #3dff9a;
+}
+.island-minion .st.against {
+  color: #ff4a6a;
+}
+.island-minion .st.veto {
+  color: #c060ff;
+}
+.island-minion .st.abstain {
+  color: #9aa6b8;
+}
+/* a big trade's cargo, rising over the pier */
+.island-float {
+  font: 800 12px var(--mono);
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 10px currentColor, 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+.island-float.buy {
+  color: #ffc04d;
+}
+.island-float.sell {
+  color: #ff5a78;
+}
