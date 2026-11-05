@@ -20,6 +20,8 @@ const listen = (set, fn) => {
   return () => set.delete(fn);
 };
 const verifiedListeners = new Set();
+const cswarmListeners = { state: new Set(), event: new Set() };
+for (const ch of ['state', 'event']) ipcRenderer.on(`cswarm:${ch}`, (_e, msg) => cswarmListeners[ch].forEach((fn) => fn(msg)));
 ipcRenderer.on('swarm:verified', (_e, msg) => verifiedListeners.forEach((fn) => fn(msg)));
 ipcRenderer.on('ccxt:event', (_e, msg) => {
   for (const fn of ccxtListeners) fn(msg);
@@ -35,6 +37,16 @@ contextBridge.exposeInMainWorld('novus', {
     onSealed: (fn) => listen(sealListeners, fn) },
   net: { fetchJson: (url, init) => call('net:fetchJson', url, init) },
   solana: { rpc: (method, params, rpcSecretId) => call('solana:rpc', method, params, rpcSecretId) },
+  cswarm: {
+    state: () => call('cswarm:state'),
+    start: () => call('cswarm:start'),
+    stop: (flatten) => call('cswarm:stop', flatten),
+    config: (patch) => call('cswarm:config', patch),
+    mode: (mode, secretId) => call('cswarm:mode', mode, secretId),
+    resetPaper: () => call('cswarm:resetPaper'),
+    onState: (fn) => listen(cswarmListeners.state, fn),
+    onEvent: (fn) => listen(cswarmListeners.event, fn),
+  },
   swarm: {
     wallet: () => call('swarm:wallet'),
     create: () => call('swarm:walletCreate'),

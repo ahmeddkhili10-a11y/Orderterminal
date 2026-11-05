@@ -99,6 +99,24 @@ try {
   await page.click('.cc-orderflow-btn');
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });
   expect(true, 'Order flow on the top bar switches to the order-flow terminal');
+  // the crypto swarm: its tab puts its panel in the layout; it starts on paper and stops
+  await page.waitForSelector('.cs', { timeout: 15_000 });
+  expect((await page.locator('.view-tab').count()) === 2, 'two terminal tabs: Meme swarm and Crypto swarm');
+  await page.click('.cs button:has-text("Start crypto swarm")');
+  await page.waitForSelector('.cs-live-dot', { timeout: 20_000 });
+  await page.waitForTimeout(2500);
+  const csText = await page.locator('.cs').innerText();
+  expect(/Paper account/.test(csText) && /\$30\.00/.test(csText) && /Scalper/.test(csText) && /Auctioneer/.test(csText) && /Trend/.test(csText), 'the crypto swarm runs on paper with its agents and $30 account');
+  await page.screenshot({ path: `${OUT}desktop-cswarm.png` });
+  // Ctrl+1 / Ctrl+2 switch terminals; the crypto swarm keeps running behind the meme terminal
+  await page.keyboard.press('Control+1');
+  await page.waitForSelector('.cc-core', { timeout: 15_000 });
+  expect(await page.evaluate(() => window.novus.cswarm.state().then((s) => s.running)), 'the crypto swarm keeps running while the meme terminal is on screen');
+  await page.keyboard.press('Control+2');
+  await page.waitForSelector('.cs-live-dot', { timeout: 15_000 });
+  await page.click('.cs button:text-is("Stop")');
+  await page.waitForSelector('.cs button:has-text("Start crypto swarm")', { timeout: 15_000 });
+  expect(true, 'the crypto swarm stops');
 
   step('window fills the screen');
   const win = await app.evaluate(({ BrowserWindow, screen }) => {

@@ -4440,3 +4440,199 @@ table.grid.meme-tape td {
   margin-top: 6px;
   font-size: 11px;
 }
+
+/* the two terminals as tabs */
+.view-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin-left: 10px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel2);
+}
+.view-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font: 600 12px var(--sans);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.view-tab:hover {
+  color: var(--text);
+}
+.view-tab.active {
+  color: var(--text);
+  background: var(--raised);
+  box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 1px var(--border2);
+}
+.vt-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.vt-dot.on {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+.vt-dot.live {
+  background: var(--buy);
+  box-shadow: 0 0 8px var(--buy);
+  animation: vt-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vt-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* the crypto swarm panel */
+.cs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  padding: 8px 10px;
+  gap: 8px;
+  font-size: 12px;
+}
+.cs-head,
+.cs-modes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cs-start {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.cs-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--buy);
+  box-shadow: 0 0 8px var(--buy);
+  animation: vt-pulse 1.6s ease-in-out infinite;
+}
+.cs-err {
+  font-size: 12px;
+}
+.cs-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+}
+.cs-tile {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+}
+.cs-tile-v {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.cs-tile-s {
+  font-size: 11px;
+}
+.cs-tabs {
+  display: flex;
+  gap: 4px;
+}
+.cs-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cs-agents {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+.cs-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  font-size: 11px;
+}
+.cs-agent.off {
+  opacity: 0.5;
+  border-left-color: var(--faint);
+}
+.cs-table {
+  width: 100%;
+  font-size: 11.5px;
+}
+.cs-table th,
+.cs-table td {
+  padding: 3px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+.cs-none {
+  padding: 4px 0;
+}
+.cs-feed {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  padding: 4px 6px;
+}
+.cs-line {
+  display: grid;
+  grid-template-columns: 34px 78px 1fr;
+  gap: 6px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--row-line);
+  line-height: 1.35;
+}
+.cs-line.vote {
+  opacity: 0.85;
+  padding-left: 10px;
+}
+.cs-line.trade b,
+.cs-line.win {
+  color: var(--buy);
+}
+.cs-line.loss,
+.cs-line.error {
+  color: var(--sell);
+}
+.cs-line.warn {
+  color: var(--warn);
+}
+.cs-who {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+.cs-who.council {
+  color: var(--accent);
+}
+.cs-rules {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.cs-scroll {
+  overflow-x: auto;
+}

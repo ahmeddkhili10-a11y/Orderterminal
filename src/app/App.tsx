@@ -6,6 +6,7 @@ import { startAmtService } from '../desktop/amt';
 import { startLunoAlerts } from '../luno/lane';
 import { startPhoneLink } from '../meme/swarm/phone';
 import { startBotAlerts } from '../desktop/botAlerts';
+import { startCryptoSwarmLink } from '../cswarm/store';
 import { CommandCenter } from '../command/CommandCenter';
 import { startSwarmService } from '../meme/swarm/swarm';
 import { startTelegramService } from '../desktop/telegram';
@@ -17,7 +18,7 @@ import { loadLayout, PRESETS, sanitize, saveLayout, tab } from './layouts';
 import { AddPanelModal, ConnectionModal, LayoutsModal, SettingsModal, type Placement } from './Modals';
 import { KeysModal } from './KeysModal';
 import { PanelHost } from './PanelHost';
-import { TopBar, type ModalKind } from './TopBar';
+import { switchView, TopBar, type ModalKind } from './TopBar';
 
 export function useThemeAttr() {
   const theme = useSettings((s) => s.theme);
@@ -58,9 +59,35 @@ export function App() {
     startLunoAlerts();
     startPhoneLink();
     startBotAlerts();
+    startCryptoSwarmLink();
     startSwarmService();
   }, []);
 
+  // the crypto swarm tab puts its panel in the layout if it is missing (never twice)
+  useEffect(() => {
+    const ensure = (e: Event) => {
+      const component = (e as CustomEvent<string>).detail;
+      let found = false;
+      model.visitNodes((n) => {
+        if (n.getType() === 'tab' && (n as TabNode).getComponent() === component) found = true;
+      });
+      if (!found) addPanel(component, 'right');
+    };
+    window.addEventListener('novus:ensure-panel', ensure);
+    return () => window.removeEventListener('novus:ensure-panel', ensure);
+  });
+  // Ctrl+1 / Ctrl+2: the meme swarm and the crypto swarm, like browser tabs
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (e.key === '1' || e.key === '2') {
+        e.preventDefault();
+        switchView(e.key === '1' ? 'command' : 'terminal', useSettings.getState().set);
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
   // panels ask for the Connections window through a window event
   useEffect(() => {
     const open = () => setModal('keys');

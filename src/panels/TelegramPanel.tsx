@@ -90,6 +90,9 @@ export function TelegramPanel(_: PanelProps<TelegramConfig>) {
         <Check checked={s.telegramSwarm} onChange={(telegramSwarm) => s.set({ telegramSwarm })}>
           <b>Swarm trades on Telegram</b> <span className="muted">— every buy with the coin's chart and why it bought, each new multiple (2×, 5×, 10× …), and every sell with the result</span>
         </Check>
+        <Check checked={s.telegramCrypto} onChange={(telegramCrypto) => s.set({ telegramCrypto })}>
+          <b>Crypto swarm trades on Telegram</b> <span className="muted">— each trade three times, with its chart: the setup (potential gain, positioning, the council's votes), how it is being managed, and the result in green or red</span>
+        </Check>
         <Check checked={s.telegramBots} onChange={(telegramBots) => s.set({ telegramBots })}>
           <b>Order-flow bot trades on Telegram</b> <span className="muted">— each entry and why, when the trade is safe, each exit with its result, and any failure (Hyperliquid or any exchange)</span>
         </Check>

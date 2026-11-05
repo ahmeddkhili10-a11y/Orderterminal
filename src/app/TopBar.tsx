@@ -15,6 +15,40 @@ import { useBoot } from './boot';
 import { sealTerminal } from './LockScreen';
 import { solTickerFeed, useSolTicker } from '../meme/solTicker';
 import { openDrawer } from '../command/CommandCenter';
+import { useSwarm } from '../meme/swarm/swarm';
+import { useCSwarm } from '../cswarm/store';
+
+/**
+ * The two terminals, as tabs. Both swarms run whichever is on screen: the
+ * meme swarm on Solana, the crypto swarm on Hyperliquid — separate wallets,
+ * separate records. Ctrl+1 and Ctrl+2 switch too.
+ */
+export function ViewTabs() {
+  const view = useSettings((s) => s.view);
+  const set = useSettings((s) => s.set);
+  const memeOn = useSwarm((s) => s.enabled);
+  const memeLive = useSwarm((s) => s.mode === 'live');
+  const cs = useCSwarm((s) => s.state);
+  const go = (v: 'command' | 'terminal') => switchView(v, set);
+  return (
+    <div className="view-tabs" role="tablist" aria-label="Terminals">
+      <button role="tab" aria-selected={view === 'command'} className={`view-tab cc-toggle${view === 'command' ? ' active' : ''}`} onClick={() => go('command')} title="Meme swarm — Solana meme coins, its own wallet (Ctrl+1)">
+        <span className={`vt-dot${memeOn ? (memeLive ? ' live' : ' on') : ''}`} />
+        Meme swarm
+      </button>
+      <button role="tab" aria-selected={view === 'terminal'} className={`view-tab cc-orderflow-btn${view === 'terminal' ? ' active' : ''}`} onClick={() => go('terminal')} title="Crypto swarm — order flow on Hyperliquid: footprint, heatmap, DOM, its own account (Ctrl+2)">
+        <span className={`vt-dot${cs?.running ? (cs.mode === 'live' ? ' live' : ' on') : ''}`} />
+        Crypto swarm
+      </button>
+    </div>
+  );
+}
+
+/** Switch terminals; the crypto swarm's panel is put in the order-flow layout if it is not there. */
+export function switchView(v: 'command' | 'terminal', set: (p: { view: 'command' | 'terminal' }) => void) {
+  set({ view: v });
+  if (v === 'terminal') window.dispatchEvent(new CustomEvent('novus:ensure-panel', { detail: 'cswarm' }));
+}
 
 /** Pyramid mark with three candles — Novus Ordo. */
 export function Logo({ size = 26 }: { size?: number }) {
@@ -286,7 +320,6 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
   const showFps = useSettings((s) => s.showFps);
   const view = useSettings((s) => s.view);
   const command = view === 'command';
-  const setSettings = useSettings((s) => s.set);
   const fps = useFps();
   const H = hub();
   const f = H.primary;
@@ -303,6 +336,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <span className="brand-by hide-sm">by Quincy Gininda</span>
         </span>
       </div>
+      <ViewTabs />
       <div className="sep" />
       {/* the Command Center is about Solana: SOL's price instead of the order-flow market */}
       {command ? (
@@ -340,13 +374,10 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <button className="chip primary-chip chrome-chip" onClick={() => openDrawer('luno')} title="Optional: real crypto against rands on Luno — daily trend bots beside the swarm">
             R <span className="lbl keep">Luno</span>
           </button>
-          <button className="chip primary-chip chrome-chip cc-orderflow-btn" onClick={() => setSettings({ view: 'terminal' })} title="The order-flow terminal: footprint, heatmap, DOM and volume profile across Binance, Bybit, OKX, Coinbase and Hyperliquid — and the order-flow bots">
-            ▥ <span className="lbl keep">Order flow</span>
-          </button>
         </>
       ) : (
-        <button className="chip primary-chip chrome-chip cc-toggle" onClick={() => setSettings({ view: 'command' })} title="Back to the meme terminal">
-          <span className="cc-toggle-dot" /> <span className="lbl keep">Meme terminal</span>
+        <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('cswarm')} title="The crypto swarm: its agents, council, trades and rules">
+          ◈ <span className="lbl keep">Swarm</span>
         </button>
       )}
       <SafeModeChip />

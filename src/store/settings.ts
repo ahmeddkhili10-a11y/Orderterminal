@@ -111,6 +111,8 @@ export interface Settings {
   swarmDesktopAlerts: boolean;
   /** the order-flow bots' trades on Telegram: entries, safe, exits with results, stops and failures */
   telegramBots: boolean;
+  /** the crypto swarm's trades on Telegram: the setup with its chart, how it is managed, the result */
+  telegramCrypto: boolean;
   telegramCommands: boolean;
   /** ask before sending each order from the ticket */
   confirmOrders: boolean;
@@ -171,6 +173,7 @@ const initial: Settings = {
   telegramSwarm: true,
   swarmDesktopAlerts: true,
   telegramBots: true,
+  telegramCrypto: true,
   telegramCommands: false,
   confirmOrders: true,
   memeRpcSecretId: '',

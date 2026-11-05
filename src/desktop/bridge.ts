@@ -510,6 +510,120 @@ export interface SwarmLimits {
   sweepAboveSol: number;
 }
 
+// ---------- the crypto swarm (Hyperliquid) ----------
+
+export type CSwarmAgent = 'scalper' | 'auction' | 'trend' | 'tape' | 'crowd' | 'guardian' | 'forest' | 'risk';
+export interface CSwarmVote {
+  bot: CSwarmAgent;
+  stance: 'for' | 'against' | 'abstain' | 'veto';
+  weight: number;
+  why: string;
+}
+export interface CSwarmPosition {
+  id: string;
+  mode: 'paper' | 'live';
+  coin: string;
+  symbol: string;
+  agent: 'scalper' | 'auction' | 'trend';
+  agentName?: string;
+  owner: 'engine' | 'swarm';
+  side: 'buy' | 'sell';
+  setup: string;
+  why: string;
+  entry: number;
+  qty: number;
+  notional: number;
+  stop: number;
+  target: number;
+  stop0: number;
+  target0: number;
+  risk: number;
+  riskUsd: number;
+  riskPct: number;
+  lev: number;
+  openedAt: number;
+  fees: number;
+  votes: CSwarmVote[];
+  summary: string;
+  odds: { pWin: number; pLoss: number; expR: number; trust: number };
+  mgmt: { t: number; text: string }[];
+  be: boolean;
+  trailed: boolean;
+  equityAtEntry: number;
+  potential?: number;
+  price?: number | null;
+  upnl?: number;
+  exit?: number;
+  pnl?: number;
+  r?: number;
+  reason?: string;
+  closedAt?: number;
+}
+export interface CSwarmLine {
+  t: number;
+  agent: CSwarmAgent | 'swarm' | 'council';
+  text: string;
+  kind: 'info' | 'warn' | 'error' | 'propose' | 'vote' | 'trade' | 'pass' | 'win' | 'loss';
+}
+export interface CSwarmRisk {
+  riskPct: number;
+  minRiskPct: number;
+  maxRiskPct: number;
+  kellyShare: number;
+  minTrades: number;
+  maxLeverage: number;
+  perCoinLeverage: number;
+  maxOpen: number;
+  dailyLossPct: number;
+  ddCut1: number;
+  ddCut2: number;
+  lossStreak: number;
+  pauseMin: number;
+  floorShare: number;
+  lockAt: number;
+  lockShare: number;
+  minNotional: number;
+}
+export interface CSwarmConfig {
+  exchangeId: string;
+  coins: string[];
+  agents: { scalper: boolean; auction: boolean; trend: boolean };
+  paperStartUsd: number;
+  feeBps: number;
+  slippageBps: number;
+  risk: CSwarmRisk;
+  council: Record<string, number>;
+}
+export interface CSwarmState {
+  running: boolean;
+  mode: 'paper' | 'live';
+  secretId: string | null;
+  sandbox: boolean;
+  cfg: CSwarmConfig;
+  equity: number | null;
+  book: { start: number; peak: number; floor: number; dayStart: number; streak: number; pausedUntil: number };
+  open: CSwarmPosition[];
+  closed: CSwarmPosition[];
+  totals: { trades: number; wins: number; pnl: number };
+  byAgent: Record<'scalper' | 'auction' | 'trend', { trades: number; wins: number; pnl: number; avgR: number | null }>;
+  coins: { coin: string; symbol: string; price: number; feed: string; feedError: string | null; funding: number | null; daily: { dir: number; up: number } | null; engines: Record<string, { state: string; warm: boolean; lastSkip: { t: number; event: string; reason: string } | null; lastSignal: { setup: string; side: string; t: number } | null }> }[];
+  lines: CSwarmLine[];
+  forest: { samples: number; trained: { n: number; accuracy: number | null; baseline: number | null; trainedAt: number } | null; shadowOpen: number };
+}
+/** The three moments of a trade, for the chart card and Telegram. */
+export interface CSwarmNotify {
+  kind: 'notify';
+  stage: 'setup' | 'manage' | 'result';
+  mode: 'paper' | 'live';
+  position: CSwarmPosition;
+  /** [time, open, high, low, close] */
+  candles: [number, number, number, number, number][];
+  timeframe: '1m' | '1h';
+  va: { vah: number; val: number; poc: number } | null;
+  equity: number | null;
+}
+export type CSwarmEvent = { kind: 'line'; line: CSwarmLine } | CSwarmNotify;
+
 /** A pending phone verification: send exactly `sol` SOL to `address` before `until`. */
 export interface PhoneProof {
   sol: string;
@@ -625,6 +739,16 @@ export interface NovusApi {
     vacuum(): Promise<void>;
     setRetention(days: number): Promise<void>;
     exportCsv(venue: string, symbol: string): Promise<{ path: string; rows: number } | null>;
+  };
+  cswarm: {
+    state(): Promise<CSwarmState>;
+    start(): Promise<boolean>;
+    stop(flatten?: boolean): Promise<boolean>;
+    config(patch: Partial<Omit<CSwarmConfig, 'risk' | 'agents'>> & { risk?: Partial<CSwarmRisk>; agents?: Partial<CSwarmConfig['agents']> }): Promise<CSwarmConfig>;
+    mode(mode: 'paper' | 'live', secretId?: string | null): Promise<'paper' | 'live'>;
+    resetPaper(): Promise<void>;
+    onState(fn: (s: CSwarmState) => void): () => void;
+    onEvent(fn: (e: CSwarmEvent) => void): () => void;
   };
   swarm: {
     wallet(): Promise<{ address: string; limits: SwarmLimits; spentToday: number; home: string | null } | null>;

@@ -4,6 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BotManager } from './amt/bots.mjs';
+import { CryptoSwarm } from './cswarm/cswarm.mjs';
 import { Db } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
@@ -88,6 +89,7 @@ let db;
 let vault;
 let ccxtSvc;
 let bots;
+let cswarm;
 let services = null;
 
 function createWindow() {
@@ -248,7 +250,7 @@ const ledgerRecord = () => {
 };
 
 // channels that need the exchange services, which load after the window is up
-const NEEDS_SERVICES = /^(ccxt|trade|amt):|^vault:test$/;
+const NEEDS_SERVICES = /^(ccxt|trade|amt|cswarm):|^vault:test$/;
 
 function registerIpc() {
   // the swarm keeps trading behind the lock screen: its own trades, balances and Telegram updates only
@@ -390,7 +392,34 @@ function registerIpc() {
   handle('amt:remove', (_e, id) => bots.remove(id));
   handle('amt:start', (_e, id) => bots.start(id));
   handle('amt:stop', (_e, id, flatten) => bots.stop(id, { flatten: Boolean(flatten), reason: flatten ? 'stopped and flattened by you' : 'stopped by you' }));
-  handle('amt:stopAll', () => bots.stopAll('kill switch'));
+  handle('amt:stopAll', async () => {
+    // the kill switch stops the crypto swarm too (its positions keep their exchange stops)
+    await cswarm?.stop().catch(() => undefined);
+    return bots.stopAll('kill switch');
+  });
+  // the crypto swarm: agents trading perpetuals on Hyperliquid, its own account and record
+  handle('cswarm:state', () => cswarm.state());
+  handle('cswarm:start', () => cswarm.start());
+  handle('cswarm:stop', (_e, flatten) => cswarm.stop({ flatten: Boolean(flatten) }));
+  handle('cswarm:config', (_e, patch) => cswarm.setConfig(patch ?? {}));
+  handle('cswarm:resetPaper', () => cswarm.resetPaper());
+  handle('cswarm:mode', async (_e, mode, secretId) => {
+    if (mode === 'live' && cswarm.mode !== 'live') {
+      const c = cswarm.cfg;
+      const r = await dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Cancel', 'Trade live'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Crypto swarm — live',
+        message: 'Let the crypto swarm trade futures on Hyperliquid on its own, with real USDC?',
+        detail: `${c.coins.join(', ')} — each trade risks about ${c.risk.riskPct}% of the account (at most ${c.risk.maxRiskPct}%), at most ${c.risk.maxOpen} positions and ${c.risk.maxLeverage}× the account in all, isolated margin. It stops for the day after losing ${c.risk.dailyLossPct}%, and for good under its floor.\n\nFutures can be liquidated. Orders are placed without asking you each time, within the order cap in the ticket's ⚙ limits.`,
+      });
+      if (r.response !== 1) return cswarm.mode;
+    }
+    cswarm.setMode(mode, secretId ?? null);
+    return cswarm.mode;
+  });
   handle('amt:snapshot', (_e, id) => bots.snapshot(id));
   handle('amt:events', (_e, id) => bots.eventsFor(id));
   handle('amt:backtest', (_e, params, venue, symbol, from) => bots.backtest(params, venue, symbol, from));
@@ -899,6 +928,14 @@ app.whenReady().then(() => {
           for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(`amt:${ch}`, payload);
         },
       });
+      cswarm = new CryptoSwarm({
+        ccxt: ccxtSvc,
+        db,
+        emit: (ch, payload) => {
+          for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(`cswarm:${ch}`, payload);
+        },
+        log: (level, msg) => (level === 'warn' ? log('warn', msg) : undefined),
+      });
       log('info', 'exchange services ready');
     })
     .catch((e) => {
@@ -947,6 +984,7 @@ app.on('second-instance', () => {
 app.on('window-all-closed', () => {
   // bots need the app open; stop them before their streams go away
   void bots?.stopAll('app closed');
+  void cswarm?.stop().catch(() => undefined);
   ccxtSvc?.closeAll();
   if (process.platform !== 'darwin') app.quit();
 });

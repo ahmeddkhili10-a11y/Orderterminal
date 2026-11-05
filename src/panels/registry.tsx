@@ -3,6 +3,7 @@ import type { PanelProps } from '../ui/controls';
 import { AccountsPanel, ACCOUNTS_DEFAULTS } from './AccountsPanel';
 import { AlertsPanel, ALERTS_DEFAULTS } from './AlertsPanel';
 import { AmtScalper, AMT_DEFAULTS } from './AmtScalper';
+import { CryptoSwarm, CRYPTO_SWARM_DEFAULTS } from './CryptoSwarm';
 import { DatabasePanel, DATABASE_DEFAULTS } from './DatabasePanel';
 import { MemeScanner, MEME_SCANNER_DEFAULTS } from './MemeScanner';
 import { MemeSwarm, MEME_SWARM_DEFAULTS } from './MemeSwarm';
@@ -78,6 +79,7 @@ export const PANELS: PanelDef[] = [
   { id: 'accounts', title: 'Exchange Accounts', category: 'Account', component: AccountsPanel, defaults: { ...ACCOUNTS_DEFAULTS }, description: 'Balances, positions, open orders and fills from any CCXT exchange using keys in your vault.' },
   { id: 'wallet', title: 'Phantom Wallet', category: 'Account', component: WalletPanel, defaults: { ...WALLET_DEFAULTS }, description: 'Connect Phantom (signed proof of ownership) or watch any Solana address: SOL, tokens and USD value.' },
   { id: 'database', title: 'Database', category: 'Account', component: DatabasePanel, defaults: { ...DATABASE_DEFAULTS }, description: 'Local SQLite: recorded trades per instrument, retention, CSV export, key and wallet counts.' },
+  { id: 'cswarm', title: 'Crypto Swarm', category: 'Algo', component: CryptoSwarm, defaults: { ...CRYPTO_SWARM_DEFAULTS }, description: 'A team of agents trading crypto perpetuals on Hyperliquid: Scalper, Auctioneer and Trend propose; Tape, Crowd, Guardian, Forest and Risk vote. Compounding risk, its own account, paper or live, every trade on Telegram with its chart.' },
   { id: 'amt', title: 'AMT Bots', category: 'Algo', component: AmtScalper, defaults: { ...AMT_DEFAULTS }, description: 'Auction Market Theory bots for any symbol — Scalp (rolling value, order flow, minutes) or Intraday (initial balance, prior-day value, holds for hours). Paper or live, on/off switch, backtest on recorded trades.' },
   { id: 'telegram', title: 'Telegram Bot', category: 'Tools', component: TelegramPanel, defaults: { ...TELEGRAM_DEFAULTS }, description: 'Send alerts to Telegram and answer /price and /status from your chat.' },
   { id: 'alerts', title: 'Alerts', category: 'Tools', component: AlertsPanel, defaults: { ...ALERTS_DEFAULTS }, description: 'Twelve alert types evaluated in your browser against the live feed.' },
