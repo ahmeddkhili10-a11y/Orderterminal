@@ -5,6 +5,7 @@
 // the reading floats beside it. On screen otherwise: a small market card and
 // the balances.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ISLAND_THEME_IDS, ISLAND_THEMES } from './themes';
 import { hub } from '../market/hub';
 import { useSettings } from '../store/settings';
 import { useCSwarm } from '../cswarm/store';
@@ -78,6 +79,8 @@ export function Island() {
   const [info, setInfo] = useState<Info | null>(null);
   const [hint, setHint] = useState(true);
   const base = useSettings((s) => s.base);
+  const themeId = useSettings((s) => s.islandTheme);
+  const setSettings = useSettings((s) => s.set);
   const venue = useSettings((s) => s.primaryVenue);
   const { lines } = useCSwarm();
 
@@ -102,6 +105,10 @@ export function Island() {
       /* no WebGL after all */
     }
   }, [gl]);
+  // the theme: the world and its labels
+  useEffect(() => {
+    engine.current?.setTheme(themeId);
+  }, [themeId, gl]);
   useEffect(() => {
     if (engine.current) {
       engine.current.detail = card.current;
@@ -229,7 +236,7 @@ export function Island() {
   })();
 
   return (
-    <div className="island">
+    <div className="island" data-theme={themeId}>
       <div className="island-host" ref={host}>
         {!gl && <div className="island-nogl">The island is drawn in 3D (WebGL), which this computer's graphics do not offer. Switch to ▦ Panels on the top bar for the same market and swarm.</div>}
       </div>
@@ -261,6 +268,22 @@ export function Island() {
         </span>
         <b className="mono isl-market-p">{fmt(info?.price)}</b>
         {info?.change !== null && info?.change !== undefined && <span className={`mono ${info.change >= 0 ? 'up' : 'down'}`}>{info.change >= 0 ? '+' : ''}{info.change.toFixed(2)}%</span>}
+        <span className="isl-themes" role="radiogroup" aria-label="Island theme">
+          {ISLAND_THEME_IDS.map((id) => {
+            const t = ISLAND_THEMES[id];
+            return (
+              <button
+                key={id}
+                role="radio"
+                aria-checked={themeId === id}
+                className={`isl-theme${themeId === id ? ' on' : ''}`}
+                title={`${t.name} theme`}
+                style={{ background: `linear-gradient(135deg, ${t.swatch[0]} 0 45%, ${t.swatch[1]} 55% 100%)` }}
+                onClick={() => setSettings({ islandTheme: id })}
+              />
+            );
+          })}
+        </span>
       </div>
 
       <MoneyBar />

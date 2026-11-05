@@ -4639,6 +4639,14 @@ table.grid.meme-tape td {
 
 /* ===================== the market island ===================== */
 .island {
+  /* theme accents for everything drawn over the world */
+  --isl-text: #f2f7ff;
+  --isl-sub: #a9c2e6;
+  --isl-accent: #7fb4ff;
+  --isl-glow: rgba(80, 160, 255, 0.95);
+  --isl-line: rgba(110, 170, 255, 0.3);
+  --isl-panel: rgba(3, 10, 24, 0.66);
+  --isl-font: var(--sans);
   position: relative;
   flex: 1;
   min-height: 0;
@@ -4714,25 +4722,25 @@ table.grid.meme-tape td {
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  font: 800 11px var(--sans);
+  font: 800 11px var(--isl-font);
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: #f2f7ff;
-  text-shadow: 0 0 10px rgba(80, 160, 255, 0.95), 0 1px 2px rgba(0, 0, 0, 0.9);
+  color: var(--isl-text);
+  text-shadow: 0 0 10px var(--isl-glow), 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 .island-place::after {
   content: '';
   width: 1px;
   height: 18px;
   margin-top: 3px;
-  background: linear-gradient(rgba(150, 200, 255, 0.9), transparent);
+  background: linear-gradient(var(--isl-accent), transparent);
 }
 .island-place em {
   font: 500 10.5px var(--mono);
   font-style: normal;
   letter-spacing: 0.02em;
   text-transform: none;
-  color: #a9c2e6;
+  color: var(--isl-sub);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 /* a minion's nameplate */
@@ -4829,8 +4837,8 @@ table.grid.meme-tape td {
   visibility: hidden;
   opacity: 0;
   padding-left: 14px;
-  border-left: 2px solid rgba(110, 185, 255, 0.85);
-  background: linear-gradient(90deg, rgba(3, 10, 24, 0.66), rgba(3, 10, 24, 0));
+  border-left: 2px solid var(--isl-accent);
+  background: linear-gradient(90deg, var(--isl-panel), transparent);
   transition: opacity 0.3s;
   will-change: transform;
 }
@@ -4849,13 +4857,13 @@ table.grid.meme-tape td {
   font: 700 9.5px var(--sans);
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: #7fb4ff;
+  color: var(--isl-accent);
 }
 .isl-holo-head b {
-  font: 800 20px var(--sans);
+  font: 800 20px var(--isl-font);
   letter-spacing: 0.04em;
   color: #fff;
-  text-shadow: 0 0 14px rgba(80, 160, 255, 0.7);
+  text-shadow: 0 0 14px var(--isl-glow);
 }
 .isl-x {
   margin-left: auto;
@@ -4941,17 +4949,17 @@ table.grid.meme-tape td {
   gap: 10px;
   padding: 7px 14px;
   border-radius: 999px;
-  background: rgba(3, 10, 24, 0.6);
+  background: var(--isl-panel);
   backdrop-filter: blur(6px);
-  box-shadow: inset 0 0 0 1px rgba(110, 170, 255, 0.28);
+  box-shadow: inset 0 0 0 1px var(--isl-line);
   font-size: 12px;
   color: #c9d8ee;
   pointer-events: none;
 }
 .isl-market-k {
-  font: 800 10px var(--sans);
+  font: 800 10px var(--isl-font);
   letter-spacing: 0.24em;
-  color: #7fb4ff;
+  color: var(--isl-accent);
 }
 .isl-market-sym b {
   color: #fff;
@@ -4978,9 +4986,9 @@ table.grid.meme-tape td {
   gap: 18px;
   padding: 9px 20px;
   border-radius: 999px;
-  background: rgba(3, 10, 24, 0.72);
+  background: var(--isl-panel);
   backdrop-filter: blur(8px);
-  box-shadow: inset 0 0 0 1px rgba(110, 170, 255, 0.3), 0 12px 30px -10px rgba(0, 0, 0, 0.8);
+  box-shadow: inset 0 0 0 1px var(--isl-line), 0 12px 30px -10px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
 }
 .isl-m {
@@ -4989,9 +4997,9 @@ table.grid.meme-tape td {
   gap: 1px;
 }
 .isl-m small {
-  font: 700 9px var(--sans);
+  font: 700 9px var(--isl-font);
   letter-spacing: 0.2em;
-  color: #7f96b8;
+  color: var(--isl-sub);
 }
 .isl-m b {
   display: flex;
@@ -5006,7 +5014,7 @@ table.grid.meme-tape td {
 .isl-sep {
   width: 1px;
   align-self: stretch;
-  background: rgba(110, 170, 255, 0.25);
+  background: var(--isl-line);
 }
 .isl-btn {
   padding: 6px 14px;
@@ -5142,4 +5150,75 @@ table.grid.meme-tape td {
 }
 .island-float.sell {
   color: #ff5a78;
+}
+
+/* the island's themes: the picker (five swatches in the market card) and each theme's accents */
+.isl-themes {
+  display: inline-flex;
+  gap: 5px;
+  margin-left: 6px;
+  padding-left: 10px;
+  border-left: 1px solid var(--isl-line);
+  align-self: center;
+  pointer-events: auto;
+}
+.isl-theme {
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.isl-theme:hover {
+  transform: scale(1.2);
+}
+.isl-theme.on {
+  box-shadow: 0 0 0 2px var(--isl-accent), 0 0 10px var(--isl-glow);
+}
+.island[data-theme='matrix'] {
+  --isl-text: #c8ffd9;
+  --isl-sub: #3dff8a;
+  --isl-accent: #3dff8a;
+  --isl-glow: rgba(0, 255, 102, 0.9);
+  --isl-line: rgba(0, 255, 102, 0.3);
+  --isl-panel: rgba(0, 12, 4, 0.72);
+  --isl-font: var(--mono);
+  background: #000;
+}
+.island[data-theme='neo'] {
+  --isl-text: #f6ecff;
+  --isl-sub: #9df4ff;
+  --isl-accent: #ff3df0;
+  --isl-glow: rgba(255, 61, 240, 0.85);
+  --isl-line: rgba(61, 244, 255, 0.35);
+  --isl-panel: rgba(20, 4, 40, 0.68);
+}
+.island[data-theme='chrome'] {
+  --isl-text: #ffffff;
+  --isl-sub: #c4ccd8;
+  --isl-accent: #e6ecf5;
+  --isl-glow: rgba(200, 215, 240, 0.8);
+  --isl-line: rgba(230, 236, 245, 0.35);
+  --isl-panel: rgba(14, 17, 23, 0.7);
+}
+.island[data-theme='gold'] {
+  --isl-text: #fff6dc;
+  --isl-sub: #e8c46a;
+  --isl-accent: #ffcf5a;
+  --isl-glow: rgba(255, 190, 70, 0.85);
+  --isl-line: rgba(255, 207, 90, 0.32);
+  --isl-panel: rgba(18, 11, 3, 0.72);
+}
+.island[data-theme='chrome'] .island-place,
+.island[data-theme='gold'] .island-place,
+.island[data-theme='chrome'] .island-minion,
+.island[data-theme='gold'] .island-minion {
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 1), 0 0 14px var(--isl-glow);
+}
+.island[data-theme='chrome'] .island-place em,
+.island[data-theme='gold'] .island-place em {
+  text-shadow: 0 0 5px rgba(0, 0, 0, 1), 0 1px 2px rgba(0, 0, 0, 1);
 }

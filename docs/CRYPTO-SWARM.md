@@ -164,6 +164,19 @@ connectors (top bar) and the money (bottom centre).
   **Esc** to fly home.
 - **The money** is a slim strip at the bottom centre: the swarm (wake / stop),
   the account, today, the open position and the floor.
+- **Themes**: five swatches at the end of the market card dress the island
+  (your choice is remembered):
+  - **Night**: the default, a moonlit island in a deep blue sea.
+  - **Matrix**: black and phosphor green, glowing contour lines over the land
+    and code falling like rain.
+  - **Neo**: neo-futuristic; a violet dusk, neon cyan and magenta, glass and
+    light.
+  - **Chrome**: polished metal; land, sea, buildings and robots reflect a
+    studio sky.
+  - **Gold**: gold land on a dark bronze sea under a warm sky.
+
+  A theme changes only colours and surfaces: buyers and bids stay on the cool
+  or gold side, sellers and asks on the warm or red side, in every theme.
 - **▦ Panels** on the top bar switches to the classic panels (footprint,
   heatmap, DOM, bots, the Crypto Swarm panel); **◈ Island** brings it back.
 

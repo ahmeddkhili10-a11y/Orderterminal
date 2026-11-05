@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { IslandThemeId } from '../island/themes';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import type { VenueId } from '../core/types';
 import type { FilterId, GlassLevel, ThemeId } from '../ui/theme';
@@ -126,6 +127,8 @@ export interface Settings {
   view: 'terminal' | 'command';
   /** the crypto terminal: the 3D market island, or the classic panels */
   cryptoView: 'island' | 'panels';
+  /** how the market island looks: night, matrix, neo, chrome or gold */
+  islandTheme: IslandThemeId;
   filter: FilterId;
   glass: GlassLevel;
   soundEnabled: boolean;
@@ -185,6 +188,7 @@ const initial: Settings = {
   theme: 'void',
   view: 'command',
   cryptoView: 'island',
+  islandTheme: 'night',
   filter: 'none',
   glass: 'medium',
   soundEnabled: true,

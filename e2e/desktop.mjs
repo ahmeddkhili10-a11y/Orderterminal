@@ -106,6 +106,13 @@ try {
   const nogl = await page.locator('.island-nogl').count();
   expect(gl3d === 1 || nogl === 1, gl3d ? 'the island is drawn in 3D' : 'without WebGL the island says so and points to Panels');
   await page.screenshot({ path: `${OUT}desktop-island.png` });
+  // themes: five swatches in the market card dress the island
+  expect((await page.locator('.isl-theme').count()) === 5, 'five island themes offered (night, matrix, neo, chrome, gold)');
+  await page.click('.isl-theme[title="Matrix theme"]');
+  await page.waitForSelector('.island[data-theme="matrix"]', { timeout: 5_000 });
+  expect(true, 'the matrix theme dresses the island');
+  await page.click('.isl-theme[title="Night theme"]');
+  await page.waitForSelector('.island[data-theme="night"]', { timeout: 5_000 });
   // the classic panels are one click away
   await page.click('.island-toggle');
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });

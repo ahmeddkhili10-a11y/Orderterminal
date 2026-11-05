@@ -29,7 +29,9 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Light, Terrain, Window } from './model';
+import { islandTheme, type IslandTheme } from './themes';
 
 // the market valley in the middle of the island
 const W = 16; // price across
@@ -179,7 +181,7 @@ function landAt(x: number, z: number) {
 }
 
 // the valley's colours by height, as in a relief map at night
-const STOPS: [number, THREE.Color][] = [
+const RELIEF_STOPS: [number, THREE.Color][] = [
   [0.0, new THREE.Color('#1d5a3e')],
   [0.12, new THREE.Color('#2f7d2c')],
   [0.24, new THREE.Color('#8fb83a')],
@@ -189,7 +191,7 @@ const STOPS: [number, THREE.Color][] = [
   [0.82, new THREE.Color('#3a1a0c')],
   [1.0, new THREE.Color('#1c0d06')],
 ];
-export function heightColor(h: number, out = new THREE.Color()): THREE.Color {
+export function heightColor(h: number, out = new THREE.Color(), STOPS: [number, THREE.Color][] = RELIEF_STOPS): THREE.Color {
   if (h <= STOPS[0][0]) return out.copy(STOPS[0][1]);
   for (let i = 1; i < STOPS.length; i++)
     if (h <= STOPS[i][0]) {
@@ -199,16 +201,6 @@ export function heightColor(h: number, out = new THREE.Color()): THREE.Color {
     }
   return out.copy(STOPS[STOPS.length - 1][1]);
 }
-// the island's colours: wet sand, beach, grass, forest, rock
-function landColor(h: number, slope: number, out = new THREE.Color()): THREE.Color {
-  if (h < 0.05) return out.set('#3d4a52');
-  if (h < 0.3) return out.set('#c9b07a').lerp(new THREE.Color('#9fb05a'), smooth(0.12, 0.3, h));
-  out.set('#3f8a3a').lerp(new THREE.Color('#2b6630'), smooth(0.6, 1.6, h));
-  if (slope > 0.55 || h > 2.2) out.lerp(new THREE.Color('#6d6152'), smooth(0.55, 0.9, slope) * 0.8 + smooth(2.2, 2.8, h) * 0.6);
-  return out;
-}
-
-const MEADOW = new THREE.Color('#2c6b35');
 
 function glowPoints(scale: number) {
   return new THREE.ShaderMaterial({
@@ -323,6 +315,32 @@ export class Island {
   private debate: { proposer: number } | null = null;
   private clearStances = 0;
   private spot!: THREE.Mesh;
+  // the theme and what it dresses
+  private theme: IslandTheme = islandTheme('night');
+  private valleyStops: [number, THREE.Color][] = RELIEF_STOPS;
+  private skyU = { uTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uBottom: { value: new THREE.Color() }, uStars: { value: 1 } };
+  private sky!: THREE.Mesh;
+  private hemi!: THREE.HemisphereLight;
+  private moon!: THREE.DirectionalLight;
+  private sunset!: THREE.DirectionalLight;
+  private landMat!: THREE.MeshStandardMaterial;
+  private landGeo!: THREE.BufferGeometry;
+  private landInfo!: { h: Float32Array; slope: Float32Array; q: Float32Array };
+  private contourU = { uContour: { value: new THREE.Color() }, uContourK: { value: 0 } };
+  private valleyContour = { uVC: { value: new THREE.Color(1, 0.6, 0.25) }, uVK: { value: 0.05 } };
+  private forestMat!: THREE.MeshStandardMaterial;
+  private stoneMat = new THREE.MeshStandardMaterial({ color: 0xe8ebf0, roughness: 0.5 });
+  private plazaMat = new THREE.MeshStandardMaterial({ color: 0x565d6b, roughness: 0.9 });
+  private shellMat = new THREE.MeshStandardMaterial({ color: 0xe9edf5, roughness: 0.28, metalness: 0.35 });
+  private woodMat = new THREE.MeshStandardMaterial({ color: 0x6a4e34, roughness: 0.85 });
+  private hallBase = new THREE.Color(0x6fb0ff);
+  private domeGlow = new THREE.Color(0x1d4aa8);
+  private cropCols = { low: new THREE.Color('#2f8a3a'), high: new THREE.Color('#d9c45a'), poc: new THREE.Color('#ffd25a') };
+  private envTex: THREE.Texture | null = null;
+  private podiumMat = new THREE.MeshStandardMaterial({ color: 0x8a93a3, emissive: 0x2a5aff, emissiveIntensity: 0.4 });
+  /** lamps burn lower in the reflective themes, where the sky already lights the scene */
+  private lampK = 1;
+  private code!: THREE.Points;
   private boatPool: THREE.Group[] = [];
   private picks: THREE.Object3D[] = [];
   private frame: IslandFrame | null = null;
@@ -392,13 +410,38 @@ export class Island {
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
-    this.scene.add(new THREE.HemisphereLight(0x8fb4ff, 0x1a1408, 1.15));
-    const moon = new THREE.DirectionalLight(0xc8d8ff, 1.3);
-    moon.position.set(12, 30, 18);
-    this.scene.add(moon);
-    const sunset = new THREE.DirectionalLight(0xff9a4a, 1.6);
-    sunset.position.set(-30, 8, -12);
-    this.scene.add(sunset);
+    this.hemi = new THREE.HemisphereLight(0x8fb4ff, 0x1a1408, 1.15);
+    this.scene.add(this.hemi);
+    this.moon = new THREE.DirectionalLight(0xc8d8ff, 1.3);
+    this.moon.position.set(12, 30, 18);
+    this.scene.add(this.moon);
+    this.sunset = new THREE.DirectionalLight(0xff9a4a, 1.6);
+    this.sunset.position.set(-30, 8, -12);
+    this.scene.add(this.sunset);
+    // the sky: a gradient dome with stars, coloured by the theme
+    this.sky = new THREE.Mesh(
+      new THREE.SphereGeometry(320, 48, 24),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        uniforms: this.skyU,
+        vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        fragmentShader: `uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uBottom; uniform float uStars; varying vec3 vDir;
+          float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          void main(){
+            float y = vDir.y;
+            vec3 c = y > 0.0 ? mix(uHorizon, uTop, pow(clamp(y, 0.0, 1.0), 0.55)) : mix(uHorizon, uBottom, pow(clamp(-y * 4.0, 0.0, 1.0), 0.5));
+            vec2 uv = vec2(atan(vDir.z, vDir.x) * 90.0, y * 180.0);
+            vec2 id = floor(uv);
+            float st = step(0.9972, h21(id)) * smoothstep(0.04, 0.3, y) * uStars;
+            c += vec3(st) * (0.5 + 0.5 * h21(id + 3.0));
+            gl_FragColor = vec4(c, 1.0);
+          }`,
+      }),
+    );
+    this.sky.renderOrder = -1;
+    this.scene.add(this.sky);
 
     // the sea: a moving, faceted low-poly surface; it runs higher with volatility
     const seaGeo = new THREE.PlaneGeometry(260, 260, 130, 130);
@@ -425,19 +468,21 @@ export class Island {
     // the market valley: the order book as mountains (no grid, only faint contour lines)
     this.valleyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.05 });
     this.valleyMat.onBeforeCompile = (sh) => {
+      sh.uniforms.uVC = this.valleyContour.uVC;
+      sh.uniforms.uVK = this.valleyContour.uVK;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vY;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvY = (modelMatrix * vec4(transformed,1.0)).y;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vY;')
+        .replace('#include <common>', '#include <common>\nvarying float vY; uniform vec3 uVC; uniform float uVK;')
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-          float c = abs(fract(vY * 2.5) - 0.5); totalEmissiveRadiance += vec3(1.0, 0.6, 0.25) * (1.0 - smoothstep(0.0, 0.04, c)) * 0.05 * step(0.9, vY);`);
+          float c = abs(fract(vY * 2.5) - 0.5); totalEmissiveRadiance += uVC * (1.0 - smoothstep(0.0, 0.04, c)) * uVK * step(0.3, vY);`);
     };
 
     // the river of price: pulses flow toward the price now
     this.riverMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uA: { value: new THREE.Color('#2673ff') }, uB: { value: new THREE.Color('#9fd8ff') } },
       vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `varying vec2 vUv; uniform float uTime;
-        void main(){ float p = pow(fract(vUv.x * 26.0 - uTime * 0.9), 5.0); vec3 c = vec3(0.15, 0.45, 1.0) * (0.55 + 1.6 * p) + vec3(0.6,0.85,1.0) * p * 0.6; gl_FragColor = vec4(c, 1.0); }`,
+      fragmentShader: `varying vec2 vUv; uniform float uTime; uniform vec3 uA; uniform vec3 uB;
+        void main(){ float p = pow(fract(vUv.x * 26.0 - uTime * 0.9), 5.0); vec3 c = uA * (0.55 + 1.6 * p) + uB * p * 0.6; gl_FragColor = vec4(c, 1.0); }`,
     });
     this.scene.add(this.river);
     this.orb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 24, 16), new THREE.MeshBasicMaterial({ color: 0xcfe9ff }));
@@ -468,6 +513,34 @@ export class Island {
     );
     this.spot.visible = false;
     this.scene.add(this.spot);
+    // falling code (the matrix theme): streams of glowing points
+    {
+      const streams = 140;
+      const per = 7;
+      const n = streams * per;
+      const pos = new Float32Array(n * 3);
+      const col = new Float32Array(n * 3);
+      const size = new Float32Array(n);
+      for (let k = 0; k < streams; k++) {
+        const x = (hash(k, 4.2) - 0.5) * 2 * RX * 1.05;
+        const z = (hash(k, 8.8) - 0.5) * 2 * RZ * 1.05;
+        const y = hash(k, 1.9) * 16;
+        for (let j = 0; j < per; j++) {
+          const i = k * per + j;
+          pos.set([x, y + j * 0.32, z], i * 3);
+          const b = j === 0 ? 1 : 0.75 - j * 0.09;
+          col.set([j === 0 ? 0.8 : 0.1 * b, b, j === 0 ? 0.85 : 0.45 * b], i * 3);
+          size[i] = j === 0 ? 0.9 : 0.7 - j * 0.05;
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.setAttribute('size', new THREE.BufferAttribute(size, 1));
+      this.code = new THREE.Points(g, glowPoints(150));
+      this.code.visible = false;
+      this.scene.add(this.code);
+    }
 
     el.addEventListener('pointermove', this.onMove);
     el.addEventListener('pointerdown', this.onDown);
@@ -479,6 +552,7 @@ export class Island {
     this.ro.observe(host);
     this.resize();
     this.raf = requestAnimationFrame(this.loop);
+    this.setTheme('night');
     // development only: lets the visual checks reach the scene
     if (import.meta.env.DEV) (window as unknown as { __island?: Island }).__island = this;
   }
@@ -522,7 +596,7 @@ export class Island {
     g.rotateX(-Math.PI / 2);
     const pos = g.getAttribute('position') as THREE.BufferAttribute;
     const col = new Float32Array(pos.count * 3);
-    const c = new THREE.Color();
+    const info = { h: new Float32Array(pos.count), slope: new Float32Array(pos.count), q: new Float32Array(pos.count) };
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
@@ -531,14 +605,27 @@ export class Island {
       const h = inValley ? BASIN - 0.25 : landHeight(x, z);
       pos.setY(i, h);
       const slope = Math.abs(landHeight(x + 0.6, z) - landHeight(x - 0.6, z)) + Math.abs(landHeight(x, z + 0.6) - landHeight(x, z - 0.6));
-      landColor(h, slope, c);
-      // the lake's banks are meadow, not beach
-      if (q < 1.6) c.lerp(MEADOW, smooth(1.6, 1.0, q) * 0.9);
-      col.set([c.r, c.g, c.b], i * 3);
+      info.h[i] = h;
+      info.slope[i] = slope;
+      info.q[i] = q;
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.computeVertexNormals();
-    const land = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.0, flatShading: true }));
+    this.landGeo = g;
+    this.landInfo = info;
+    this.paintLand();
+    this.landMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.0, flatShading: true });
+    // glowing contour lines (the matrix and neo themes)
+    this.landMat.onBeforeCompile = (sh) => {
+      sh.uniforms.uContour = this.contourU.uContour;
+      sh.uniforms.uContourK = this.contourU.uContourK;
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vLY;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvLY = (modelMatrix * vec4(transformed,1.0)).y;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vLY; uniform vec3 uContour; uniform float uContourK;')
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          float cl = abs(fract(vLY * 3.0) - 0.5); totalEmissiveRadiance += uContour * (1.0 - smoothstep(0.0, 0.06, cl)) * uContourK * step(0.12, vLY);`);
+    };
+    const land = new THREE.Mesh(g, this.landMat);
     land.userData.peek = 'land';
     this.scene.add(land);
     this.picks.push(land);
@@ -554,7 +641,8 @@ export class Island {
       const s = 0.5 + hash(k, 3.3) * 0.7;
       trees.push(new THREE.Matrix4().makeScale(s, s * (1.2 + hash(k, 5) * 0.6), s).setPosition(x, h + 0.45 * s, z));
     }
-    const forest = new THREE.InstancedMesh(new THREE.ConeGeometry(0.35, 1.0, 6), new THREE.MeshStandardMaterial({ color: 0x1f5a2c, roughness: 0.9, flatShading: true }), trees.length);
+    this.forestMat = new THREE.MeshStandardMaterial({ color: 0x1f5a2c, roughness: 0.9, flatShading: true });
+    const forest = new THREE.InstancedMesh(new THREE.ConeGeometry(0.35, 1.0, 6), this.forestMat, trees.length);
     trees.forEach((m, i) => forest.setMatrixAt(i, m));
     this.scene.add(forest);
     // fireflies drifting over the land
@@ -659,7 +747,7 @@ export class Island {
         m.compose(new THREE.Vector3(at.x - 3.3 + (r / (C.rows - 1)) * 6.6, y0 + hh / 2, at.z - 2.2 + (k / (C.cols - 1)) * 4.4), q, new THREE.Vector3(0.3, hh, 0.42));
         C.mesh.setMatrixAt(i, m);
         const gold = r === C.poc;
-        C.mesh.setColorAt(i, gold ? c.set('#ffd25a') : c.set('#2f8a3a').lerp(new THREE.Color('#d9c45a'), clamp(C.h[i], 0, 1)));
+        C.mesh.setColorAt(i, gold ? c.copy(this.cropCols.poc) : c.copy(this.cropCols.low).lerp(this.cropCols.high, clamp(C.h[i], 0, 1)));
       }
     C.mesh.instanceMatrix.needsUpdate = true;
     if (C.mesh.instanceColor) C.mesh.instanceColor.needsUpdate = true;
@@ -667,7 +755,7 @@ export class Island {
 
   private buildHarbor() {
     const at = SITES.harbor;
-    const wood = new THREE.MeshStandardMaterial({ color: 0x6a4e34, roughness: 0.85 });
+    const wood = this.woodMat;
     const dark = new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.9 });
     // a pier from the beach out to sea, with a T-head where the boats moor
     const deck = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.12, 6.4), wood);
@@ -917,7 +1005,7 @@ export class Island {
     at.y = landHeight(at.x, at.z);
     const g = new THREE.Group();
     g.position.copy(at);
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.52, 3.4, 20), new THREE.MeshStandardMaterial({ color: 0xeef2f7, roughness: 0.5 }));
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.52, 3.4, 20), this.stoneMat);
     tower.position.y = 1.7;
     // three rings of light up the tower: the 15, 5 and 1-minute moves (the top is the fastest)
     this.bands = [];
@@ -1057,13 +1145,13 @@ export class Island {
     // the hall: a drum with columns and a glass dome, a light on top
     const hall = new THREE.Group();
     hall.position.set(at.x, at.y, at.z - 1.6);
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.5, 0.4, 40), new THREE.MeshStandardMaterial({ color: 0xd9dde4, roughness: 0.6 }));
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.5, 0.4, 40), this.stoneMat);
     base.position.y = 0.2;
-    const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 1.6, 40), new THREE.MeshStandardMaterial({ color: 0xe8ebf0, roughness: 0.5 }));
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 1.6, 40), this.stoneMat);
     drum.position.y = 1.2;
     for (let k = 0; k < 12; k++) {
       const a = (k / 12) * Math.PI * 2;
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.6, 8), new THREE.MeshStandardMaterial({ color: 0xf5f6f8 }));
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.6, 8), this.stoneMat);
       col.position.set(Math.cos(a) * 2.05, 1.2, Math.sin(a) * 2.05);
       hall.add(col);
     }
@@ -1077,9 +1165,9 @@ export class Island {
     hall.add(base, drum, this.hallDome, spire, this.hallLight);
     this.scene.add(hall);
     // the plaza and its podium
-    const plaza = new THREE.Mesh(new THREE.CylinderGeometry(3.7, 3.9, 0.1, 64), new THREE.MeshStandardMaterial({ color: 0x565d6b, roughness: 0.9 }));
+    const plaza = new THREE.Mesh(new THREE.CylinderGeometry(3.7, 3.9, 0.1, 64), this.plazaMat);
     plaza.position.set(at.x, at.y + 0.05, at.z + PODIUM);
-    const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 0.3, 24), new THREE.MeshStandardMaterial({ color: 0x8a93a3, emissive: 0x2a5aff, emissiveIntensity: 0.4 }));
+    const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 0.3, 24), this.podiumMat);
     podium.position.set(at.x, at.y + 0.2, at.z + PODIUM);
     this.scene.add(plaza, podium);
     this.hit(new THREE.Vector3(at.x, at.y, at.z), 'council', 4.2, 4.5);
@@ -1111,7 +1199,7 @@ export class Island {
       ].map(([x, y]) => new THREE.Vector2(x, y)),
       28,
     );
-    const shell = new THREE.MeshStandardMaterial({ color: 0xe9edf5, roughness: 0.28, metalness: 0.35 });
+    const shell = this.shellMat;
     const joint = new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.5, metalness: 0.5 });
     this.minions = agents.map((a, i) => {
       const n = agents.length;
@@ -1508,11 +1596,11 @@ export class Island {
     this.animateLinks(t, now);
     // the verdict: the hall flashes green or red, the banner says it
     const v = this.verdict && now < this.verdict.until ? this.verdict : null;
-    const base = new THREE.Color(0x6fb0ff);
+    const base = this.hallBase;
     const flash = v ? new THREE.Color(v.trade ? 0x3dff9a : 0xff4a6a) : base;
     this.hallLight.color.lerp(flash, 1 - Math.exp(-dt * 6));
-    this.hallLight.intensity = v ? 9 + 4 * Math.sin(t * 10) : 5;
-    (this.hallDome.material as THREE.MeshStandardMaterial).emissive.lerp(v ? flash.clone().multiplyScalar(0.5) : new THREE.Color(0x1d4aa8), 1 - Math.exp(-dt * 4));
+    this.hallLight.intensity = (v ? 9 + 4 * Math.sin(t * 10) : 5) * this.lampK;
+    (this.hallDome.material as THREE.MeshStandardMaterial).emissive.lerp(v ? flash.clone().multiplyScalar(0.5) : this.domeGlow, 1 - Math.exp(-dt * 4));
     const spire = this.scene.getObjectByName('spire');
     if (spire) spire.rotation.y = t * 0.8;
     if (v) {
@@ -1520,6 +1608,126 @@ export class Island {
       this.banner.className = `island-banner ${v.trade ? 'trade' : 'pass'}`;
       this.place(this.banner, new THREE.Vector3(at.x, y0 + 5.6, at.z - 1.6));
     } else this.banner.style.display = 'none';
+  }
+
+  // ---------- themes ----------
+
+  /** colour the land's vertices by the theme: beach, grass, forest, rock, meadow by the lake */
+  private paintLand() {
+    const T = this.theme.land;
+    const { h, slope, q } = this.landInfo;
+    const col = this.landGeo.getAttribute('color') as THREE.BufferAttribute;
+    const beach = new THREE.Color(T.beach);
+    const grass = new THREE.Color(T.grass);
+    const forest = new THREE.Color(T.forest);
+    const rock = new THREE.Color(T.rock);
+    const meadow = new THREE.Color(T.meadow);
+    const wet = rock.clone().multiplyScalar(0.55);
+    const c = new THREE.Color();
+    for (let i = 0; i < h.length; i++) {
+      const y = h[i];
+      if (y < 0.05) c.copy(wet);
+      else if (y < 0.3) c.copy(beach).lerp(grass, smooth(0.12, 0.3, y));
+      else {
+        c.copy(grass).lerp(forest, smooth(0.6, 1.6, y));
+        if (slope[i] > 0.55 || y > 2.2) c.lerp(rock, smooth(0.55, 0.9, slope[i]) * 0.8 + smooth(2.2, 2.8, y) * 0.6);
+      }
+      if (q[i] < 1.6) c.lerp(meadow, smooth(1.6, 1.0, q[i]) * 0.9);
+      col.setXYZ(i, c.r, c.g, c.b);
+    }
+    col.needsUpdate = true;
+  }
+
+  /** dress the island in a theme (night, matrix, neo, chrome, gold) */
+  setTheme(id: string) {
+    const T = islandTheme(id);
+    this.theme = T;
+    const surf = (m: THREE.MeshStandardMaterial, s: { color: string; metal: number; rough: number; emissive?: string }, glow = 0.35) => {
+      m.color.set(s.color);
+      m.metalness = s.metal;
+      m.roughness = s.rough;
+      m.emissive.set(s.emissive ?? '#000000');
+      m.emissiveIntensity = s.emissive ? glow : 1;
+    };
+    this.skyU.uTop.value.set(T.sky.top);
+    this.skyU.uHorizon.value.set(T.sky.horizon);
+    this.skyU.uBottom.value.set(T.sky.bottom);
+    this.skyU.uStars.value = T.sky.stars;
+    this.renderer.setClearColor(T.sky.bottom, 1);
+    this.scene.background = new THREE.Color(T.sky.bottom);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.set(T.fog[0]);
+    fog.near = T.fog[1];
+    fog.far = T.fog[2];
+    this.hemi.color.set(T.hemi[0]);
+    this.hemi.groundColor.set(T.hemi[1]);
+    this.hemi.intensity = T.hemi[2];
+    this.moon.color.set(T.key[0]);
+    this.moon.intensity = T.key[1];
+    this.sunset.color.set(T.rim[0]);
+    this.sunset.intensity = T.rim[1];
+    this.renderer.toneMappingExposure = T.exposure;
+    this.bloom.strength = T.bloom;
+    // chrome and gold reflect a studio sky; the others only the night
+    if (T.env > 0) {
+      if (!this.envTex) {
+        const pm = new THREE.PMREMGenerator(this.renderer);
+        this.envTex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+        pm.dispose();
+      }
+      this.scene.environment = this.envTex;
+      this.scene.environmentIntensity = T.env;
+    } else this.scene.environment = null;
+    surf(this.seaMat, T.sea, 1);
+    this.landMat.metalness = T.land.metal;
+    this.landMat.roughness = T.land.rough;
+    this.paintLand();
+    this.contourU.uContour.value.set(T.contour[0]);
+    this.contourU.uContourK.value = T.contour[1];
+    this.valleyContour.uVC.value.set(T.contour[1] > 0.3 ? T.contour[0] : '#ff9940');
+    this.valleyContour.uVK.value = T.contour[1] > 0.3 ? 0.5 : 0.05;
+    surf(this.forestMat, T.trees, 0.25);
+    this.valleyStops = T.valley.map(([k, c]) => [k, new THREE.Color(c)] as [number, THREE.Color]);
+    (this.riverMat.uniforms.uA.value as THREE.Color).set(T.river[0]);
+    (this.riverMat.uniforms.uB.value as THREE.Color).set(T.river[1]);
+    surf(this.stoneMat, T.stone, 0.4);
+    surf(this.plazaMat, T.plaza);
+    const dome = this.hallDome.material as THREE.MeshStandardMaterial;
+    dome.color.set(T.dome.color);
+    dome.metalness = T.dome.metal;
+    dome.roughness = T.dome.rough;
+    this.domeGlow.set(T.dome.glow);
+    this.podiumMat.color.set(T.plaza.color).offsetHSL(0, 0, 0.15);
+    this.podiumMat.emissive.set(T.dome.color);
+    this.podiumMat.emissiveIntensity = 0.3;
+    this.lampK = T.env > 0 ? 0.35 : 1;
+    this.orbLight.intensity = 4 * this.lampK;
+    this.lampLight.intensity = 3 * this.lampK;
+    this.hallBase.set(T.dome.color);
+    surf(this.shellMat, T.shell, 0.4);
+    surf(this.woodMat, T.wood, 0.4);
+    const bars = this.towers.bars.material as THREE.MeshStandardMaterial;
+    bars.metalness = T.towers.metal;
+    bars.roughness = T.towers.rough;
+    const c = new THREE.Color();
+    for (let i = 0; i < this.towers.side.length; i++) {
+      const ask = this.towers.side[i] === 1;
+      this.towers.bars.setColorAt(i, c.set(ask ? T.towers.ask : T.towers.bid));
+      this.towers.caps.setColorAt(i, c.set(ask ? T.towers.capAsk : T.towers.capBid));
+    }
+    if (this.towers.bars.instanceColor) this.towers.bars.instanceColor.needsUpdate = true;
+    if (this.towers.caps.instanceColor) this.towers.caps.instanceColor.needsUpdate = true;
+    this.cropCols.low.set(T.crops.low);
+    this.cropCols.high.set(T.crops.high);
+    this.cropCols.poc.set(T.crops.poc);
+    const flies = this.scene.getObjectByName('flies') as THREE.Points | undefined;
+    if (flies) {
+      const fc = flies.geometry.getAttribute('color') as THREE.BufferAttribute;
+      c.set(T.flies);
+      for (let i = 0; i < fc.count; i++) fc.setXYZ(i, c.r, c.g, c.b);
+      fc.needsUpdate = true;
+    }
+    this.code.visible = T.rain !== null;
   }
 
   // ---------- going places ----------
@@ -1690,7 +1898,7 @@ export class Island {
       const hv = Math.max(0, h[i]);
       const q = lakeQ(pos.getX(i), pos.getZ(i));
       pos.setY(i, q > 0.97 ? BASIN - 0.6 : BASIN - 0.08 + (hv * HS + 0.08) * smooth(0.97, 0.86, q));
-      heightColor(hv, c);
+      heightColor(hv, c, this.valleyStops);
       col.setXYZ(i, c.r, c.g, c.b);
     }
     pos.needsUpdate = true;
@@ -1938,6 +2146,17 @@ export class Island {
     }
     this.walk(dt);
     this.controls.update();
+    this.sky.position.copy(this.camera.position);
+    if (this.code.visible) {
+      const p = this.code.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const per = 7;
+      for (let k = 0; k < p.count / per; k++) {
+        let y = p.getY(k * per) - dt * (3 + hash(k, 6.1) * 4);
+        if (y < -0.5) y += 16.5;
+        for (let j = 0; j < per; j++) p.setY(k * per + j, y + j * 0.32);
+      }
+      p.needsUpdate = true;
+    }
     this.seaUniforms.uTime.value = t;
     this.riverMat.uniforms.uTime.value = t;
     this.placeTowers(dt);
