@@ -4636,3 +4636,335 @@ table.grid.meme-tape td {
 .cs-scroll {
   overflow-x: auto;
 }
+
+/* ===================== the market island ===================== */
+.island {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #02040a;
+}
+.island-host,
+.island-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.island-canvas {
+  display: block;
+  cursor: grab;
+}
+.island-canvas:active {
+  cursor: grabbing;
+}
+.island-nogl {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  padding: 40px;
+  text-align: center;
+}
+.island-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.island-labels > div {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  will-change: transform;
+}
+.island-price {
+  padding: 3px 8px;
+  border: 1px solid rgba(110, 180, 255, 0.7);
+  border-radius: 6px;
+  background: rgba(4, 14, 32, 0.8);
+  color: #dff0ff;
+  font: 600 13px var(--mono);
+  box-shadow: 0 0 14px rgba(60, 140, 255, 0.55);
+}
+.island-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font: 600 10px var(--sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #cfe3ff;
+  text-shadow: 0 0 6px rgba(70, 150, 255, 0.9);
+}
+.island-node span {
+  font: 500 10px var(--mono);
+  letter-spacing: 0;
+  color: #9fb6d6;
+  text-transform: none;
+}
+
+/* the island's places: names floating above them */
+.island-place {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid rgba(90, 160, 255, 0.45);
+  border-radius: 7px;
+  background: rgba(3, 10, 24, 0.72);
+  font: 700 10px var(--sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #d8e8ff;
+  box-shadow: 0 0 14px -4px rgba(60, 140, 255, 0.6);
+}
+.island-place span {
+  font: 500 10px var(--mono);
+  letter-spacing: 0;
+  text-transform: none;
+  color: #8ea6c8;
+}
+
+/* the card of the place you visited */
+.isl-detail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 340px;
+  max-height: 62%;
+  display: flex;
+  flex-direction: column;
+  visibility: hidden;
+  opacity: 0;
+  border: 1px solid rgba(90, 160, 255, 0.55);
+  border-radius: 12px;
+  background: rgba(3, 9, 22, 0.88);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.8), 0 0 28px -8px rgba(60, 140, 255, 0.6);
+  transition: opacity 0.25s;
+  will-change: transform;
+}
+.isl-detail.open {
+  opacity: 1;
+}
+.isl-detail header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(80, 150, 255, 0.25);
+  font: 700 11px var(--sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #e3efff;
+}
+.isl-x {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #8ea6c8;
+  cursor: pointer;
+  font-size: 13px;
+}
+.isl-x:hover {
+  color: #fff;
+}
+.isl-detail-body {
+  overflow: auto;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #c9d6ea;
+}
+.isl-detail-body p {
+  margin: 2px 0;
+  line-height: 1.45;
+}
+.isl-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(80, 150, 255, 0.12);
+}
+.isl-row span {
+  color: #8ea6c8;
+}
+.isl-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4da3ff;
+  box-shadow: 0 0 8px #4da3ff;
+}
+/* an agent's gauge, big, in its card */
+.isl-gauge-big {
+  position: relative;
+  width: 110px;
+  height: 110px;
+  margin: 4px auto;
+  border-radius: 50%;
+  background: conic-gradient(from -90deg, #00e5ff, #3dff8a 22%, #ffe14d 42%, #ff7a2f 60%, #ff3d7f 78%, #a44bff calc(var(--v) * 100%), rgba(60, 90, 160, 0.18) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 11px), #000 calc(100% - 10px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 11px), #000 calc(100% - 10px));
+  filter: drop-shadow(0 0 8px rgba(80, 160, 255, 0.6));
+}
+.isl-gauge-big + p {
+  text-align: center;
+}
+.isl-detail-body .isl-gauge-big span {
+  display: none;
+}
+
+/* the money: bottom centre */
+.isl-money {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+.isl-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 128px;
+  padding: 8px 14px;
+  border: 1px solid rgba(110, 170, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(4, 9, 20, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(160, 200, 255, 0.12);
+}
+.isl-chip small {
+  font: 700 9.5px var(--sans);
+  letter-spacing: 0.16em;
+  color: #8ea6c8;
+}
+.isl-chip b {
+  font-size: 20px;
+  font-weight: 700;
+  color: #eaf4ff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.isl-chip span {
+  font-size: 10.5px;
+  color: #7f93b3;
+}
+.isl-chip-swarm b {
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.isl-chip-swarm .chip {
+  margin-top: 3px;
+  align-self: flex-start;
+}
+.isl-go {
+  border-color: #3dffa0;
+  color: #3dffa0;
+}
+.isl-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 100px;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 5px 12px;
+  border-radius: 20px;
+  background: rgba(3, 10, 24, 0.7);
+  color: #9fb6d6;
+  font-size: 11.5px;
+  pointer-events: none;
+  animation: isl-hint 9s ease forwards;
+}
+@keyframes isl-hint {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.isl-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+}
+.isl-line {
+  line-height: 1.35;
+  color: #c9d6ea;
+}
+.isl-line b {
+  color: #6fb6ff;
+  margin-right: 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.isl-line.trade,
+.isl-line.win {
+  color: #3dffa0;
+}
+.isl-line.loss,
+.isl-line.error {
+  color: #ff5d74;
+}
+.isl-line.vote {
+  opacity: 0.8;
+  padding-left: 10px;
+}
+.isl-pos {
+  padding: 3px 6px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font: 600 11px var(--mono);
+}
+
+/* peeking */
+.isl-peek {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  max-width: 300px;
+  padding: 7px 10px;
+  border: 1px solid rgba(110, 180, 255, 0.7);
+  border-radius: 8px;
+  background: rgba(3, 10, 24, 0.92);
+  box-shadow: 0 0 18px -4px rgba(60, 140, 255, 0.7);
+  font-size: 11.5px;
+  color: #c9d6ea;
+}
+.isl-peek b {
+  display: block;
+  color: #fff;
+  font: 600 12.5px var(--mono);
+  margin-bottom: 2px;
+}
+.isl-peek.buy {
+  border-color: rgba(255, 181, 74, 0.8);
+}
+.isl-peek.sell {
+  border-color: rgba(255, 61, 94, 0.8);
+}
+
+@media (max-width: 1100px) {
+  .island-hud {
+    grid-template-columns: minmax(220px, 30%) 1fr minmax(220px, 30%);
+  }
+}

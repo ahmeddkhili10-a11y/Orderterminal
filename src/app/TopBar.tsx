@@ -320,6 +320,8 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
   const showFps = useSettings((s) => s.showFps);
   const view = useSettings((s) => s.view);
   const command = view === 'command';
+  const cryptoView = useSettings((s) => s.cryptoView);
+  const setSettings = useSettings((s) => s.set);
   const fps = useFps();
   const H = hub();
   const f = H.primary;
@@ -376,9 +378,16 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           </button>
         </>
       ) : (
-        <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('cswarm')} title="The crypto swarm: its agents, council, trades and rules">
-          ◈ <span className="lbl keep">Swarm</span>
-        </button>
+        <>
+          <button className="chip primary-chip chrome-chip island-toggle" onClick={() => setSettings({ cryptoView: cryptoView === 'island' ? 'panels' : 'island' })} title={cryptoView === 'island' ? 'The classic panels: footprint, heatmap, DOM, bots' : 'The market island in 3D'}>
+            {cryptoView === 'island' ? '▦' : '◈'} <span className="lbl keep">{cryptoView === 'island' ? 'Panels' : 'Island'}</span>
+          </button>
+          {cryptoView === 'panels' && (
+            <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('cswarm')} title="The crypto swarm: its agents, council, trades and rules">
+              ◈ <span className="lbl keep">Swarm</span>
+            </button>
+          )}
+        </>
       )}
       <SafeModeChip />
       <AlgoKill />

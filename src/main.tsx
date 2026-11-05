@@ -32,7 +32,10 @@ const filter = params.get('filter');
 if (filter && FILTERS.some((f) => f.id === filter)) s.set({ filter: filter as FilterId });
 
 const view = params.get('view');
-if (view === 'terminal' || view === 'command') s.set({ view });
+if (view === 'command') s.set({ view });
+// the crypto terminal: the market island, or (view=terminal, as before) the classic panels
+else if (view === 'island') s.set({ view: 'terminal', cryptoView: 'island' });
+else if (view === 'terminal' || view === 'panels') s.set({ view: 'terminal', cryptoView: 'panels' });
 
 const simLoad = Number(params.get('simLoad'));
 if (simLoad > 1) setSimLoad(simLoad);

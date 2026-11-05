@@ -97,8 +97,19 @@ try {
   await page.keyboard.press('Escape');
   // the rest checks the order-flow terminal: one click from the meme terminal's bar
   await page.click('.cc-orderflow-btn');
+  // the crypto terminal opens on the market island; only the money sits on screen, bottom centre
+  await page.waitForSelector('.island', { timeout: 15_000 });
+  await page.waitForSelector('.isl-money', { timeout: 15_000 });
+  const money = await page.locator('.isl-money').innerText();
+  expect(/PAPER ACCOUNT/.test(money) && /\$30\.00/.test(money) && /TODAY/.test(money) && /FLOOR/.test(money), 'the money strip: the swarm, its paper account, today, the position, the floor');
+  const gl3d = await page.locator('.island-canvas').count();
+  const nogl = await page.locator('.island-nogl').count();
+  expect(gl3d === 1 || nogl === 1, gl3d ? 'the island is drawn in 3D' : 'without WebGL the island says so and points to Panels');
+  await page.screenshot({ path: `${OUT}desktop-island.png` });
+  // the classic panels are one click away
+  await page.click('.island-toggle');
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });
-  expect(true, 'Order flow on the top bar switches to the order-flow terminal');
+  expect(true, 'Panels switches the crypto terminal to the classic order-flow layout');
   // the crypto swarm: its tab puts its panel in the layout; it starts on paper and stops
   await page.waitForSelector('.cs', { timeout: 15_000 });
   expect((await page.locator('.view-tab').count()) === 2, 'two terminal tabs: Meme swarm and Crypto swarm');

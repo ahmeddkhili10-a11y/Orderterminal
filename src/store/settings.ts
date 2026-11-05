@@ -124,6 +124,8 @@ export interface Settings {
   theme: ThemeId;
   /** the panel layout, or the Command Center (swarm dashboard) */
   view: 'terminal' | 'command';
+  /** the crypto terminal: the 3D market island, or the classic panels */
+  cryptoView: 'island' | 'panels';
   filter: FilterId;
   glass: GlassLevel;
   soundEnabled: boolean;
@@ -182,6 +184,7 @@ const initial: Settings = {
   backfillMinutes: 30,
   theme: 'void',
   view: 'command',
+  cryptoView: 'island',
   filter: 'none',
   glass: 'medium',
   soundEnabled: true,

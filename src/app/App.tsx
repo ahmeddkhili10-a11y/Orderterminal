@@ -7,6 +7,7 @@ import { startLunoAlerts } from '../luno/lane';
 import { startPhoneLink } from '../meme/swarm/phone';
 import { startBotAlerts } from '../desktop/botAlerts';
 import { startCryptoSwarmLink } from '../cswarm/store';
+import { Island } from '../island/Island';
 import { CommandCenter } from '../command/CommandCenter';
 import { startSwarmService } from '../meme/swarm/swarm';
 import { startTelegramService } from '../desktop/telegram';
@@ -48,6 +49,7 @@ export function App() {
   const layoutRef = useRef<ILayoutApi>(null);
   const fired = useSettings((s) => s.fired);
   const view = useSettings((s) => s.view);
+  const cryptoView = useSettings((s) => s.cryptoView);
   const sessionStart = useMemo(() => Date.now(), []);
 
   useEffect(() => {
@@ -188,8 +190,9 @@ export function App() {
         </div>
       )}
       {view === 'command' && <CommandCenter />}
-      {/* the panels stay mounted under the Command Center, so they keep their state */}
-      <div className="layout-host" style={view === 'command' ? { display: 'none' } : undefined}>
+      {view === 'terminal' && cryptoView === 'island' && <Island />}
+      {/* the panels stay mounted under the Command Center and the island, so they keep their state */}
+      <div className="layout-host" style={view === 'command' || cryptoView === 'island' ? { display: 'none' } : undefined}>
         <div className="layout-inner">
           <Layout ref={layoutRef} model={model} factory={factory} onModelChange={(m) => saveLayout(m.toJson())} realtimeResize />
         </div>
