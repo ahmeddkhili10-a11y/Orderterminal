@@ -5,6 +5,7 @@ import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BotManager } from './amt/bots.mjs';
 import { CryptoSwarm } from './cswarm/cswarm.mjs';
+import { LabService } from './lab/lab.mjs';
 import { Db } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
@@ -25,6 +26,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 // training worker: bundled next to main.mjs and kept outside the asar archive
 const trainWorkerPath = join(here, 'trainWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
+const labWorkerPath = join(here, 'labWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 const DAY = 86_400_000;
 
 // NOVUS_USER_DATA relocates the database, vault and settings (tests, portable installs)
@@ -90,6 +92,7 @@ let vault;
 let ccxtSvc;
 let bots;
 let cswarm;
+let lab;
 let services = null;
 
 function createWindow() {
@@ -250,7 +253,7 @@ const ledgerRecord = () => {
 };
 
 // channels that need the exchange services, which load after the window is up
-const NEEDS_SERVICES = /^(ccxt|trade|amt|cswarm):|^vault:test$/;
+const NEEDS_SERVICES = /^(ccxt|trade|amt|cswarm|lab):|^vault:test$/;
 
 function registerIpc() {
   // the swarm keeps trading behind the lock screen: its own trades, balances and Telegram updates only
@@ -398,6 +401,16 @@ function registerIpc() {
     return bots.stopAll('kill switch');
   });
   // the crypto swarm: agents trading perpetuals on Hyperliquid, its own account and record
+  // the Strategy Lab: research runs, results, backtests and deployment
+  handle('lab:state', () => lab.status());
+  handle('lab:result', () => lab.result());
+  handle('lab:config', (_e, patch) => lab.setConfig(patch ?? {}));
+  handle('lab:run', (_e, patch) => lab.run(patch ?? {}));
+  handle('lab:cancel', () => lab.cancel());
+  handle('lab:test', (_e, spec, patch) => lab.test(spec, patch ?? {}));
+  handle('lab:deploy', (_e, args, targets, coins) => lab.deploy(args ?? {}, targets, coins));
+  handle('lab:undeploy', (_e, id) => lab.undeploy(String(id)));
+  handle('lab:toggle', (_e, id, on) => lab.toggle(String(id), Boolean(on)));
   handle('cswarm:state', () => cswarm.state());
   handle('cswarm:start', () => cswarm.start());
   handle('cswarm:stop', (_e, flatten) => cswarm.stop({ flatten: Boolean(flatten) }));
@@ -928,9 +941,18 @@ app.whenReady().then(() => {
           for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(`amt:${ch}`, payload);
         },
       });
+      lab = new LabService({
+        ccxt: ccxtSvc,
+        dir: join(app.getPath('userData'), 'lab'),
+        makeWorker: () => new Worker(labWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
+        emit: (ch, payload) => {
+          for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(ch, payload);
+        },
+      });
       cswarm = new CryptoSwarm({
         ccxt: ccxtSvc,
         db,
+        labDeployed: () => lab.deployed('crypto'),
         emit: (ch, payload) => {
           for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(`cswarm:${ch}`, payload);
         },

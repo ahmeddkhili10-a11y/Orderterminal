@@ -198,6 +198,25 @@ export class CcxtService {
     return out;
   }
 
+  /** Funding-rate history of a perpetual (public data), oldest first: { time, rate } per funding interval. */
+  async fundingHistory(id, symbol, since, max = 20000) {
+    const ex = this.publicExchange(id);
+    await ex.loadMarkets();
+    if (!ex.has.fetchFundingRateHistory) throw new Error(`${ex.name} has no funding history`);
+    if (!ex.markets[symbol]) throw new Error(`${symbol} is not listed on ${ex.name}`);
+    const out = [];
+    let t = since;
+    while (out.length < max) {
+      const rows = await ex.fetchFundingRateHistory(symbol, t, 1000);
+      if (!rows?.length) break;
+      for (const r of rows) if (Number.isFinite(r.fundingRate) && (!out.length || r.timestamp > out[out.length - 1].time)) out.push({ time: r.timestamp, rate: r.fundingRate });
+      const last = rows[rows.length - 1].timestamp;
+      if (rows.length < 2 || last <= t || last >= Date.now() - 3_600_000) break;
+      t = last + 1;
+    }
+    return out;
+  }
+
   async tickers(id) {
     const ex = this.publicExchange(id);
     await ex.loadMarkets();

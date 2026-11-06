@@ -48,7 +48,7 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
   const a = atr14(c)[i];
   if (!Number.isFinite(a) || a <= 0) return null;
   let odds: number | null = null;
-  if (spec.meta) {
+  if (spec.meta?.model) {
     const row = [...features(c)[i], d];
     if (row.every(Number.isFinite)) {
       odds = predictForest(spec.meta.model, row);

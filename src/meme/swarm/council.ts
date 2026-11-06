@@ -9,13 +9,16 @@
 //               from enough coins (trust 30 %+), an expected loss or a likely
 //               death is a veto
 //   Optimizer   for at the size it would allow; a portfolio gate is a veto
+//   Lab         strategies deployed from the Strategy Lab read the coin's own
+//               chart: for while one says long, against while one says short.
+//               Tested on major coins, not meme coins, so it votes but never vetoes
 //
 // Buy only with no veto, the Strategist for, and the weighted votes for minus
 // against at 1.5 or more.
 import type { Decision, Viability, Virality } from './agents';
 import type { Odds } from './forest';
 
-export type CouncilBot = 'sentinel' | 'herald' | 'strategist' | 'forest' | 'optimizer';
+export type CouncilBot = 'sentinel' | 'herald' | 'strategist' | 'forest' | 'optimizer' | 'lab';
 export interface Vote {
   bot: CouncilBot;
   stance: 'for' | 'against' | 'abstain' | 'veto';
@@ -53,6 +56,8 @@ export interface CouncilInput {
   optimizerGate: string | null;
   sizeMult: number;
   social?: { posts: number; authors: number } | null;
+  /** the Strategy Lab's deployed strategies on this coin's chart: +1 long, −1 short, 0 nothing, null too little history */
+  lab?: { name: string; dir: number | null }[];
 }
 
 export function council(inp: CouncilInput, cfg: CouncilConfig = COUNCIL_DEFAULTS): Verdict {
@@ -79,6 +84,15 @@ export function council(inp: CouncilInput, cfg: CouncilConfig = COUNCIL_DEFAULTS
   else votes.push({ bot: 'forest', stance: 'abstain', weight: 0, why: `${odds} — on the fence` });
   // Optimizer
   votes.push(inp.optimizerGate ? { bot: 'optimizer', stance: 'veto', weight: 0, why: inp.optimizerGate } : { bot: 'optimizer', stance: 'for', weight: 1, why: `the book can take it — size ${inp.sizeMult.toFixed(2)}×` });
+  if (inp.lab?.length) {
+    const read = inp.lab.filter((l) => l.dir !== null);
+    const longs = read.filter((l) => l.dir! > 0);
+    const shorts = read.filter((l) => l.dir! < 0);
+    if (!read.length) votes.push({ bot: 'lab', stance: 'abstain', weight: 0, why: 'too little chart history for the Lab’s strategies' });
+    else if (longs.length > shorts.length) votes.push({ bot: 'lab', stance: 'for', weight: Math.min(1, 0.5 * longs.length), why: `${longs.map((l) => l.name).join(', ')} ${longs.length > 1 ? 'say' : 'says'} long on this chart` });
+    else if (shorts.length > longs.length) votes.push({ bot: 'lab', stance: 'against', weight: Math.min(1, 0.5 * shorts.length), why: `${shorts.map((l) => l.name).join(', ')} ${shorts.length > 1 ? 'say' : 'says'} short on this chart` });
+    else votes.push({ bot: 'lab', stance: 'abstain', weight: 0, why: 'the Lab’s strategies have no signal on this chart' });
+  }
 
   const score = votes.reduce((a, b) => a + (b.stance === 'for' ? b.weight : b.stance === 'against' ? -b.weight : 0), 0);
   const veto = votes.find((b) => b.stance === 'veto');

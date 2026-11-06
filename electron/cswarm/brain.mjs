@@ -22,9 +22,9 @@
 //   Risk         the compounding risk manager (risk.mjs): a gate is a veto.
 import { Forest } from '../../src/meme/swarm/forest.ts';
 
-export const PROPOSERS = ['scalper', 'auction', 'trend'];
+export const PROPOSERS = ['scalper', 'auction', 'trend', 'lab'];
 export const COUNCIL = ['scalper', 'auction', 'trend', 'tape', 'crowd', 'guardian', 'forest', 'risk'];
-export const AGENT_NAME = { scalper: 'Scalper', auction: 'Auctioneer', trend: 'Trend', tape: 'Tape', crowd: 'Crowd', guardian: 'Guardian', forest: 'Forest', risk: 'Risk' };
+export const AGENT_NAME = { scalper: 'Scalper', auction: 'Auctioneer', trend: 'Trend', lab: 'Lab', tape: 'Tape', crowd: 'Crowd', guardian: 'Guardian', forest: 'Forest', risk: 'Risk' };
 const COINS = ['BTC', 'ETH', 'SOL'];
 
 export const dirOf = (side) => (side === 'buy' ? 1 : -1);

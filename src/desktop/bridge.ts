@@ -1,4 +1,7 @@
 import type { XPost } from '../shared/xapi';
+import type { LabConfig, LabDeployed, LabStatus, LabTest } from '../lab/store';
+import type { ResearchResult } from '../lab/research';
+import type { StrategySpec } from '../lab/backtest';
 import type { Kline } from '../core/types';
 import type { TokenInfo, WalletActivity, WalletBalances } from '../shared/solana';
 
@@ -739,6 +742,19 @@ export interface NovusApi {
     vacuum(): Promise<void>;
     setRetention(days: number): Promise<void>;
     exportCsv(venue: string, symbol: string): Promise<{ path: string; rows: number } | null>;
+  };
+  lab: {
+    state(): Promise<LabStatus>;
+    result(): Promise<ResearchResult | null>;
+    config(patch: Partial<LabConfig>): Promise<LabConfig>;
+    run(patch?: Partial<LabConfig>): Promise<LabStatus['last']>;
+    cancel(): Promise<void>;
+    test(spec: StrategySpec, patch?: Partial<LabConfig>): Promise<LabTest>;
+    deploy(args: { rank?: number; spec?: StrategySpec; tfH?: number; stats?: LabDeployed['stats'] }, targets?: { crypto: boolean; meme: boolean }, coins?: string[]): Promise<string>;
+    undeploy(id: string): Promise<void>;
+    toggle(id: string, on: boolean): Promise<void>;
+    onState(fn: (s: LabStatus) => void): () => void;
+    onEvent(fn: (e: { kind: string; at?: number; id?: string; name?: string }) => void): () => void;
   };
   cswarm: {
     state(): Promise<CSwarmState>;

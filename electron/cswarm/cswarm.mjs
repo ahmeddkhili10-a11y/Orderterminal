@@ -22,6 +22,7 @@ import { ADAPTIVE_PRESET, AmtEngine, INTRADAY_PRESET } from '../amt/engine.mjs';
 import { AGENT_NAME, CCOUNCIL_DEFAULTS, councilR, dirOf, features, MARK, oddsR, PROPOSERS, rClass, trainForest } from './brain.mjs';
 import { newBook, recordClose, RISK_DEFAULTS, riskGate, shiftBook, sizeTrade, updateBook } from './risk.mjs';
 import { atrOf, dailyTrendOf, manageTrend, Shadow, TREND_AGENT_DEFAULTS, trendCandidate } from './agents.mjs';
+import { liveDirection, liveSignal, manageLab } from '../../src/lab/live.ts';
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -29,7 +30,7 @@ const HOUR = 3_600_000;
 export const CSWARM_DEFAULTS = {
   exchangeId: 'hyperliquid',
   coins: ['BTC', 'ETH', 'SOL'],
-  agents: { scalper: true, auction: true, trend: true },
+  agents: { scalper: true, auction: true, trend: true, lab: true },
   /** the paper account starts with this (USDC) */
   paperStartUsd: 30,
   /** taker fee and slippage per side, bps (Hyperliquid base tier: 4.5 bps taker) */
@@ -58,8 +59,10 @@ export class CryptoSwarm {
    * @param o.db { get(key), set(key, value) }
    * @param o.emit (channel, payload) => void — 'state' and 'event' to the app
    */
-  constructor({ ccxt, db, emit = () => {}, now = Date.now, log = () => {} }) {
+  constructor({ ccxt, db, emit = () => {}, now = Date.now, log = () => {}, labDeployed = () => [] }) {
     this.ccxt = ccxt;
+    /** the Strategy Lab's strategies deployed into this swarm */
+    this.labDeployed = labDeployed;
     this.db = db;
     this.emitFn = emit;
     this.now = now;
@@ -184,7 +187,7 @@ export class CryptoSwarm {
 
   setupCoin(coin) {
     const c = this.cfg;
-    const cs = { coin, symbol: symbolFor(coin, c.exchangeId), sid: `cswarm-${coin}`, price: NaN, funding: null, daily: null, dailyAt: 0, hourly: [], hourlyAt: 0, lastBar: 0, engines: {}, busy: false, feed: 'connecting', feedError: null };
+    const cs = { coin, symbol: symbolFor(coin, c.exchangeId), sid: `cswarm-${coin}`, price: NaN, funding: null, daily: null, dailyAt: 0, hourly: [], hourlyAt: 0, lastBar: 0, lab: {}, labLast: {}, engines: {}, busy: false, feed: 'connecting', feedError: null };
     const eq = this.equity() > 0 ? this.equity() : c.paperStartUsd;
     for (const agent of ['scalper', 'auction']) {
       if (!c.agents[agent]) continue;
@@ -232,7 +235,13 @@ export class CryptoSwarm {
     const pos = this.openOn(coin);
     if (!pos || pos.closing) return;
     const cs = this.coins.get(coin);
-    if (pos.owner === 'swarm') {
+    const lab = pos.agent === 'lab' ? this.labDeployed().find((d) => d.id === pos.labId) ?? null : null;
+    if (lab) {
+      // the Lab's trade follows the exits it was tested with
+      const r = manageLab(pos, lab.spec, lab.tfH, p, t);
+      if (r?.note) this.decision(pos, r.note);
+      if (r?.exit) void this.close(pos, r.exit, p);
+    } else if (pos.owner === 'swarm') {
       const r = manageTrend(pos, p, t, { ...TREND_AGENT_DEFAULTS, maxHoldH: pos.agent === 'trend' ? TREND_AGENT_DEFAULTS.maxHoldH : 12 });
       if (r?.note) this.decision(pos, r.note);
       if (r?.exit) void this.close(pos, r.exit, p);
@@ -302,6 +311,7 @@ export class CryptoSwarm {
       } catch (err) {
         this.sayOnce(`candles:${cs.coin}`, 'trend', `${cs.coin}: candles unavailable (${err?.message ?? err}) — trying again`, 'warn', 30 * MIN);
       }
+      if (c.agents.lab !== false) await this.labTick(cs, now);
     }
     if (this.mode === 'live') await this.refreshEquity();
     const eq = this.equity();
@@ -311,6 +321,53 @@ export class CryptoSwarm {
     }
     if (now - (this.trainedAt ?? 0) >= 10 * MIN) await this.retrain();
     this.persist();
+  }
+
+  /**
+   * The Lab agent: each strategy deployed from the Strategy Lab reads its
+   * signal on this coin's closed candles of its own timeframe, proposes new
+   * signals to the council, and closes its trade on an opposite signal when
+   * its rules say so.
+   */
+  async labTick(cs, now) {
+    const strategies = this.labDeployed().filter((d) => !d.coins?.length || d.coins.includes(cs.coin));
+    if (!strategies.length) return;
+    for (const tfH of [...new Set(strategies.map((d) => d.tfH))]) {
+      const tf = tfH === 24 ? '1d' : `${tfH}h`;
+      const L = (cs.lab[tfH] ??= { bars: [], at: 0 });
+      try {
+        if (!L.bars.length) {
+          L.bars = await this.ccxt.history(this.cfg.exchangeId, cs.symbol, tf, now - 3000 * tfH * HOUR, 3000);
+          L.at = now;
+        } else if (now - L.at >= 10 * MIN) {
+          const fresh = await this.ccxt.ohlcv(this.cfg.exchangeId, cs.symbol, tf, 10);
+          const last = L.bars[L.bars.length - 1]?.time ?? 0;
+          L.bars = [...L.bars.filter((b) => b.time < (fresh[0]?.time ?? Infinity)), ...fresh].filter((b, i, a) => i === 0 || b.time > a[i - 1].time).slice(-3000);
+          L.at = now;
+          if ((L.bars[L.bars.length - 1]?.time ?? 0) <= last) continue;
+        } else continue;
+      } catch (err) {
+        this.sayOnce(`lab:${cs.coin}:${tf}`, 'lab', `${cs.coin}: ${tf} history unavailable for the Lab's strategies (${err?.message ?? err}) — trying again`, 'warn', 30 * MIN);
+        continue;
+      }
+      const closed = L.bars.filter((b) => b.time + tfH * HOUR <= now);
+      const market = { coin: cs.coin, tfH, bars: closed, funding: null };
+      for (const d of strategies.filter((x) => x.tfH === tfH)) {
+        const pos = this.openOn(cs.coin);
+        // an opposite signal closes the Lab's own trade, if the rules say so
+        if (pos && pos.agent === 'lab' && pos.labId === d.id && d.spec.exit.onFlip && !pos.closing) {
+          if (liveDirection(d.spec, market) === -dirOf(pos.side)) void this.close(pos, 'flip', Number.isFinite(cs.price) ? cs.price : closed[closed.length - 1].close);
+          continue;
+        }
+        const sig = liveSignal(d.spec, market);
+        if (!sig || sig.bar <= (cs.labLast[d.id] ?? 0)) continue;
+        cs.labLast[d.id] = sig.bar;
+        const price = Number.isFinite(cs.price) ? cs.price : sig.price;
+        const shift = price - sig.price;
+        const stats = d.stats ? ` (tested: Sharpe ${d.stats.sharpe.toFixed(2)}, t ${d.stats.t.toFixed(1)}, ${d.stats.verdict})` : '';
+        this.propose(cs.coin, 'lab', { ...sig, price, stop: sig.stop + shift, target: sig.target + shift, setup: `Lab · ${sig.setup}`, why: `${sig.why}${stats}`, labId: d.id, labTfH: tfH, labHoldMs: d.spec.exit.maxBars * tfH * HOUR });
+      }
+    }
   }
 
   async refreshEquity() {
@@ -397,7 +454,7 @@ export class CryptoSwarm {
     this.discuss(cand, v);
     if (!v.trade) {
       e?.failed(`council: ${v.summary}`);
-      this.shadow.add({ coin, side: p.side, entry: p.price, stop: p.stop, target: p.target, t, maxHoldMs: agent === 'trend' ? 72 * HOUR : agent === 'auction' ? 8 * HOUR : 15 * MIN, x, agent, costR: odds.costR });
+      this.shadow.add({ coin, side: p.side, entry: p.price, stop: p.stop, target: p.target, t, maxHoldMs: agent === 'lab' ? p.labHoldMs ?? 72 * HOUR : agent === 'trend' ? 72 * HOUR : agent === 'auction' ? 8 * HOUR : 15 * MIN, x, agent, costR: odds.costR });
       return;
     }
     const risk = Math.abs(p.price - p.stop);
@@ -407,7 +464,9 @@ export class CryptoSwarm {
       coin,
       symbol: cs.symbol,
       agent,
-      owner: agent === 'trend' ? 'swarm' : 'engine',
+      owner: agent === 'trend' || agent === 'lab' ? 'swarm' : 'engine',
+      labId: p.labId ?? null,
+      labTfH: p.labTfH ?? null,
       side: p.side,
       setup: p.setup,
       why: p.why,

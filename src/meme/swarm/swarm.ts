@@ -11,6 +11,7 @@
 // passed-but-not-picked coins) is followed for an hour, so the hit rates per
 // conviction level show whether the strategy works.
 import { create } from 'zustand';
+import { memeLabVotes } from '../../lab/meme';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { desktop, type SwarmLimits } from '../../desktop/bridge';
 import { fetchJson } from '../../exchanges/ws';
@@ -171,7 +172,7 @@ const RETRY_MS = 60_000;
 const MAX_TRIES = 4;
 
 /** Which bot speaks for each council seat in the live feed. */
-const AGENT_OF: Record<CouncilBot, AgentId> = { sentinel: 'sentinel', herald: 'herald', strategist: 'strategist', forest: 'forest', optimizer: 'optimizer' };
+const AGENT_OF: Record<CouncilBot, AgentId> = { sentinel: 'sentinel', herald: 'herald', strategist: 'strategist', forest: 'forest', optimizer: 'optimizer', lab: 'strategist' };
 
 /** The x potential, in words: what the forest expects, its odds, and the room to the target. */
 export function potentialText(p: NonNullable<Position['potential']>) {
@@ -701,6 +702,7 @@ class Swarm {
           optimizerGate: gate ?? read?.gate ?? (twin ? `already holding a coin on "${twin}" — same-narrative coins pump and rug together` : null),
           sizeMult,
           social: this.social.get(tok.mint) ?? null,
+          lab: memeLabVotes(tok),
         });
         const transcript = verdict.votes.map((b) => `${MARK[b.stance]} ${b.bot[0].toUpperCase() + b.bot.slice(1)}: ${b.why}`);
         for (const b of verdict.votes) this.say(AGENT_OF[b.bot], `${tok.symbol} · council ${MARK[b.stance]} ${b.why}`, tok.mint);
