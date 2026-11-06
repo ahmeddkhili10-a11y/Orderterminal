@@ -6152,3 +6152,11 @@ table.grid.meme-tape td {
     display: none;
   }
 }
+@media (max-width: 1700px) {
+  .app.pro .topbar .chip .lbl.keep {
+    display: none;
+  }
+  .app.pro .topbar .brand-text {
+    display: none;
+  }
+}

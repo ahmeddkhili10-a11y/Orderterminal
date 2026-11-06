@@ -352,6 +352,8 @@ export function LabResearch() {
               </div>
             ))}
             {showLib ? (
+              <>
+              <div className="lab-line muted">Each rule at its best published parameters, chosen in sample, then run on the out-of-sample years it never saw. * learned rules are fitted on the in-sample data, so only their out-of-sample numbers are a test.</div>
               <table className="pro-table">
                 <thead>
                   <tr>
@@ -370,7 +372,10 @@ export function LabResearch() {
                       <td className="l b">{l.name}</td>
                       <td className="l muted">{l.family}</td>
                       <td className="mono muted">{l.skipped ?? Object.entries(l.params).map(([k, v]) => `${k}=${v}`).join(' ')}</td>
-                      <td className="mono">{l.is ? num(l.is.sharpe) : '—'}</td>
+                      <td className="mono" title={l.family === 'ml' ? 'Learned rules are fitted on the in-sample data: their in-sample Sharpe is not a test — read the out-of-sample one' : undefined}>
+                        {l.is ? num(l.is.sharpe) : '—'}
+                        {l.family === 'ml' && l.is ? '*' : ''}
+                      </td>
                       <td className={`mono ${(l.oos?.sharpe ?? 0) > 0 ? 'up' : 'down'}`}>{l.oos ? num(l.oos.sharpe) : '—'}</td>
                       <td className="mono">{l.oos ? num(l.oos.t) : '—'}</td>
                       <td className="mono">{l.oos?.trades ?? '—'}</td>
@@ -378,6 +383,7 @@ export function LabResearch() {
                   ))}
                 </tbody>
               </table>
+              </>
             ) : (
               <>
                 <table className="pro-table">

@@ -358,7 +358,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <AggregateChips />
           <button className="chip" onClick={() => onOpen('connection')} title="Connection & history source">
             <span className={`status-dot status-${bf.state === 'done' ? 'open' : bf.state === 'loading' ? 'connecting' : bf.state === 'error' ? 'error' : 'idle'}`} />
-            History
+            <span className="lbl">History</span>
             {bf.state === 'loading' && (
               <span className="progress">
                 <div style={{ width: `${Math.round(bf.progress * 100)}%` }} />
@@ -394,7 +394,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       )}
       <SafeModeChip />
       <AlgoKill />
-      {!command && (
+      {!command && !pro && (
         <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('amt')} title="AMT trading bots: scalp and intraday, paper or live, backtests">
           <BotIcon /> <span className="lbl keep">Bots</span>
         </button>
