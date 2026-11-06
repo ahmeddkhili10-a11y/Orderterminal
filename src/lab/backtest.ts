@@ -6,8 +6,10 @@
 // charged every bar a perpetual position is open. The result has the trades
 // (in R, the multiple of the risk taken) and a return for every bar, marked
 // to market at the close, for the statistics.
+import { errQuantile } from './garch';
 import type { ForestModel } from './ml';
-import { atr14, garchSigma, EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Ctx, type ExitSpec, type Params } from './library';
+import { atr14, barsPerYear, benchBeta, garchOf, garchSigma, EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Ctx, type ExitSpec, type Params } from './library';
+import { volTargetWeight } from './quant';
 
 export interface RuleRef {
   id: string;
@@ -22,6 +24,19 @@ export interface StrategySpec {
   sides: 'both' | 'long' | 'short';
   /** a meta-labeller: a forest that decides which signals to take (nf: how many inputs it was trained on) */
   meta?: { model: ForestModel; threshold: number; nf?: number };
+  /**
+   * position size while in a trade: unit notional; a volatility target
+   * (annual σ the position should run at, from the GARCH forecast); or a
+   * value-at-risk budget (the 1-day 99 % GARCH VaR the position may carry, as
+   * a fraction of capital). Capped at 3× notional.
+   */
+  sizing?: Sizing;
+  /** delta-hedge the market exposure: short β × the position in bitcoin (β re-estimated on 30 days of returns) */
+  hedge?: 'btc';
+}
+export interface Sizing {
+  mode: 'unit' | 'vol' | 'var';
+  target: number;
 }
 export interface Trade {
   side: 1 | -1;
@@ -55,6 +70,22 @@ export interface BTResult {
 
 const ex0 = (s: StrategySpec): ExitSpec => ({ ...EXIT_DEFAULT, ...s.exit });
 
+/** the position weight each bar's close calls for (used from the next bar); null = unit notional */
+export function sizeWeights(c: Ctx, s: StrategySpec): Float64Array | null {
+  const z = s.sizing;
+  if (!z || z.mode === 'unit' || !(z.target > 0)) return null;
+  const G = garchSigma(c);
+  if (z.mode === 'vol') {
+    const bpy = barsPerYear(c.m.tfH);
+    return G.map((g) => volTargetWeight(g, z.target, bpy, 3));
+  }
+  // a VaR budget: the weight at which a day's 99 % loss (GARCH, the fitted tails) is the budget
+  const fit = garchOf(c);
+  const q = fit ? -errQuantile(fit, 0.01) : 2.326;
+  const day = Math.sqrt(Math.max(1, Math.round(24 / c.m.tfH)));
+  return G.map((g) => (g > 0 ? Math.min(3, z.target / (q * g * day)) : 0));
+}
+
 export function signalOf(c: Ctx, s: StrategySpec): Int8Array {
   const sig = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
   const fs = s.filters.map((f) => FILTER_MAP[f.id].compute(c, f.p));
@@ -78,6 +109,9 @@ export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, cost
   const raw = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
   const A = atr14(c);
   const G = ex0(s).stopVol ? garchSigma(c) : null;
+  const W = sizeWeights(c, s);
+  const B = s.hedge === 'btc' && c.m.bench ? benchBeta(c) : null;
+  const bm = c.m.bench;
   const f = c.m.funding;
   const ex: ExitSpec = { ...EXIT_DEFAULT, ...s.exit };
   const cost = (costs.feeBps + costs.slipBps) / 1e4;
@@ -86,6 +120,13 @@ export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, cost
   const times = new Float64Array(n);
   const trades: Trade[] = [];
   let pos: { side: 1 | -1; sig: number; entryI: number; entry: number; stop: number; stop0: number; target: number; risk: number; trailed: boolean; fund: number } | null = null;
+  // the position's weight (notional) and its bitcoin hedge ratio, both set at entry and rebalanced when they drift
+  let w = 1;
+  let hb = 0;
+  const wAt = (i: number) => (W && Number.isFinite(W[i]) ? W[i] : 1);
+  const bAt = (i: number) => (B && Number.isFinite(B[i]) ? B[i] : 0);
+  // the cost of opening or closing: the coin leg and the hedge leg
+  const tc = () => cost * w * (1 + Math.abs(hb));
   let inBars = 0;
   const close = (i: number, px: number, reason: Trade['reason']) => {
     if (!pos) return;
@@ -109,35 +150,52 @@ export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, cost
         // the stop: ATRs, or GARCH standard deviations of the next bar's return
         const risk = G && ex.stopVol ? ex.stopVol * G[i - 1] * entry : ex.stopAtr * a;
         pos = { side, sig: i - 1, entryI: i, entry, stop: entry - side * risk, stop0: entry - side * risk, target: ex.targetR > 0 ? entry + side * ex.targetR * risk : NaN, risk, trailed: false, fund: 0 };
-        rets[k] -= cost;
+        w = wAt(i - 1);
+        hb = bAt(i - 1);
+        rets[k] -= tc();
       }
     }
     if (!pos) continue;
     inBars++;
     const prev = i === pos.entryI ? pos.entry : b[i - 1].close;
+    // unit size holds a fixed quantity (P&L on the entry notional); a sized or hedged position is a weight
+    // of capital, rebalanced, so each bar's move is measured from the bar before
+    const den = W || B ? prev : pos.entry;
     // 2) the stop, then the target, inside the bar
     const hitStop = pos.side === 1 ? bar.low <= pos.stop : bar.high >= pos.stop;
     const hitTgt = Number.isFinite(pos.target) && (pos.side === 1 ? bar.high >= pos.target : bar.low <= pos.target);
     const fund = f && Number.isFinite(f[i]) ? pos.side * f[i] : 0;
     pos.fund += fund;
+    // the hedge leg: short β of bitcoin per unit of a long (long β per unit of a short)
+    if (hb && bm && Number.isFinite(bm[i]) && Number.isFinite(bm[i - 1]) && bm[i - 1] > 0) rets[k] -= pos.side * w * hb * (bm[i] / bm[i - 1] - 1);
     if (hitStop || hitTgt) {
       // a gap through the stop fills at the open
       const px = hitStop ? (pos.side === 1 ? Math.min(pos.stop, bar.open) : Math.max(pos.stop, bar.open)) * (1 - pos.side * (costs.slipBps / 1e4)) : pos.target;
-      rets[k] += (pos.side * (px - prev)) / pos.entry - cost - fund;
+      rets[k] += w * ((pos.side * (px - prev)) / den - fund) - tc();
       close(i, px, hitStop ? (pos.trailed ? 'trail' : 'stop') : 'target');
       continue;
     }
-    rets[k] += (pos.side * (bar.close - prev)) / pos.entry - fund;
+    rets[k] += w * ((pos.side * (bar.close - prev)) / den - fund);
     // 3) at the close: time limit, opposite signal, trailing stop
     if (i - pos.entryI + 1 >= ex.maxBars) {
-      rets[k] -= cost;
+      rets[k] -= tc();
       close(i, bar.close, 'time');
       continue;
     }
     if (ex.onFlip && raw[i] === -pos.side) {
-      rets[k] -= cost;
+      rets[k] -= tc();
       close(i, bar.close, 'flip');
       continue;
+    }
+    // rebalance the size (and the hedge) when the target has drifted more than a quarter
+    if (W || B) {
+      const wn = wAt(i);
+      const bn = bAt(i);
+      if (Math.abs(wn - w) > 0.25 * w || Math.abs(bn - hb) > 0.25 * Math.max(0.2, Math.abs(hb))) {
+        rets[k] -= cost * (Math.abs(wn - w) + Math.abs(wn * bn - w * hb));
+        w = wn;
+        hb = bn;
+      }
     }
     if (ex.trailAtr > 0 && Number.isFinite(A[i]) && (pos.side * (bar.close - pos.entry)) / pos.risk >= 1) {
       const t = bar.close - pos.side * ex.trailAtr * A[i];
@@ -148,7 +206,7 @@ export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, cost
     }
   }
   if (pos && to - 1 >= from) {
-    rets[n - 1] -= cost;
+    rets[n - 1] -= tc();
     close(to - 1, b[to - 1].close, 'end');
   }
   return { trades, rets, times, exposure: n ? inBars / n : 0 };

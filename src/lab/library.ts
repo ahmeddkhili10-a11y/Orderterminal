@@ -13,6 +13,7 @@
 // one rule runs on 1-hour, 4-hour or daily candles.
 import { fitBest, garchVar, type GarchFit } from './garch';
 import { fitForest, fitRidge, predictForest, predictRidge, type ForestModel, type Ridge } from './ml';
+import { fitHmm2, hmmFilter, kalmanTrend, ouRolling, varianceRatio, volEstimate, type Hmm2 } from './quant';
 import { CANDLE_FEATURES, candleShape } from './shape';
 import { adx, atr, ema, hiPrev, loPrev, logRets, pctRank, retN, rsi, rstd, rvol, sma, volZ, type Bar } from './series';
 
@@ -23,6 +24,8 @@ export interface Market {
   bars: Bar[];
   /** funding paid by longs per bar (a fraction of notional), aligned with bars; null when unknown */
   funding?: Float64Array | null;
+  /** the benchmark's close (bitcoin) at each bar, for a delta hedge; null for bitcoin itself or when unknown */
+  bench?: Float64Array | null;
 }
 export type Params = Record<string, number>;
 export type Family = 'momentum' | 'trend' | 'breakout' | 'reversion' | 'carry' | 'seasonal' | 'volume' | 'ml';
@@ -111,6 +114,91 @@ export function garchSigma(c: Ctx): Float64Array {
   });
 }
 
+// ---------- quantitative models (quant.ts), cached per market ----------
+
+const lrets = (c: Ctx) => cached(c, 'lr', () => logRets(close(c)));
+const logp = (c: Ctx) => cached(c, 'logp', () => Float64Array.from(close(c), Math.log));
+
+/** variance of the 1-bar log return over the training bars (the Kalman filter's observation noise) */
+function trainVar(c: Ctx): number {
+  return cached(c, 'trainVar', () => {
+    const lr = lrets(c);
+    const end = Math.min(c.trainEnd, lr.length);
+    let s = 0;
+    let q = 0;
+    let k = 0;
+    for (let i = Math.max(1, end - 6000); i < end; i++)
+      if (Number.isFinite(lr[i])) {
+        s += lr[i];
+        q += lr[i] * lr[i];
+        k++;
+      }
+    return k > 10 ? q / k - (s / k) ** 2 : 1e-4;
+  });
+}
+
+/** the Kalman local-linear trend of log price; smooth 0 (smoothest) … 2 */
+export const kalmanOf = (c: Ctx, smooth: number) =>
+  cached(c, `kalman${smooth}`, () => kalmanTrend(logp(c), [1e-7, 1e-6, 1e-5][smooth] * c.m.tfH ** 2, trainVar(c)));
+/** Ornstein–Uhlenbeck fit of log price over a rolling window (hours) */
+export const ouOf = (c: Ctx, windowH: number) => cached(c, `ou${H(c, windowH)}`, () => ouRolling(logp(c), H(c, windowH)));
+/** variance ratio of 1-day returns against 1-bar returns, over a rolling window (hours) */
+export const vrOf = (c: Ctx, windowH: number) => cached(c, `vr${H(c, windowH)}`, () => varianceRatio(lrets(c), Math.max(2, H(c, 24)), H(c, windowH)).vr);
+/** the two-state regime model (Hamilton), fitted on the training bars */
+export function hmmOf(c: Ctx): Hmm2 | null {
+  return cached(c, 'hmm', () => {
+    const lr = lrets(c);
+    const end = Math.min(c.trainEnd, lr.length);
+    return end > 400 ? trainedOnce(c, 'hmm', () => fitHmm2(lr.slice(Math.max(1, end - 6000), end))) : null;
+  });
+}
+/** P(turbulent regime) at each bar, filtered forward (uses returns up to that bar only) */
+export const hmmProb = (c: Ctx) =>
+  cached(c, 'hmmP', () => {
+    const m = hmmOf(c);
+    return m ? hmmFilter(m, Float64Array.from(lrets(c), (x) => (Number.isFinite(x) ? x : 0))) : new Float64Array(c.m.bars.length).fill(NaN);
+  });
+/** rolling beta of the coin to the benchmark (bitcoin) over 30 days, from returns up to each bar */
+export function benchBeta(c: Ctx): Float64Array | null {
+  return cached(c, 'beta', () => {
+    const bm = c.m.bench;
+    if (!bm) return null;
+    const n = c.m.bars.length;
+    const w = H(c, 720);
+    const y = lrets(c);
+    const out = new Float64Array(n).fill(NaN);
+    let sx = 0;
+    let sy = 0;
+    let sxx = 0;
+    let sxy = 0;
+    let k = 0;
+    const xs = new Float64Array(n);
+    const ys = new Float64Array(n);
+    for (let i = 1; i < n; i++) {
+      const x = Math.log(bm[i] / bm[i - 1]);
+      const ok = Number.isFinite(x) && Number.isFinite(y[i]);
+      xs[i] = ok ? x : 0;
+      ys[i] = ok ? y[i] : 0;
+      sx += xs[i];
+      sy += ys[i];
+      sxx += xs[i] * xs[i];
+      sxy += xs[i] * ys[i];
+      k++;
+      if (k > w) {
+        const j = i - w;
+        sx -= xs[j];
+        sy -= ys[j];
+        sxx -= xs[j] * xs[j];
+        sxy -= xs[j] * ys[j];
+        k = w;
+      }
+      const d = k * sxx - sx * sx;
+      if (k >= w && d > 0) out[i] = (k * sxy - sx * sy) / d;
+    }
+    return out;
+  });
+}
+
 const state = (n: number) => new Int8Array(n);
 const sgn = (x: number) => (x > 0 ? 1 : x < 0 ? -1 : 0);
 
@@ -146,7 +234,7 @@ const hrs = (h: number) => (h >= 24 && h % 24 === 0 ? `${h / 24}-day` : `${h}-ho
 
 // ---------- features for the learned rules and the meta-labeller ----------
 
-export const FEATURES = ['ret 1h', 'ret 4h', 'ret 1d', 'ret 1w', 'price / 1w MA', 'RSI 14', 'ADX 14', 'vol 1d / vol 30d', 'volume z', 'hour (sin)', 'hour (cos)', 'weekday', 'funding (a year)', 'GARCH σ next bar', 'GARCH σ / long run', ...CANDLE_FEATURES];
+export const FEATURES = ['ret 1h', 'ret 4h', 'ret 1d', 'ret 1w', 'price / 1w MA', 'RSI 14', 'ADX 14', 'vol 1d / vol 30d', 'volume z', 'hour (sin)', 'hour (cos)', 'weekday', 'funding (a year)', 'GARCH σ next bar', 'GARCH σ / long run', ...CANDLE_FEATURES, 'Kalman slope t', 'OU s-score (1w)', 'variance ratio (2w)', 'P(turbulent regime)', 'Yang–Zhang / GARCH σ'];
 
 export function features(c: Ctx): Float64Array[] {
   return cached(c, 'features', () => {
@@ -168,10 +256,15 @@ export function features(c: Ctx): Float64Array[] {
     const g = garchOf(c);
     const lrun = g ? Math.sqrt(g.longRun) : NaN;
     const shape = candleShape(c.m.bars, atr14(c));
+    const kf = kalmanOf(c, 1);
+    const ou = ouOf(c, 168).s;
+    const vr = vrOf(c, 336);
+    const hp = hmmProb(c);
+    const yz = cached(c, 'yz', () => volEstimate(c.m.bars, H(c, 24), 'yangZhang'));
     return c.m.bars.map((b, i) => {
       const d = new Date(b.time);
       const h = d.getUTCHours();
-      return Float64Array.from([r1[i], r4[i], r24[i], r168[i], cl[i] / ma[i] - 1, rs[i] / 100, ad[i] / 100, v30[i] > 0 ? v1[i] / v30[i] : v7[i] > 0 ? v1[i] / v7[i] : NaN, vz[i], Math.sin((h / 24) * 2 * Math.PI), Math.cos((h / 24) * 2 * Math.PI), d.getUTCDay() / 6, fa ? fa[i] : 0, gs[i] * 100, Number.isFinite(lrun) && lrun > 0 ? gs[i] / lrun : 1, ...shape[i]]);
+      return Float64Array.from([r1[i], r4[i], r24[i], r168[i], cl[i] / ma[i] - 1, rs[i] / 100, ad[i] / 100, v30[i] > 0 ? v1[i] / v30[i] : v7[i] > 0 ? v1[i] / v7[i] : NaN, vz[i], Math.sin((h / 24) * 2 * Math.PI), Math.cos((h / 24) * 2 * Math.PI), d.getUTCDay() / 6, fa ? fa[i] : 0, gs[i] * 100, Number.isFinite(lrun) && lrun > 0 ? gs[i] / lrun : 1, ...shape[i], kf.slopeSd[i] > 0 ? kf.slope[i] / kf.slopeSd[i] : NaN, Number.isFinite(ou[i]) ? ou[i] : 0, Number.isFinite(vr[i]) ? vr[i] : 1, hp[i], gs[i] > 0 ? yz[i] / gs[i] : NaN]);
     });
   });
 }
@@ -550,6 +643,38 @@ export const SIGNALS: SignalDef[] = [
     describe: (p) => `long when the ${hrs(p.lookback)} return is more than ${p.k} GARCH standard deviations up, short when as far down`,
   },
   {
+    id: 'kalman',
+    name: 'Kalman-filter trend',
+    family: 'trend',
+    papers: ['kal60', 'har90'],
+    rationale: 'A Kalman filter separates a trend from the noise around it and says how sure it is of the slope: trade only when the filtered slope is clearly away from zero, which ignores the whipsaws moving averages fall for.',
+    grid: { smooth: [0, 1, 2], k: [1, 2, 3] },
+    exit: { stopAtr: 3, maxBars: 336, onFlip: true },
+    compute: (c, p) => {
+      const kf = kalmanOf(c, p.smooth);
+      return Int8Array.from(kf.slope, (s, i) => {
+        const t = kf.slopeSd[i] > 0 ? s / kf.slopeSd[i] : 0;
+        return t > p.k ? 1 : t < -p.k ? -1 : 0;
+      });
+    },
+    describe: (p) => `long when the Kalman-filtered trend slope (${['smoothest', 'smooth', 'responsive'][p.smooth]}) is more than ${p.k} standard errors above zero, short when as far below`,
+  },
+  {
+    id: 'ou',
+    name: 'Ornstein–Uhlenbeck reversion',
+    family: 'reversion',
+    papers: ['uo30', 'al10', 'ber10'],
+    rationale: 'Fit a mean-reverting (Ornstein–Uhlenbeck) process to the price over a window; when the process reverts quickly and price sits far from its equilibrium in its own standard deviations (the s-score), bet on the pull back.',
+    grid: { window: [72, 168, 336], k: [1.5, 2] },
+    exit: { stopAtr: 2, maxBars: 72, onFlip: false },
+    compute: (c, p) => {
+      const o = ouOf(c, p.window);
+      const maxHL = H(c, p.window) / 4;
+      return Int8Array.from(o.s, (s, i) => (Number.isFinite(s) && o.halfLife[i] < maxHL ? (s < -p.k ? 1 : s > p.k ? -1 : 0) : 0));
+    },
+    describe: (p) => `fit an Ornstein–Uhlenbeck process over ${hrs(p.window)}; when it reverts fast (half-life under a quarter of the window), long below −${p.k} s-score, short above +${p.k}`,
+  },
+  {
     id: 'candle',
     name: 'Next-candle forecast',
     family: 'ml',
@@ -712,6 +837,40 @@ export const FILTERS: FilterDef[] = [
       return a;
     },
     describe: (p) => `no longs when funding is above ${(p.band * 100).toFixed(0)}% a year, no shorts below −${(p.band * 100).toFixed(0)}%`,
+  },
+  {
+    id: 'vratio',
+    name: 'Variance-ratio regime',
+    papers: ['lm88', 'hur51'],
+    rationale: 'When daily moves are bigger than the sum of hourly ones would suggest (variance ratio above 1), moves persist and trends pay; below 1 they reverse and fading pays. Match the rule to the regime.',
+    grid: { mode: [0, 1], window: [336, 720] },
+    compute: (c, p) => {
+      const vr = vrOf(c, p.window);
+      const a = allow(vr.length);
+      vr.forEach((x, i) => {
+        const ok = Number.isFinite(x) && (p.mode === 0 ? x > 1.05 : x < 0.95);
+        a.long[i] = a.short[i] = ok ? 1 : 0;
+      });
+      return a;
+    },
+    describe: (p) => (p.mode === 0 ? `only while moves persist: the ${hrs(p.window)} variance ratio of daily to hourly returns is above 1.05 (trending)` : `only while moves reverse: the ${hrs(p.window)} variance ratio is below 0.95 (mean-reverting)`),
+  },
+  {
+    id: 'hmm',
+    name: 'Hidden-Markov regime',
+    papers: ['ham89', 'at12'],
+    rationale: 'A two-state Markov-switching model, fitted in sample, reads the odds that the market is in its calm or its turbulent regime from the returns so far; strategies behave differently in each.',
+    grid: { mode: [0, 1] },
+    compute: (c, p) => {
+      const hp = hmmProb(c);
+      const a = allow(hp.length);
+      hp.forEach((x, i) => {
+        const ok = Number.isFinite(x) && (p.mode === 0 ? x < 0.5 : x > 0.5);
+        a.long[i] = a.short[i] = ok ? 1 : 0;
+      });
+      return a;
+    },
+    describe: (p) => (p.mode === 0 ? 'only in the calm regime (the hidden-Markov odds of turbulence under 50 %)' : 'only in the turbulent regime (the hidden-Markov odds of turbulence over 50 %)'),
   },
 ];
 

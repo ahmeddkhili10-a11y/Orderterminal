@@ -1,7 +1,7 @@
 // A deployed Lab strategy, live: read its signal on the latest closed candles
 // and manage its open trade by its own exit rules — the same code paths the
 // backtest used, so what was tested is what trades.
-import { signalOf, type StrategySpec } from './backtest';
+import { signalOf, sizeWeights, type StrategySpec } from './backtest';
 import { atr14, ctxOf, features, garchOf, garchSigma, type Market } from './library';
 import { predictForest } from './ml';
 import { rulesOf } from './research';
@@ -31,6 +31,12 @@ export interface LiveSignal {
   odds: number | null;
   setup: string;
   why: string;
+  /**
+   * the strategy's own sizing, relative to its usual size: a volatility target
+   * or VaR budget takes more risk when the GARCH forecast is calm and less in
+   * a storm (clamped 0.5–1.5; the swarm's risk manager applies it)
+   */
+  sizeMult: number;
 }
 
 /**
@@ -65,6 +71,15 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
   // swarm still needs a level for its reward-to-risk, so 4R stands in
   const tR = spec.exit.targetR > 0 ? spec.exit.targetR : 4;
   const rule = rulesOf(spec, m.tfH)[0].replace(/^Entry: /, '');
+  // tested sizing: today's weight against the weight at the long-run volatility
+  let sizeMult = 1;
+  let sizeNote = '';
+  // both sizings scale as 1/σ: against the long-run σ, today's forecast sets the multiple
+  if (sizeWeights(c, spec) && g && g.longRun > 0 && gs > 0) {
+    sizeMult = Math.max(0.5, Math.min(1.5, Math.sqrt(g.longRun) / gs));
+    sizeNote = ` · ${spec.sizing?.mode === 'vol' ? 'volatility target' : 'VaR budget'}: ${sizeMult.toFixed(2)}× usual size`;
+  }
+  const hedgeNote = spec.hedge === 'btc' ? ' · tested with a bitcoin delta hedge (short β × the position in BTC): the swarm does not place hedges — place it yourself with TKT if you want the tested result' : '';
   return {
     side: d > 0 ? 'buy' : 'sell',
     price: px,
@@ -74,7 +89,8 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
     bar: m.bars[i].time,
     odds,
     setup: spec.name,
-    why: `${rule}${odds !== null ? ` — the forest gives it ${(odds * 100).toFixed(0)}%` : ''}${volNote}`,
+    why: `${rule}${odds !== null ? ` — the forest gives it ${(odds * 100).toFixed(0)}%` : ''}${volNote}${sizeNote}${hedgeNote}`,
+    sizeMult,
   };
 }
 

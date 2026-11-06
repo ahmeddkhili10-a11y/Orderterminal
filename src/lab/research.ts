@@ -19,7 +19,7 @@
 //
 // Every strategy runs on all coins with the same rules: a rule that only works
 // on one coin is more likely luck.
-import { backtest, COSTS, type BTResult, type Costs, type StrategySpec, type Trade } from './backtest';
+import { backtest, COSTS, type BTResult, type Costs, type Sizing, type StrategySpec, type Trade } from './backtest';
 import { candleForecast, type CandleReport } from './candles';
 import { forecastTest, garchVar, horizonVol, hourProfile, simulate, valueAtRisk, type ForecastTest } from './garch';
 import { barsPerYear, ctxOf, EXIT_DEFAULT, features, FEATURES, FILTER_MAP, FILTERS, garchOf, gridOf, logRet, SIGNAL_MAP, SIGNALS, type Ctx, type ExitSpec, type Market, type Params, type SignalDef } from './library';
@@ -122,6 +122,24 @@ export interface ForecastReport {
   candles: CandleReport | null;
 }
 
+/**
+ * What the search learned about each ingredient: how often it was tried, the
+ * in-sample score of the mixes with and without it, the final odds the
+ * adaptive search gave it, and — among the finalists — the out-of-sample
+ * Sharpe with and without it.
+ */
+export interface Learned {
+  group: string;
+  option: string;
+  tried: number;
+  isWith: number;
+  isWithout: number;
+  prob: number;
+  oosWith: number | null;
+  oosWithout: number | null;
+  nOos: number;
+}
+
 export interface ResearchResult {
   at: number;
   tfH: number;
@@ -130,6 +148,8 @@ export interface ResearchResult {
   library: LibraryRow[];
   top: Ranked[];
   pbo: number | null;
+  /** the adaptive search's account of which ingredients helped */
+  learned: Learned[];
   forecasting: ForecastReport[];
   notes: string[];
   cfg: ResearchCfg;
@@ -178,7 +198,19 @@ function runAll(ctxs: Ctx[], spec: StrategySpec, part: 'is' | 'oos' | 'all', cos
   return { per, ...p, trades: per.flatMap((x) => x.bt.trades), exposure: per.reduce((a, x) => a + x.bt.exposure, 0) / (per.length || 1) };
 }
 
-const keyOf = (s: StrategySpec) => JSON.stringify([s.signal, s.filters, s.exit, s.sides]);
+const keyOf = (s: StrategySpec) => JSON.stringify([s.signal, s.filters, s.exit, s.sides, s.sizing ?? null, s.hedge ?? null]);
+
+export function describeSizing(z: Sizing | undefined): string | null {
+  if (!z || z.mode === 'unit') return null;
+  return z.mode === 'vol'
+    ? `size the position to run at ${(z.target * 100).toFixed(0)} % annual volatility on the GARCH forecast (volatility targeting), at most 3× notional`
+    : `size the position so a day's 99 % value at risk (GARCH, fitted tails) is ${(z.target * 100).toFixed(0)} % of capital, at most 3× notional`;
+}
+const SIZING_WHY: Record<string, { papers: string[]; why: string }> = {
+  vol: { papers: ['mm17', 'hhkrsv18', 'bsc15'], why: 'Volatility targeting: volatility is forecastable but does not predict returns, so taking less risk when the GARCH forecast is high and more when it is low raises the Sharpe ratio and shrinks the crashes.' },
+  var: { papers: ['kup95', 'adeh99', 'boll86'], why: 'A value-at-risk budget: the position carries the same 1-day 99 % loss whatever the market, using the fitted GARCH volatility and its fat tails.' },
+  btc: { papers: ['sha64', 'bs73'], why: 'Delta hedge against bitcoin: short β × the position in BTC so the result is the coin’s own move, not the market’s — what remains is alpha.' },
+};
 
 function describeExit(e: ExitSpec, tfH: number): string {
   const parts = [e.stopVol ? `stop ${e.stopVol} GARCH σ` : `stop ${e.stopAtr} ATR`];
@@ -196,13 +228,16 @@ export function rulesOf(s: StrategySpec, tfH: number): string[] {
     `Entry: ${sig.describe(s.signal.p)}${s.sides === 'long' ? ' (longs only)' : s.sides === 'short' ? ' (shorts only)' : ''}`,
     ...s.filters.map((f) => `Filter: ${FILTER_MAP[f.id].describe(f.p)}`),
     `Exit: ${describeExit(s.exit, tfH)}`,
+    ...(describeSizing(s.sizing) ? [`Sizing: ${describeSizing(s.sizing)}`] : []),
+    ...(s.hedge === 'btc' ? ['Hedge: delta-hedge the market — short β × the position in bitcoin, β re-estimated on 30 days of returns'] : []),
   ];
 }
 
 export function nameOf(s: StrategySpec): string {
   const sig = SIGNAL_MAP[s.signal.id];
   const f = s.filters.map((x) => FILTER_MAP[x.id].name.split(' ')[0].toLowerCase());
-  return f.length ? `${sig.name} + ${f.join(' + ')}` : sig.name;
+  const extra = [s.sizing?.mode === 'vol' ? 'vol target' : s.sizing?.mode === 'var' ? 'VaR budget' : '', s.hedge === 'btc' ? 'BTC-hedged' : ''].filter(Boolean);
+  return (f.length ? `${sig.name} + ${f.join(' + ')}` : sig.name) + (extra.length ? ` · ${extra.join(' · ')}` : '');
 }
 
 // ---------- the run ----------
@@ -215,7 +250,8 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
   if (ms.length < markets.length) notes.push(`skipped ${markets.length - ms.length} coin(s) with fewer than 600 candles`);
   const tfH = ms[0].tfH;
   const bpy = barsPerYear(tfH);
-  const ctxs = ms.map((m, k) => ctxOf(m, Math.floor(m.bars.length * cfg.isShare), cfg.seed + k));
+  const ctxs = withBench(ms).map((m, k) => ctxOf(m, Math.floor(m.bars.length * cfg.isShare), cfg.seed + k));
+  const canHedge = ctxs.some((c) => !!c.m.bench);
   const hasFunding = ms.some((m) => m.funding && m.funding.some((x) => x !== 0));
   if (!hasFunding) notes.push('no funding history: the carry signal and the crowding filter were skipped');
   const usable = (s: SignalDef) => (s.needsFunding && !hasFunding ? 'needs funding history' : s.intraday && tfH >= 24 ? 'needs bars shorter than a day' : null);
@@ -281,30 +317,76 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
   const targets = [0, 1.5, 2, 3];
   const trails = [0, 2, 3];
   const holds = [12, 24, 72, 168, 480];
+  // An adaptive search (the cross-entropy method, Rubinstein 1999): each
+  // ingredient — each filter, the kind of stop, the sizing, the hedge — is
+  // drawn with odds that start even and move, batch by batch, toward what the
+  // best in-sample mixes used (the rule itself is drawn evenly from the seeds). The out-of-sample data play no
+  // part in it; the finalists face them at the end as before.
+  const groups: Record<string, { options: string[]; p: number[] }> = {
+    rule: { options: seeds.map((s) => `${s.sig.name} (${Object.entries(s.spec.signal.p).map(([k, v]) => `${k} ${v}`).join(', ')})`), p: seeds.map(() => 1 / Math.max(1, seeds.length)) },
+    stop: { options: ['ATR stop', 'GARCH-σ stop'], p: [0.67, 0.33] },
+    sizing: { options: ['unit size', 'volatility target', 'VaR budget'], p: [0.4, 0.3, 0.3] },
+    ...Object.fromEntries(filters.map((f) => [`filter:${f.id}`, { options: ['off', f.name], p: [0.85, 0.15] }])),
+    ...(canHedge ? { hedge: { options: ['unhedged', 'BTC delta hedge'], p: [0.75, 0.25] } } : {}),
+  };
+  const draw = (g: string) => {
+    const { p } = groups[g];
+    let u = rnd();
+    for (let j = 0; j < p.length; j++) if ((u -= p[j]) <= 0) return j;
+    return p.length - 1;
+  };
+  const samples: { pick: Record<string, number>; score: number }[] = [];
+  const BATCH = 40;
+  let batch: { pick: Record<string, number>; score: number }[] = [];
   for (let k = 0; k < cfg.combos && seeds.length; k++) {
-    const s = seeds[Math.floor(rnd() * seeds.length)];
-    const nf = Math.floor(rnd() * 3);
+    const pick: Record<string, number> = {};
+    for (const g of Object.keys(groups)) pick[g] = draw(g);
+    const s = seeds[pick.rule];
     const fs: StrategySpec['filters'] = [];
-    for (let j = 0; j < nf; j++) {
-      const f = filters[Math.floor(rnd() * filters.length)];
-      if (fs.some((x) => x.id === f.id)) continue;
-      const g = gridOf(f.grid);
-      fs.push({ id: f.id, p: g[Math.floor(rnd() * g.length)] });
-    }
+    for (const f of filters)
+      if (pick[`filter:${f.id}`] === 1 && fs.length < 3) {
+        const g = gridOf(f.grid);
+        fs.push({ id: f.id, p: g[Math.floor(rnd() * g.length)] });
+      }
     const exit = exitFor(s.sig, {
       stopAtr: stops[Math.floor(rnd() * stops.length)],
       targetR: targets[Math.floor(rnd() * targets.length)],
       trailAtr: trails[Math.floor(rnd() * trails.length)],
       maxBars: holds[Math.floor(rnd() * holds.length)],
       onFlip: rnd() < 0.5,
-      // a third of the mixes stop in GARCH volatility instead of ATR
-      stopVol: rnd() < 0.33 ? [2, 3, 4][Math.floor(rnd() * 3)] : 0,
+      stopVol: pick.stop === 1 ? [2, 3, 4][Math.floor(rnd() * 3)] : 0,
     });
-    const spec: StrategySpec = { name: '', signal: s.spec.signal, filters: fs, exit, sides: cfg.sides };
+    const sizing: Sizing | undefined = pick.sizing === 1 ? { mode: 'vol', target: [0.3, 0.6, 1][Math.floor(rnd() * 3)] } : pick.sizing === 2 ? { mode: 'var', target: [0.03, 0.06, 0.1][Math.floor(rnd() * 3)] } : undefined;
+    const spec: StrategySpec = { name: '', signal: s.spec.signal, filters: fs, exit, sides: cfg.sides, ...(sizing ? { sizing } : {}), ...(pick.hedge === 1 ? { hedge: 'btc' as const } : {}) };
     spec.name = nameOf(spec);
-    evalIS(spec);
-    await tick({ stage: 'Mixing and matching rules', done: k + 1, total: cfg.combos });
+    const t = evalIS(spec);
+    const smp = { pick, score: t.score };
+    samples.push(smp);
+    batch.push(smp);
+    if (batch.length === BATCH) {
+      const ok = batch.filter((x) => Number.isFinite(x.score)).sort((a, b) => b.score - a.score);
+      const elite = ok.slice(0, Math.max(3, Math.floor(ok.length / 4)));
+      if (elite.length >= 3)
+        for (const [g, grp] of Object.entries(groups)) {
+          // the rules stay evenly drawn: they were chosen on the library test, and learned rules score
+          // flatteringly on the data they were fitted to — chasing that would chase overfitting
+          if (g === 'rule') continue;
+          const freq = grp.p.map((_, j) => elite.filter((x) => x.pick[g] === j).length / elite.length);
+          const np = grp.p.map((q, j) => Math.max(0.03, 0.7 * q + 0.3 * freq[j]));
+          const z = np.reduce((a, b) => a + b, 0);
+          grp.p = np.map((q) => q / z);
+        }
+      batch = [];
+    }
+    await tick({ stage: 'Mixing and matching: an adaptive search over rules, filters, stops, sizing and hedges', done: k + 1, total: cfg.combos });
   }
+  const pickOf = (spec: StrategySpec): Record<string, number> => ({
+    rule: seeds.findIndex((s) => JSON.stringify(s.spec.signal) === JSON.stringify(spec.signal)),
+    stop: spec.exit.stopVol ? 1 : 0,
+    sizing: spec.sizing?.mode === 'vol' ? 1 : spec.sizing?.mode === 'var' ? 2 : 0,
+    hedge: spec.hedge === 'btc' ? 1 : 0,
+    ...Object.fromEntries(filters.map((f) => [`filter:${f.id}`, spec.filters.some((x) => x.id === f.id) ? 1 : 0])),
+  });
 
   // 4) the finalists meet the data they have never seen
   const all = [...trials.values()].filter((t) => Number.isFinite(t.score));
@@ -421,7 +503,8 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
     const passes = checks.filter((c) => c.pass).length;
     const verdict: Verdict = verdictOf(checks, oos, dsr);
     const sig = SIGNAL_MAP[spec.signal.id];
-    const papers = [...new Set([...sig.papers, ...spec.filters.flatMap((f) => FILTER_MAP[f.id].papers)])];
+    const extras = [spec.sizing && spec.sizing.mode !== 'unit' ? SIZING_WHY[spec.sizing.mode] : null, spec.hedge === 'btc' ? SIZING_WHY.btc : null].filter((x): x is { papers: string[]; why: string } => !!x);
+    const papers = [...new Set([...sig.papers, ...spec.filters.flatMap((f) => FILTER_MAP[f.id].papers), ...extras.flatMap((x) => x.papers)])];
     const curve = equityCurve(fullRun, bhAll);
     ranked.push({
       rank: 0,
@@ -429,7 +512,7 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
       garchNull: null,
       rules: rulesOf(spec, tfH),
       papers,
-      rationale: [sig.rationale, ...spec.filters.map((f) => FILTER_MAP[f.id].rationale)],
+      rationale: [sig.rationale, ...spec.filters.map((f) => FILTER_MAP[f.id].rationale), ...extras.map((x) => x.why)],
       family: sig.family,
       is: t.is,
       oos,
@@ -446,6 +529,30 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
       score: oos.sharpe * Math.min(1, oos.trades / 20) * (0.5 + 0.5 * dsr) + passes * 0.05,
     });
   }
+  // what the search learned, ingredient by ingredient
+  const learned: Learned[] = [];
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
+  const scored = samples.filter((x) => Number.isFinite(x.score));
+  const fin = ranked.map((r) => ({ pick: pickOf(r.spec), sharpe: r.oos.sharpe }));
+  for (const [g, grp] of Object.entries(groups))
+    grp.options.forEach((option, j) => {
+      if (g.startsWith('filter:') && j === 0) return;
+      const w = scored.filter((x) => x.pick[g] === j);
+      const wo = scored.filter((x) => x.pick[g] !== j);
+      const fw = fin.filter((x) => x.pick[g] === j);
+      const fwo = fin.filter((x) => x.pick[g] !== j);
+      learned.push({
+        group: g.startsWith('filter:') ? 'filter' : g,
+        option,
+        tried: samples.filter((x) => x.pick[g] === j).length,
+        isWith: mean(w.map((x) => x.score)),
+        isWithout: mean(wo.map((x) => x.score)),
+        prob: grp.p[j],
+        oosWith: fw.length ? mean(fw.map((x) => x.sharpe)) : null,
+        oosWithout: fwo.length ? mean(fwo.map((x) => x.sharpe)) : null,
+        nOos: fw.length,
+      });
+    });
   const order: Record<Verdict, number> = { edge: 0, promising: 1, 'no edge': 2 };
   const rank = () => ranked.sort((a, b) => order[a.verdict] - order[b.verdict] || b.score - a.score);
   // the leaders face one more test: worlds simulated from each coin's own GARCH model, with no edge in them
@@ -480,6 +587,7 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
     library,
     top,
     pbo: pbo(blocks),
+    learned,
     forecasting,
     notes,
     cfg,
@@ -602,9 +710,17 @@ function equityCurve(run: { rets: Float64Array; times: number[] }, bh: { rets: F
   return pts;
 }
 
+/** bitcoin as every other coin's benchmark for delta hedges, aligned by bar time (when it is one of the coins) */
+export function withBench(ms: Market[]): Market[] {
+  const btc = ms.find((m) => /^BTC/i.test(m.coin));
+  if (!btc) return ms;
+  const at = new Map(btc.bars.map((b) => [b.time, b.close]));
+  return ms.map((m) => (m === btc ? m : { ...m, bench: Float64Array.from(m.bars, (b) => at.get(b.time) ?? NaN) }));
+}
+
 /** one strategy's full test, on demand (the Backtest screen) */
 export function evaluate(markets: Market[], spec: StrategySpec, isShare = 0.7, costs: Costs = COSTS) {
-  const ctxs = markets.map((m, k) => ctxOf(m, Math.floor(m.bars.length * isShare), 42 + k));
+  const ctxs = withBench(markets).map((m, k) => ctxOf(m, Math.floor(m.bars.length * isShare), 42 + k));
   const bpy = barsPerYear(markets[0].tfH);
   const is = runAll(ctxs, spec, 'is', costs);
   const oos = runAll(ctxs, spec, 'oos', costs);

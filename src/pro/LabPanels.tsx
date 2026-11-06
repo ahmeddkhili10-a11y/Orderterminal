@@ -10,7 +10,7 @@ import { desktop } from '../desktop/bridge';
 import type { StrategySpec } from '../lab/backtest';
 import { EXIT_DEFAULT, FILTER_MAP, FILTERS, SIGNAL_MAP, SIGNALS, type ExitSpec } from '../lab/library';
 import { PAPERS, type Paper } from '../lab/papers';
-import { nameOf, rulesOf, type ForecastReport, type Ranked } from '../lab/research';
+import { nameOf, rulesOf, type ForecastReport, type Learned, type Ranked } from '../lab/research';
 import { startLabLink, useLab, type LabConfig, type LabTest } from '../lab/store';
 import { Check, NumberInput, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { Bars, Fan, LineChart } from './charts';
@@ -305,6 +305,60 @@ function Detail({ r, tfH, onDeploy }: { r: Ranked; tfH: number; onDeploy: (targe
   );
 }
 
+/** the adaptive search's account of each ingredient */
+function LearnedView({ rows }: { rows: Learned[] }) {
+  if (!rows.length) return <div className="pro-empty">This research ran before the adaptive search was added: run it again.</div>;
+  const groups = ['sizing', 'hedge', 'stop', 'filter', 'rule'];
+  const title: Record<string, string> = { sizing: 'SIZING — VOLATILITY TARGETING AND VALUE AT RISK', hedge: 'DELTA HEDGE AGAINST BITCOIN', stop: 'STOPS', filter: 'FILTERS (REGIMES, TREND, VOLATILITY, VOLUME)', rule: 'ENTRY RULES (DRAWN EVENLY)' };
+  return (
+    <>
+      <div className="lab-line muted">
+        The mixing step is an adaptive search (the cross-entropy method): every ingredient starts with even odds, and after each batch of 40 mixes the odds move toward what the best quarter used, in sample. The out-of-sample columns are the finalists only — data the search never saw. An ingredient that scores well in sample but not out of it was luck.
+      </div>
+      {groups.map((g) => {
+        const rs = rows.filter((r) => r.group === g).sort((a, b) => b.isWith - b.isWithout - (a.isWith - a.isWithout));
+        if (!rs.length) return null;
+        return (
+          <div key={g}>
+            <div className="pro-section">{title[g]}</div>
+            <table className="pro-table compact">
+              <thead>
+                <tr>
+                  <th className="l">INGREDIENT</th>
+                  <th>TRIED</th>
+                  <th title="Mean in-sample score of the mixes with it, and without it">IN SAMPLE WITH / WITHOUT</th>
+                  <th title="The odds the search gave it at the end">FINAL ODDS</th>
+                  <th title="Mean out-of-sample Sharpe of the finalists with it, and without it">OUT OF SAMPLE WITH / WITHOUT</th>
+                  <th className="l">READING</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rs.map((r) => {
+                  const isLift = r.isWith - r.isWithout;
+                  const oosLift = r.oosWith !== null && r.oosWithout !== null ? r.oosWith - r.oosWithout : null;
+                  const reading = oosLift === null ? (isLift > 0 ? 'helped in sample; no finalist used it' : 'did not help in sample') : isLift > 0 && oosLift > 0 ? 'helped in and out of sample' : isLift <= 0 && oosLift > 0 ? 'helped only out of sample' : isLift > 0 ? 'helped in sample only — likely luck' : 'did not help';
+                  return (
+                    <tr key={r.option}>
+                      <td className="l b">{r.option}</td>
+                      <td className="mono">{r.tried}</td>
+                      <td className={`mono ${isLift > 0 ? 'up' : 'down'}`}>
+                        {num(r.isWith)} / {num(r.isWithout)}
+                      </td>
+                      <td className="mono">{pct(r.prob)}</td>
+                      <td className={`mono ${oosLift === null ? 'muted' : oosLift > 0 ? 'up' : 'down'}`}>{r.oosWith !== null ? `${num(r.oosWith)} / ${r.oosWithout !== null ? num(r.oosWithout) : '—'} (${r.nOos})` : '—'}</td>
+                      <td className="l muted">{reading}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 const HEAT = (x: number) => (x < 0.75 ? 'h-0' : x < 0.95 ? 'h-1' : x < 1.15 ? 'h-2' : x < 1.4 ? 'h-3' : x < 1.8 ? 'h-4' : 'h-5');
 
 /** each coin's GARCH model and candle forecasts: fitted in sample, scored on the years they never saw */
@@ -440,7 +494,7 @@ function Forecasting({ reports, tfH }: { reports: ForecastReport[]; tfH: number 
 export function LabResearch() {
   const { status, result } = useLabLink();
   const [sel, setSel] = useState(1);
-  const [view, setView] = useState<'top' | 'lib' | 'fcst'>('top');
+  const [view, setView] = useState<'top' | 'lib' | 'fcst' | 'learn'>('top');
   const [msg, setMsg] = useState('');
   if (!desktop?.lab) return <NeedsDesktop />;
   if (!status) return <div className="pro-empty">Connecting to the Lab…</div>;
@@ -488,6 +542,7 @@ export function LabResearch() {
                   [
                     ['top', 'Top five'],
                     ['lib', 'Library comparison'],
+                    ['learn', 'What it learned'],
                     ['fcst', 'Forecasting'],
                   ] as const
                 ).map(([v, label]) => (
@@ -502,7 +557,9 @@ export function LabResearch() {
                 {n}
               </div>
             ))}
-            {view === 'fcst' ? (
+            {view === 'learn' ? (
+              <LearnedView rows={result.learned ?? []} />
+            ) : view === 'fcst' ? (
               <Forecasting reports={result.forecasting ?? []} tfH={result.tfH} />
             ) : view === 'lib' ? (
               <>
@@ -691,6 +748,29 @@ export function LabBuilder({ config: c, setConfig }: PanelProps<BuilderConfig>) 
           <label className="row">
             <Check checked={s.exit.onFlip} onChange={(onFlip) => exitSet({ onFlip })}>
               An opposite signal closes it
+            </Check>
+          </label>
+          <label title="Unit: a fixed position. Volatility target: run the position at an annual volatility on the GARCH forecast (Moreira & Muir 2017). VaR budget: hold a day's 99 % GARCH value at risk to a share of capital.">
+            SIZING
+            <Select
+              value={s.sizing?.mode ?? 'unit'}
+              options={[
+                { value: 'unit', label: 'Unit size' },
+                { value: 'vol', label: 'Volatility target' },
+                { value: 'var', label: 'VaR budget' },
+              ]}
+              onChange={(mode) => set({ sizing: mode === 'unit' ? undefined : { mode, target: mode === 'vol' ? 0.6 : 0.05 } })}
+            />
+          </label>
+          {s.sizing && s.sizing.mode !== 'unit' && (
+            <label>
+              {s.sizing.mode === 'vol' ? 'TARGET VOL (% A YEAR)' : 'DAILY VaR 99 (% OF CAPITAL)'}
+              <NumberInput value={Math.round(s.sizing.target * 100)} step={s.sizing.mode === 'vol' ? 10 : 1} min={1} onChange={(v) => set({ sizing: { mode: s.sizing!.mode, target: v / 100 } })} />
+            </label>
+          )}
+          <label className="row" title="Short β × the position in bitcoin, so the result is the coin's own move. Needs BTC among the coins. The swarm does not place the hedge leg.">
+            <Check checked={s.hedge === 'btc'} onChange={(on) => set({ hedge: on ? 'btc' : undefined })}>
+              Delta-hedge against bitcoin
             </Check>
           </label>
         </div>

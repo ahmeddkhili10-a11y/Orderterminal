@@ -448,7 +448,7 @@ export class CryptoSwarm {
     const book = this.book();
     const open = this.open();
     const gate = riskGate(book, equity, open.length, c.risk, t);
-    const size = gate ? null : sizeTrade({ price: p.price, stop: p.stop, side: p.side, equity, book, openNotional: open.reduce((a, q) => a + q.notional, 0), expR: odds.expR, maxLev: c.risk.perCoinLeverage }, c.risk);
+    const size = gate ? null : sizeTrade({ price: p.price, stop: p.stop, side: p.side, equity, book, openNotional: open.reduce((a, q) => a + q.notional, 0), expR: odds.expR, maxLev: c.risk.perCoinLeverage, sizeMult: p.sizeMult }, c.risk);
     const sizeNote = size && !size.skip ? `risking ${size.riskPct.toFixed(2)}% of the account (${usd(size.riskUsd)}) on a ${usd(size.notional)} position, ${size.lev.toFixed(1)}× the account${size.why ? ` — ${size.why}` : ''}` : '';
     const v = councilR({ cand, odds, riskGate: gate ?? size?.skip ?? null, sizeNote }, c.council);
     this.discuss(cand, v);
