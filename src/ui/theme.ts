@@ -1,6 +1,8 @@
 import { useSettings } from '../store/settings';
 
-export type ThemeId = 'void' | 'solana' | 'gold' | 'arctic' | 'crimson' | 'synthwave' | 'grey' | 'white' | 'black' | 'neon-green' | 'neon-orange';
+export type ThemeId = 'void' | 'solana' | 'gold' | 'arctic' | 'crimson' | 'synthwave' | 'grey' | 'white' | 'black' | 'neon-green' | 'neon-orange' | ProThemeId;
+/** the professional terminal's themes: flat, dense, high-contrast */
+export type ProThemeId = 'pro-amber' | 'pro-lseg' | 'pro-eikon' | 'pro-graphite' | 'pro-paper';
 export type FilterId = 'none' | 'vivid' | 'soft' | 'mono' | 'warm' | 'cool' | 'night' | 'crt';
 export type GlassLevel = 'off' | 'light' | 'medium' | 'heavy';
 
@@ -207,6 +209,56 @@ function build(s: Spec): ThemeDef {
   };
 }
 
+/**
+ * A professional terminal theme: a flat, near-opaque surface, no glow, the
+ * accent for headers and keys, separate colours for column headings (`head`).
+ */
+function proTheme(o: { id: ProThemeId; name: string; swatch: string; dark: boolean; bg: string; panel: string; line: string; text: string; muted: string; faint: string; buy: string; sell: string; accent: string; warn: string; head: string; onAccent: string; ramp?: RGB[] }): ThemeDef {
+  const hi = o.dark ? 'rgba(255,255,255,' : 'rgba(0,0,0,';
+  const d = build({
+    id: o.id,
+    name: o.name,
+    swatch: o.swatch,
+    dark: o.dark,
+    bg: o.bg,
+    bgImage: o.bg,
+    glass: o.panel,
+    glassStrong: o.panel,
+    glassBorder: o.line,
+    glassHi: 'transparent',
+    shadow: 'none',
+    control: `${hi}0.04)`,
+    raised: `${hi}0.07)`,
+    border: o.line,
+    border2: `${hi}0.22)`,
+    text: o.text,
+    muted: o.muted,
+    faint: o.faint,
+    buy: o.buy,
+    sell: o.sell,
+    accent: o.accent,
+    warn: o.warn,
+    poc: o.warn,
+    glow: 'transparent',
+    canvasTint: 'rgba(0,0,0,0)',
+    grid: `${hi}0.06)`,
+    header: `${hi}0.05)`,
+    rowAlt: `${hi}0.025)`,
+    cell: o.dark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.03)',
+    cellSpread: `${hi}0.06)`,
+    tooltip: o.panel,
+    tabbar: o.bg,
+    rowLine: `${hi}0.07)`,
+    accentSoft: `${hi}0.08)`,
+    focus: o.accent,
+    onAccent: o.onAccent,
+    ramp: o.ramp,
+  });
+  d.css['--pro-head'] = o.head;
+  d.css['--pro-accent'] = o.accent;
+  return d;
+}
+
 /** A dark swarm theme from a few colours: black glass tinted by `tint`, with its own lights, metal and gauges. */
 function swarmTheme(o: { id: ThemeId; name: string; swatch: string; bg: string; glow1: string; glow2: string; tint: [number, number, number]; text: string; muted: string; faint: string; buy: string; sell: string; accent: string; warn: string; onAccent: string; look: SwarmLook; ramp: RGB[] }): ThemeDef {
   const [r, g, b] = o.tint;
@@ -254,6 +306,113 @@ function swarmTheme(o: { id: ThemeId; name: string; swatch: string; bg: string; 
 }
 
 export const THEMES: Record<ThemeId, ThemeDef> = {
+  // ---- the professional terminal ----
+  'pro-amber': proTheme({
+    id: 'pro-amber',
+    name: 'Terminal Amber',
+    swatch: 'linear-gradient(135deg,#000 0 55%,#ff9a00 55% 100%)',
+    dark: true,
+    bg: '#000000',
+    panel: '#050505',
+    line: '#262626',
+    text: '#f2f2f2',
+    muted: '#ff9a00',
+    faint: '#7a6a50',
+    buy: '#26d07c',
+    sell: '#ff4040',
+    accent: '#ff9a00',
+    warn: '#ffd200',
+    head: '#ffd200',
+    onAccent: '#000000',
+    ramp: [
+      [0, 0, 0],
+      [40, 22, 0],
+      [120, 60, 0],
+      [255, 154, 0],
+      [255, 210, 0],
+      [255, 255, 255],
+    ],
+  }),
+  'pro-lseg': proTheme({
+    id: 'pro-lseg',
+    name: 'Workspace',
+    swatch: 'linear-gradient(135deg,#101418 0 55%,#ff5000 55% 100%)',
+    dark: true,
+    bg: '#0b0e11',
+    panel: '#11151a',
+    line: '#232a33',
+    text: '#e6e9ee',
+    muted: '#8d99a8',
+    faint: '#566170',
+    buy: '#25c26e',
+    sell: '#f04848',
+    accent: '#ff5a1f',
+    warn: '#ffd400',
+    head: '#ffd400',
+    onAccent: '#000000',
+    ramp: [
+      [8, 12, 22],
+      [14, 60, 140],
+      [30, 150, 230],
+      [255, 210, 60],
+      [255, 110, 30],
+      [255, 240, 220],
+    ],
+  }),
+  'pro-eikon': proTheme({
+    id: 'pro-eikon',
+    name: 'Eikon Blue',
+    swatch: 'linear-gradient(135deg,#0a1a33 0 55%,#3db8ff 55% 100%)',
+    dark: true,
+    bg: '#06101f',
+    panel: '#0a172b',
+    line: '#1b2c47',
+    text: '#dce8f7',
+    muted: '#7f9cc0',
+    faint: '#47607f',
+    buy: '#36d399',
+    sell: '#ff5470',
+    accent: '#3db8ff',
+    warn: '#ffcc33',
+    head: '#ffcc33',
+    onAccent: '#001022',
+  }),
+  'pro-graphite': proTheme({
+    id: 'pro-graphite',
+    name: 'Graphite',
+    swatch: 'linear-gradient(135deg,#1b1d21 0 55%,#9aa4b2 55% 100%)',
+    dark: true,
+    bg: '#141619',
+    panel: '#1a1d21',
+    line: '#2c3036',
+    text: '#e3e6ea',
+    muted: '#9aa3ae',
+    faint: '#5d646d',
+    buy: '#3ccf8e',
+    sell: '#ef5a5a',
+    accent: '#c9d1dc',
+    warn: '#f2c14e',
+    head: '#c9d1dc',
+    onAccent: '#111316',
+  }),
+  'pro-paper': proTheme({
+    id: 'pro-paper',
+    name: 'Paper',
+    swatch: 'linear-gradient(135deg,#f4f4f1 0 55%,#1f4e9a 55% 100%)',
+    dark: false,
+    bg: '#ecebe6',
+    panel: '#fbfbf8',
+    line: '#cfcdc4',
+    text: '#151515',
+    muted: '#5b5b55',
+    faint: '#9a988f',
+    buy: '#0f8a4b',
+    sell: '#c7262f',
+    accent: '#1f4e9a',
+    warn: '#a86b00',
+    head: '#1f4e9a',
+    onAccent: '#ffffff',
+  }),
   // pure black, chrome edges, cyan and magenta light — the Command Center look
   void: build({
     id: 'void',
@@ -691,7 +850,10 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
   }),
 };
 
-export const THEME_IDS = Object.keys(THEMES) as ThemeId[];
+export const PRO_THEME_IDS: ProThemeId[] = ['pro-amber', 'pro-lseg', 'pro-eikon', 'pro-graphite', 'pro-paper'];
+export const isProTheme = (id: string): id is ProThemeId => (PRO_THEME_IDS as string[]).includes(id);
+/** the classic (glass) themes */
+export const THEME_IDS = (Object.keys(THEMES) as ThemeId[]).filter((id) => !isProTheme(id));
 
 export const FILTERS: { id: FilterId; name: string; css: string }[] = [
   { id: 'none', name: 'None', css: 'none' },

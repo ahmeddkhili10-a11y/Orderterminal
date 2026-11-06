@@ -1,4 +1,6 @@
 import { Component, StrictMode, useEffect, type ReactNode } from 'react';
+import { PopoutPage } from './pro/Screens';
+import { switchUi } from './pro/ProBar';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { Embed } from './app/Embed';
@@ -32,6 +34,11 @@ const filter = params.get('filter');
 if (filter && FILTERS.some((f) => f.id === filter)) s.set({ filter: filter as FilterId });
 
 const view = params.get('view');
+// ?ui=pro|classic picks the look; the older ?view= links (and tests) mean the classic views
+const ui = params.get('ui') ?? (view ? 'classic' : null);
+if (ui === 'pro' || ui === 'classic') switchUi(ui);
+const ws = params.get('ws');
+if (ws === 'markets' || ws === 'lab' || ws === 'swarm' || ws === 'meme') s.set({ workspace: ws });
 if (view === 'command') s.set({ view });
 // the crypto terminal: the market island, or (view=terminal, as before) the classic panels
 else if (view === 'island') s.set({ view: 'terminal', cryptoView: 'island' });
@@ -43,6 +50,8 @@ if (simLoad > 1) setSimLoad(simLoad);
 detectSafeMode();
 
 const embed = params.get('embed');
+// a panel popped out into its own window (see src/pro/Screens.tsx)
+const popout = params.get('popout');
 
 /**
  * The terminal mounts only after the ledger key is accepted. It mounts the
@@ -108,7 +117,7 @@ class Crash extends Component<{ children: ReactNode }, { error: Error | null }> 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Crash>
-      <Gate>{embed ? <Embed panelId={embed} params={params} /> : <App />}</Gate>
+      <Gate>{popout ? <PopoutPage panelId={popout} storeKey={params.get('key') ?? popout} title={params.get('title') ?? popout} cfg={params.get('cfg')} /> : embed ? <Embed panelId={embed} params={params} /> : <App />}</Gate>
     </Crash>
   </StrictMode>,
 );

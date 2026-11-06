@@ -515,7 +515,7 @@ export interface SwarmLimits {
 
 // ---------- the crypto swarm (Hyperliquid) ----------
 
-export type CSwarmAgent = 'scalper' | 'auction' | 'trend' | 'tape' | 'crowd' | 'guardian' | 'forest' | 'risk';
+export type CSwarmAgent = 'scalper' | 'auction' | 'trend' | 'lab' | 'tape' | 'crowd' | 'guardian' | 'forest' | 'risk';
 export interface CSwarmVote {
   bot: CSwarmAgent;
   stance: 'for' | 'against' | 'abstain' | 'veto';
@@ -743,6 +743,17 @@ export interface NovusApi {
     setRetention(days: number): Promise<void>;
     exportCsv(venue: string, symbol: string): Promise<{ path: string; rows: number } | null>;
   };
+  screens: {
+    state(): Promise<ScreensState>;
+    /** pop a panel out into its own window (on a screen, or beside the terminal); its window id */
+    popout(panel: string, title: string, config: Record<string, unknown>, displayId?: number | null): Promise<number>;
+    move(id: number, displayId: number, mode?: 'fill' | 'full' | 'float'): Promise<boolean>;
+    focus(id: number): Promise<boolean>;
+    close(id: number): Promise<boolean>;
+    /** this window's id */
+    self(): Promise<number | null>;
+    onChanged(fn: (s: ScreensState) => void): () => void;
+  };
   lab: {
     state(): Promise<LabStatus>;
     result(): Promise<ResearchResult | null>;
@@ -816,6 +827,17 @@ export interface NovusApi {
 }
 
 /** Present only inside the Electron desktop app. */
+export interface ScreenRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface ScreensState {
+  displays: { id: number; label: string; primary: boolean; internal: boolean; bounds: ScreenRect; workArea: ScreenRect; scale: number }[];
+  windows: { id: number; kind: 'main' | 'panel'; title: string; panel: string | null; displayId: number; bounds: ScreenRect; maximized: boolean; fullScreen: boolean; visible: boolean }[];
+}
+
 export const desktop: NovusApi | undefined = typeof window !== 'undefined' ? (window as unknown as { novus?: NovusApi }).novus : undefined;
 export const isDesktop = Boolean(desktop);
 

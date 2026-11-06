@@ -1,0 +1,119 @@
+// The professional terminal's functions: short codes typed on the command
+// line (or clicked on the function keys) that open a screen in a workspace.
+// A coin before the code makes it the market first: "ETH GP", "SOL BOOK".
+
+export type Workspace = 'markets' | 'lab' | 'swarm' | 'meme';
+
+export interface Fn {
+  code: string;
+  name: string;
+  /** the panel it opens */
+  panel: string;
+  ws: Workspace;
+  desc: string;
+}
+
+export const WORKSPACES: { id: Workspace; name: string; key: string; desc: string }[] = [
+  { id: 'markets', name: 'MARKETS', key: 'F1', desc: 'Quotes, charts, order book, flow, derivatives, news' },
+  { id: 'lab', name: 'STRATEGY LAB', key: 'F2', desc: 'Research published strategies, test, rank and deploy them' },
+  { id: 'swarm', name: 'CRYPTO SWARM', key: 'F3', desc: 'The crypto swarm on Hyperliquid, its trades and orders' },
+  { id: 'meme', name: 'MEME DESK', key: 'F4', desc: 'The meme swarm on Solana, its scanner and wallet' },
+];
+
+export const FUNCTIONS: Fn[] = [
+  // markets
+  { code: 'MON', name: 'Monitor', panel: 'monitor', ws: 'markets', desc: 'Quote board: last, change, range, volume, funding, open interest' },
+  { code: 'HMAP', name: 'Heat map', panel: 'heatgrid', ws: 'markets', desc: 'The market as tiles: size by volume, colour by change' },
+  { code: 'GP', name: 'Graph price', panel: 'historical', ws: 'markets', desc: 'Candles or market profile, VWAP, averages' },
+  { code: 'GIP', name: 'Footprint', panel: 'footprint', ws: 'markets', desc: 'Intraday footprint: bid × ask, delta, imbalances' },
+  { code: 'LHM', name: 'Liquidity heat map', panel: 'heatmap', ws: 'markets', desc: 'Resting liquidity over time with trades' },
+  { code: 'CORR', name: 'Correlation', panel: 'correl', ws: 'markets', desc: 'Correlation matrix, beta to bitcoin, volatility' },
+  { code: 'HVOL', name: 'Volatility', panel: 'volmon', ws: 'markets', desc: 'Realised volatility: day, week, month, term, rank' },
+  { code: 'DES', name: 'Description', panel: 'summary', ws: 'markets', desc: 'Price, 24h stats, funding, OI, long/short, basis' },
+  { code: 'BOOK', name: 'Order book', panel: 'orderbook', ws: 'markets', desc: 'Composite order book across venues' },
+  { code: 'DOM', name: 'Depth ladder', panel: 'dom', ws: 'markets', desc: 'Price ladder with traded volume and delta' },
+  { code: 'DPTH', name: 'Depth chart', panel: 'depth', ws: 'markets', desc: 'Cumulative bid and ask depth' },
+  { code: 'TAS', name: 'Time & sales', panel: 'tape', ws: 'markets', desc: 'Every trade across venues, sized' },
+  { code: 'CVD', name: 'Cumulative delta', panel: 'cvd', ws: 'markets', desc: 'Buy minus sell volume, per venue' },
+  { code: 'FLOW', name: 'Flow pulse', panel: 'flowpulse', ws: 'markets', desc: 'Buy vs sell notional, 30 s to 15 min' },
+  { code: 'BLCK', name: 'Block trades', panel: 'whales', ws: 'markets', desc: 'Large prints and net whale flow' },
+  { code: 'LIQ', name: 'Liquidations', panel: 'liquidations', ws: 'markets', desc: 'Forced orders, long vs short' },
+  { code: 'OI', name: 'Open interest', panel: 'oi', ws: 'markets', desc: 'Open interest per venue' },
+  { code: 'FUND', name: 'Funding', panel: 'funding', ws: 'markets', desc: 'Funding rates, APR and basis' },
+  { code: 'OMON', name: 'Options', panel: 'options', ws: 'markets', desc: 'Deribit option prints, IV, put/call' },
+  { code: 'SPRD', name: 'Venue spread', panel: 'spread', ws: 'markets', desc: 'Each venue against the primary' },
+  { code: 'VP', name: 'Volume profile', panel: 'vprofile', ws: 'markets', desc: 'Volume at price, value area' },
+  { code: 'SCRN', name: 'Screener', panel: 'screener', ws: 'markets', desc: 'Every perpetual on a venue' },
+  { code: 'WL', name: 'Watchlist', panel: 'watchlist', ws: 'markets', desc: 'Your symbols on any venue' },
+  { code: 'TOP', name: 'Top news', panel: 'news', ws: 'markets', desc: 'Real-time headlines by coin' },
+  { code: 'WEI', name: 'World markets', panel: 'yahoo', ws: 'markets', desc: 'Stocks, indices, FX, futures (Yahoo Finance)' },
+  // strategy lab
+  { code: 'LIB', name: 'Strategy library', panel: 'lablib', ws: 'lab', desc: 'Every rule, its papers and rationale' },
+  { code: 'RSCH', name: 'Research', panel: 'labresearch', ws: 'lab', desc: 'Search, test and rank strategies; deploy the best' },
+  { code: 'BT', name: 'Backtest builder', panel: 'labbuilder', ws: 'lab', desc: 'Build a strategy by hand and test it' },
+  { code: 'DEPL', name: 'Deployed', panel: 'labdeployed', ws: 'lab', desc: 'Strategies trading in the swarms' },
+  // crypto swarm
+  { code: 'SWRM', name: 'Crypto swarm', panel: 'cswarm', ws: 'swarm', desc: 'Agents, council, trades and rules' },
+  { code: 'AMT', name: 'AMT bots', panel: 'amt', ws: 'swarm', desc: 'Auction-market-theory bots' },
+  { code: 'TKT', name: 'Order ticket', panel: 'ticket', ws: 'swarm', desc: 'Place orders on any exchange' },
+  { code: 'PORT', name: 'Portfolio', panel: 'accounts', ws: 'swarm', desc: 'Balances, positions, orders, fills' },
+  { code: 'ALRT', name: 'Alerts', panel: 'alerts', ws: 'swarm', desc: 'Price and flow alerts' },
+  // meme desk
+  { code: 'MEME', name: 'Meme swarm', panel: 'memeswarm', ws: 'meme', desc: 'Five bots trading Solana meme coins' },
+  { code: 'SCAN', name: 'Meme scanner', panel: 'memescan', ws: 'meme', desc: 'Every new and graduating meme coin' },
+  { code: 'MTOK', name: 'Meme token', panel: 'memetoken', ws: 'meme', desc: 'One coin: curve, safety, flow, chart' },
+  { code: 'WALL', name: 'Wallet', panel: 'wallet', ws: 'meme', desc: 'Phantom and the swarm wallet' },
+  { code: 'TG', name: 'Telegram', panel: 'telegram', ws: 'meme', desc: 'Your Telegram bot' },
+  // tools
+  { code: 'CALC', name: 'Calculator', panel: 'calculator', ws: 'swarm', desc: 'Size, risk/reward, liquidation' },
+  { code: 'NOTE', name: 'Journal', panel: 'journal', ws: 'swarm', desc: 'Timestamped notes' },
+  { code: 'DB', name: 'Database', panel: 'database', ws: 'swarm', desc: 'Recorded trades, retention, export' },
+];
+
+export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
+
+/** the function keys shown for each workspace */
+export const KEYS: Record<Workspace, string[]> = {
+  markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'FUND', 'OI', 'LIQ', 'TOP'],
+  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'SWRM', 'CORR', 'HVOL'],
+  swarm: ['SWRM', 'DEPL', 'TKT', 'PORT', 'AMT', 'GP', 'ALRT', 'CALC'],
+  meme: ['MEME', 'SCAN', 'MTOK', 'WALL', 'TG'],
+};
+
+export interface Parsed {
+  coin: string | null;
+  fn: Fn | null;
+  workspace: Workspace | null;
+  unknown: string[];
+}
+
+/** "eth gp <go>" → the coin ETH and the GP function */
+export function parseCommand(text: string): Parsed {
+  const words = text
+    .toUpperCase()
+    .replace(/<GO>|<EQUITY>|<CRYPTO>|<CURNCY>/g, ' ')
+    .split(/[\s,]+/)
+    .filter(Boolean);
+  let coin: string | null = null;
+  let fn: Fn | null = null;
+  let workspace: Workspace | null = null;
+  const unknown: string[] = [];
+  for (const w of words) {
+    const ws = WORKSPACES.find((x) => x.name.replace(' ', '') === w || x.id.toUpperCase() === w || x.key === w);
+    if (FN_MAP[w]) fn = FN_MAP[w];
+    else if (ws) workspace = ws.id;
+    else if (w === 'LAB') workspace = 'lab';
+    else if (/^[A-Z0-9]{2,10}$/.test(w) && !coin) coin = w;
+    else unknown.push(w);
+  }
+  return { coin, fn, workspace: workspace ?? fn?.ws ?? null, unknown };
+}
+
+/** suggestions for what is being typed: codes and names that match */
+export function suggest(text: string, limit = 8): Fn[] {
+  const last = text.toUpperCase().split(/\s+/).filter(Boolean).pop() ?? '';
+  if (!last) return [];
+  const starts = FUNCTIONS.filter((f) => f.code.startsWith(last));
+  const names = FUNCTIONS.filter((f) => !starts.includes(f) && (f.name.toUpperCase().includes(last) || f.desc.toUpperCase().includes(last)));
+  return [...starts, ...names].slice(0, limit);
+}

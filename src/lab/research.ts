@@ -276,8 +276,6 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
   // 4) the finalists meet the data they have never seen
   const all = [...trials.values()].filter((t) => Number.isFinite(t.score));
   const nTrials = trials.size;
-  const mean = srBars.reduce((a, b) => a + b, 0) / (srBars.length || 1);
-  const varSr = srBars.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, srBars.length - 1);
   const perSignal = new Map<string, number>();
   const finalists = all
     .sort((a, b) => b.score - a.score)
@@ -355,7 +353,10 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
       }
     }
 
-    const dsr = deflatedSharpe(oos, nTrials, varSr);
+    // deflated for the choice made out of sample: the best of the finalists, against the
+    // spread of Sharpe ratios luck alone gives over this many bars (Bailey & López de Prado 2014).
+    // The in-sample search does not bias these data: the finalists never saw them.
+    const dsr = deflatedSharpe(oos, finalists.length, (1 + 0.5 * oos.srBar ** 2) / Math.max(1, oos.bars));
     // is it more than the market? regress its returns on buy-and-hold's
     const bhMap = new Map(bhOos.times.map((tt, i) => [tt, bhOos.rets[i]]));
     const xs: number[] = [];

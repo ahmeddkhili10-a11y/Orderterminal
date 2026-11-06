@@ -35,8 +35,11 @@ import { TradesTape, TAPE_DEFAULTS } from './TradesTape';
 import { VolumeProfilePanel, VPROFILE_DEFAULTS } from './VolumeProfilePanel';
 import { Watchlist, WATCHLIST_DEFAULTS } from './Watchlist';
 import { WhaleTracker, WHALES_DEFAULTS } from './WhaleTracker';
+import { Correl, CORR_DEFAULTS, HEAT_DEFAULTS, HeatGrid, Monitor, MONITOR_DEFAULTS, VOL_DEFAULTS, VolMonitor } from '../pro/MarketPanels';
+import { BUILDER_DEFAULTS, LabBuilder, LabDeployed, LabLibrary, LabResearch, LIB_DEFAULTS, RESEARCH_PANEL_DEFAULTS } from '../pro/LabPanels';
+import { ProHelp } from '../pro/HelpPanel';
 
-export type Category = 'Meme' | 'Charts' | 'Orderflow' | 'Order book' | 'Derivatives' | 'Market' | 'Account' | 'Algo' | 'Tools';
+export type Category = 'Meme' | 'Charts' | 'Orderflow' | 'Order book' | 'Derivatives' | 'Market' | 'Account' | 'Algo' | 'Strategy Lab' | 'Tools';
 
 export interface PanelDef {
   id: string;
@@ -50,6 +53,15 @@ export interface PanelDef {
 }
 
 export const PANELS: PanelDef[] = [
+  { id: 'monitor', title: 'MON · Monitor', category: 'Market', component: Monitor, defaults: { ...MONITOR_DEFAULTS }, description: 'Quote board for every market on the venue: last, change, high, low, volume, funding APR, open interest. Click a row to make it the market.' },
+  { id: 'heatgrid', title: 'HMAP · Heat Map', category: 'Market', component: HeatGrid, defaults: { ...HEAT_DEFAULTS }, description: 'The market as tiles, sized by volume and coloured by the day’s change.' },
+  { id: 'correl', title: 'CORR · Correlation', category: 'Market', component: Correl, defaults: { ...CORR_DEFAULTS }, description: 'Correlation matrix of returns (7, 30 or 90 days), beta to bitcoin and volatility.' },
+  { id: 'volmon', title: 'HVOL · Volatility', category: 'Market', component: VolMonitor, defaults: { ...VOL_DEFAULTS }, description: 'Realised volatility over a day, a week and a month, its term structure and rank.' },
+  { id: 'lablib', title: 'LIB · Strategy Library', category: 'Strategy Lab', component: LabLibrary, defaults: { ...LIB_DEFAULTS }, description: 'Every rule and filter in the Strategy Lab with the papers behind it and why it should work.' },
+  { id: 'labresearch', title: 'RSCH · Research', category: 'Strategy Lab', component: LabResearch, defaults: { ...RESEARCH_PANEL_DEFAULTS }, description: 'Search published rules and their combinations on years of history; rank the top five with out-of-sample tests, Monte Carlo and a deflated Sharpe ratio; deploy them.' },
+  { id: 'labbuilder', title: 'BT · Backtest Builder', category: 'Strategy Lab', component: LabBuilder, defaults: { ...BUILDER_DEFAULTS }, description: 'Build a strategy from the library by hand — entry, filters, exits — and backtest it in and out of sample.' },
+  { id: 'labdeployed', title: 'DEPL · Deployed', category: 'Strategy Lab', component: LabDeployed, defaults: {}, description: 'The strategies trading in the swarms, on/off, and what the Lab agent has said.' },
+  { id: 'prohelp', title: 'HELP · Functions', category: 'Tools', component: ProHelp, defaults: {}, description: 'Every function code and key in the professional terminal.' },
   { id: 'memeswarm', title: 'Meme Swarm', category: 'Meme', component: MemeSwarm, defaults: { ...MEME_SWARM_DEFAULTS }, description: 'Five bots on the meme-coin chain: Scout finds coins, Sentinel rejects rugs, Herald scores virality, Strategist picks entries, Manager runs the trades (paper, or live from the swarm wallet) — with hit rates by conviction.' },
   { id: 'memescan', title: 'Meme Scanner', category: 'Meme', component: MemeScanner, defaults: { ...MEME_SCANNER_DEFAULTS }, description: 'Live Solana meme coins: every pump.fun launch, coins near graduation, migrated and DexScreener-listed coins — heat, flow, room to your target and rug flags.' },
   { id: 'memetoken', title: 'Meme Token', category: 'Meme', component: MemeToken, defaults: { ...MEME_TOKEN_DEFAULTS }, description: 'One meme coin: bonding curve, market cap, on-chain safety checks, buy/sell flow, creator activity, live trades and chart.' },

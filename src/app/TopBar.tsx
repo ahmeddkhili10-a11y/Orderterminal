@@ -17,6 +17,8 @@ import { solTickerFeed, useSolTicker } from '../meme/solTicker';
 import { openDrawer } from '../command/CommandCenter';
 import { useSwarm } from '../meme/swarm/swarm';
 import { useCSwarm } from '../cswarm/store';
+import { ProThemePicker, switchUi, WorkspaceTabs } from '../pro/ProBar';
+import { ScreensMenu } from '../pro/Screens';
 
 /**
  * The two terminals, as tabs. Both swarms run whichever is on screen: the
@@ -319,7 +321,8 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
   useHubVersion();
   const showFps = useSettings((s) => s.showFps);
   const view = useSettings((s) => s.view);
-  const command = view === 'command';
+  const pro = useSettings((s) => s.ui) === 'pro';
+  const command = !pro && view === 'command';
   const cryptoView = useSettings((s) => s.cryptoView);
   const setSettings = useSettings((s) => s.set);
   const fps = useFps();
@@ -338,7 +341,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <span className="brand-by hide-sm">by Quincy Gininda</span>
         </span>
       </div>
-      <ViewTabs />
+      {pro ? <WorkspaceTabs /> : <ViewTabs />}
       <div className="sep" />
       {/* the Command Center is about Solana: SOL's price instead of the order-flow market */}
       {command ? (
@@ -377,7 +380,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
             R <span className="lbl keep">Luno</span>
           </button>
         </>
-      ) : (
+      ) : pro ? null : (
         <>
           <button className="chip primary-chip chrome-chip island-toggle" onClick={() => setSettings({ cryptoView: cryptoView === 'island' ? 'panels' : 'island' })} title={cryptoView === 'island' ? 'The classic panels: footprint, heatmap, DOM, bots' : 'The market island in 3D'}>
             {cryptoView === 'island' ? '▦' : '◈'} <span className="lbl keep">{cryptoView === 'island' ? 'Panels' : 'Island'}</span>
@@ -399,7 +402,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       <button className="chip primary-chip chrome-chip" onClick={() => onOpen('keys')} title="Connections: exchange API keys (Binance, Coinbase…), Telegram bot, Solana RPC">
         <ConnectIcon /> <span className="lbl keep">Connect</span>
       </button>
-      {!command && (
+      {!command && !pro && (
         <>
         <button className="chip" onClick={() => onOpen('add')} title="Add a panel">
           + <span className="lbl">Panel</span>
@@ -415,11 +418,26 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
         </button>
         </>
       )}
-      <ThemeSwatches />
-      <FilterSelect />
+      {pro && (
+        <button className={`chip${editing ? ' active' : ''}`} onClick={onEdit} title={editing ? 'Finish editing the layout' : 'Edit layout: move, split, add and close panels'}>
+          ✎ <span className="lbl keep">{editing ? 'Done' : 'Layout'}</span>
+        </button>
+      )}
+      {pro ? (
+        <ProThemePicker />
+      ) : (
+        <>
+          <ThemeSwatches />
+          <FilterSelect />
+        </>
+      )}
+      <button className="chip ui-toggle" onClick={() => switchUi(pro ? 'classic' : 'pro')} title={pro ? 'The classic swarm views: the Command Center and the 3D island' : 'The professional terminal: workspaces, command line, Strategy Lab'}>
+        {pro ? '◐ Classic' : '▤ Pro terminal'}
+      </button>
       <button className="chip seal primary-chip chrome-chip" onClick={() => void sealTerminal()} title="Lock the terminal — back to the ENTER LEDGER KEY page. Market data and bots keep running.">
         <LockIcon /> <span className="lbl keep">Lock</span>
       </button>
+      <ScreensMenu />
       <FullscreenButton />
       <button className="chip" onClick={() => onOpen('settings')} title="Settings">
         ⚙

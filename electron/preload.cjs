@@ -22,6 +22,8 @@ const listen = (set, fn) => {
 const verifiedListeners = new Set();
 const cswarmListeners = { state: new Set(), event: new Set() };
 const labListeners = { state: new Set(), event: new Set() };
+const screenListeners = new Set();
+ipcRenderer.on('screens:changed', (_e, msg) => screenListeners.forEach((fn) => fn(msg)));
 for (const ch of ['state', 'event']) ipcRenderer.on(`lab:${ch}`, (_e, msg) => labListeners[ch].forEach((fn) => fn(msg)));
 for (const ch of ['state', 'event']) ipcRenderer.on(`cswarm:${ch}`, (_e, msg) => cswarmListeners[ch].forEach((fn) => fn(msg)));
 ipcRenderer.on('swarm:verified', (_e, msg) => verifiedListeners.forEach((fn) => fn(msg)));
@@ -39,6 +41,15 @@ contextBridge.exposeInMainWorld('novus', {
     onSealed: (fn) => listen(sealListeners, fn) },
   net: { fetchJson: (url, init) => call('net:fetchJson', url, init) },
   solana: { rpc: (method, params, rpcSecretId) => call('solana:rpc', method, params, rpcSecretId) },
+  screens: {
+    state: () => call('screens:state'),
+    popout: (panel, title, config, displayId) => call('screens:popout', panel, title, config, displayId),
+    move: (id, displayId, mode) => call('screens:move', id, displayId, mode),
+    focus: (id) => call('screens:focus', id),
+    close: (id) => call('screens:close', id),
+    self: () => call('screens:self'),
+    onChanged: (fn) => listen(screenListeners, fn),
+  },
   lab: {
     state: () => call('lab:state'),
     result: () => call('lab:result'),

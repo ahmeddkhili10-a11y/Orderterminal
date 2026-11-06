@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { BotManager } from './amt/bots.mjs';
 import { CryptoSwarm } from './cswarm/cswarm.mjs';
 import { LabService } from './lab/lab.mjs';
+import { Screens } from './windows.mjs';
 import { Db } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
@@ -93,6 +94,7 @@ let ccxtSvc;
 let bots;
 let cswarm;
 let lab;
+let screens = null;
 let services = null;
 
 function createWindow() {
@@ -180,7 +182,45 @@ function createWindow() {
   win.on('closed', () => {
     win = null;
     ccxtSvc?.closeAll();
+    // the popped-out panels go with the terminal (and come back next time)
+    if (screens) {
+      screens.quitting = true;
+      for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.close();
+    }
   });
+}
+
+/** A window for one popped-out panel: the terminal's safety settings, its own page. */
+function panelWindow(query, bounds) {
+  const w = new BrowserWindow({
+    ...bounds,
+    minWidth: 320,
+    minHeight: 200,
+    title: `${query.title} — Novus Ordo`,
+    backgroundColor: '#000000',
+    icon: join(root, 'build', 'icon.png'),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: join(root, 'electron', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  w.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://') && !url.startsWith(process.env.VITE_DEV_SERVER_URL ?? '\0')) e.preventDefault();
+  });
+  w.webContents.on('devtools-opened', () => {
+    if (!unlocked) w.webContents.closeDevTools();
+  });
+  if (process.env.VITE_DEV_SERVER_URL) void w.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${new URLSearchParams(query)}`);
+  else void w.loadFile(join(root, 'dist', 'index.html'), { query }).catch((e) => log('error', 'panel window failed to load', e));
+  return w;
 }
 
 /**
@@ -243,6 +283,7 @@ function seal(reason) {
     w.webContents.closeDevTools();
     w.webContents.send('app:sealed', reason);
   }
+  screens?.setVisible(false);
 }
 const attempts = new AttemptGate();
 const sha256Hex = (x) => createHash('sha256').update(x).digest('hex');
@@ -301,6 +342,11 @@ function registerIpc() {
     }
     attempts.success();
     unlocked = true;
+    // popped-out panels come back (and, the first time, the ones left open last session)
+    if (screens) {
+      screens.setVisible(true);
+      setTimeout(() => screens?.restore(), 1500);
+    }
     return true;
   });
   // lock again (renderer shows the lock screen); bots keep running in this process
@@ -401,6 +447,13 @@ function registerIpc() {
     return bots.stopAll('kill switch');
   });
   // the crypto swarm: agents trading perpetuals on Hyperliquid, its own account and record
+  // windows and screens: pop panels out, send windows to any screen
+  handle('screens:state', () => screens.state());
+  handle('screens:popout', (_e, panel, title, config, displayId) => screens.popout(String(panel), String(title ?? panel), config ?? {}, displayId ?? null));
+  handle('screens:move', (_e, id, displayId, mode) => screens.move(Number(id), Number(displayId), mode === 'full' || mode === 'float' ? mode : 'fill'));
+  handle('screens:focus', (_e, id) => screens.focus(Number(id)));
+  handle('screens:close', (_e, id) => screens.close(Number(id)));
+  handle('screens:self', (e) => BrowserWindow.fromWebContents(e.sender)?.id ?? null);
   // the Strategy Lab: research runs, results, backtests and deployment
   handle('lab:state', () => lab.status());
   handle('lab:result', () => lab.result());
@@ -928,6 +981,14 @@ app.whenReady().then(() => {
   registerIpc();
   // the window first, everything heavy after it
   createWindow();
+  screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow });
+  const screensChanged = () => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('screens:changed', screens.state());
+  };
+  for (const ev of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(ev, screensChanged);
+  app.on('before-quit', () => {
+    if (screens) screens.quitting = true;
+  });
   log('info', 'window created');
   services = import('./ccxt-service.mjs')
     .then(async (m) => {

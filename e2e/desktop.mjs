@@ -64,6 +64,44 @@ try {
   await page.waitForSelector('.topbar', { timeout: 30_000 });
   expect(await page.evaluate(() => window.novus.vault.list().then(() => true, () => false)), 'vault opens after the ledger key');
 
+  step('opens on the professional terminal: workspaces, command line, Strategy Lab, screens');
+  await page.waitForSelector('.pro-cmdbar', { timeout: 15_000 });
+  expect((await page.locator('.pro-ws-tab').count()) === 4, 'four workspaces: markets, strategy lab, crypto swarm, meme desk');
+  expect((await page.locator('.pro-key').count()) >= 8, 'function keys for the workspace');
+  await page.waitForSelector('.flexlayout__tab_button:has-text("MON · Monitor")', { timeout: 15_000 });
+  expect(true, 'the markets workspace opens with the monitor');
+  await page.screenshot({ path: `${OUT}desktop-pro-markets.png` });
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('RSCH');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.pro-ws-tab.active:has-text("STRATEGY LAB")', { timeout: 10_000 });
+  await page.waitForSelector('button:has-text("Run research")', { timeout: 15_000 });
+  expect(true, 'RSCH on the command line opens the Strategy Lab research screen');
+  expect((await page.locator('.lab-rule').count()) >= 23, 'the library lists every rule and filter with its papers');
+  const ls = await page.evaluate(() => window.novus.lab.state());
+  expect(!!ls && ls.cfg.coins.length > 0 && Array.isArray(ls.deployed), 'the Lab answers from the desktop process');
+  const runErr = await page.evaluate(() => window.novus.lab.run({ coins: ['BTC'], source: 'binance', years: 0.1, funding: false }).then(() => 'ran', (e) => e.message));
+  expect(runErr === 'ran' || /history|candles|BTC/i.test(runErr), `research without exchange access says why (${String(runErr).slice(0, 90)})`);
+  await page.screenshot({ path: `${OUT}desktop-pro-lab.png` });
+  const scr = await page.evaluate(() => window.novus.screens.state());
+  expect(scr.displays.length >= 1 && scr.windows.some((w) => w.kind === 'main'), `screens listed (${scr.displays.map((d) => d.label).join(', ')})`);
+  expect((await page.locator('.pop-out-btn').count()) > 0, '⧉ pop-out on the tab bars');
+  const popWindow = app.waitForEvent('window', { timeout: 30_000 });
+  const popId = await page.evaluate(() => window.novus.screens.popout('heatgrid', 'HMAP · Heat Map', {}));
+  const pop = await popWindow;
+  await pop.waitForSelector('.popout-bar', { timeout: 30_000 });
+  expect(/HMAP/.test(await pop.locator('.popout-bar').innerText()), 'a panel pops out into its own window');
+  await page.evaluate(([id, d]) => window.novus.screens.move(id, d, 'float'), [popId, scr.displays[0].id]);
+  const scr2 = await page.evaluate(() => window.novus.screens.state());
+  expect(scr2.windows.some((w) => w.kind === 'panel' && w.id === popId && w.displayId === scr.displays[0].id), 'the popped-out window is sent to a screen');
+  await pop.screenshot({ path: `${OUT}desktop-pro-popout.png` }).catch(() => undefined);
+  await page.evaluate((id) => window.novus.screens.close(id), popId);
+  await page.selectOption('.pro-theme-select', 'pro-eikon');
+  expect((await page.evaluate(() => document.documentElement.dataset.theme)) === 'pro-eikon', 'professional themes switch');
+  await page.selectOption('.pro-theme-select', 'pro-amber');
+  // the rest of this test drives the classic swarm views
+  await page.click('.ui-toggle');
+
   step('opens on the meme terminal');
   await page.waitForSelector('.cc-core', { timeout: 15_000 });
   expect(true, 'the app opens on the meme terminal');

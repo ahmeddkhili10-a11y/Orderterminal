@@ -129,6 +129,12 @@ export interface Settings {
   cryptoView: 'island' | 'panels';
   /** how the market island looks: night, matrix, neo, chrome or gold */
   islandTheme: IslandThemeId;
+  /** the professional terminal (dense workspaces, command line) or the classic swarm views */
+  ui: 'pro' | 'classic';
+  /** the professional terminal's workspace on screen */
+  workspace: 'markets' | 'lab' | 'swarm' | 'meme';
+  /** the classic look's theme, kept while the professional terminal is on */
+  classicTheme: ThemeId;
   filter: FilterId;
   glass: GlassLevel;
   soundEnabled: boolean;
@@ -185,10 +191,13 @@ const initial: Settings = {
   byodUrl: 'http://localhost:8080',
   byodToken: '',
   backfillMinutes: 30,
-  theme: 'void',
+  theme: 'pro-amber',
   view: 'command',
   cryptoView: 'island',
   islandTheme: 'night',
+  ui: 'pro',
+  workspace: 'markets',
+  classicTheme: 'void',
   filter: 'none',
   glass: 'medium',
   soundEnabled: true,
@@ -237,7 +246,7 @@ export const useSettings = create<Settings & Actions>()(
     }),
     {
       name: 'oft-settings',
-      version: 7,
+      version: 8,
       // v1 had dark/light themes only
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
@@ -254,6 +263,13 @@ export const useSettings = create<Settings & Actions>()(
           p.alerts = [];
           p.telegramSwarm = true;
           p.swarmDesktopAlerts = true;
+        }
+        // v8: the professional terminal is the default; the classic look's theme is kept for later
+        if (version < 8) {
+          p.classicTheme = p.theme ?? 'void';
+          p.theme = 'pro-amber';
+          p.ui = 'pro';
+          p.workspace = 'markets';
         }
         return p as unknown as Settings & Actions;
       },
