@@ -321,8 +321,8 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       <div style={{ flex: 1 }} />
       {pro ? null : (
         <>
-          <button className="chip primary-chip chrome-chip island-toggle" onClick={() => setSettings({ cryptoView: cryptoView === 'island' ? 'panels' : 'island' })} title={cryptoView === 'island' ? 'The classic panels: footprint, heatmap, DOM, bots' : 'The market island in 3D'}>
-            {cryptoView === 'island' ? '▦' : '◈'} <span className="lbl keep">{cryptoView === 'island' ? 'Panels' : 'Island'}</span>
+          <button className="chip primary-chip chrome-chip island-toggle" onClick={() => setSettings({ cryptoView: cryptoView === 'command' ? 'panels' : 'command' })} title={cryptoView === 'command' ? 'The classic panels: footprint, heatmap, DOM, bots' : 'The swarm Command Center: the core, the gauges, the deploy gate'}>
+            {cryptoView === 'command' ? '▦' : '◈'} <span className="lbl keep">{cryptoView === 'command' ? 'Panels' : 'Command'}</span>
           </button>
           {cryptoView === 'panels' && (
             <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('cswarm')} title="The crypto swarm: its agents, council, trades and rules">
@@ -370,7 +370,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <FilterSelect />
         </>
       )}
-      <button className="chip ui-toggle" onClick={() => switchUi(pro ? 'classic' : 'pro')} title={pro ? 'The classic swarm views: the Command Center and the 3D island' : 'The professional terminal: workspaces, command line, Strategy Lab'}>
+      <button className="chip ui-toggle" onClick={() => switchUi(pro ? 'classic' : 'pro')} title={pro ? 'The classic look: the crypto swarm Command Center and the order-flow panels' : 'The professional terminal: workspaces, command line, Strategy Lab'}>
         {pro ? '◐ Classic' : '▤ Pro terminal'}
       </button>
       <button className="chip seal primary-chip chrome-chip" onClick={() => void sealTerminal()} title="Lock the terminal — back to the ENTER LEDGER KEY page. Market data and bots keep running.">

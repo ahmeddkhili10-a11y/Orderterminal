@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import type { IslandThemeId } from '../island/themes';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import type { VenueId } from '../core/types';
 import type { FilterId, GlassLevel, ThemeId } from '../ui/theme';
@@ -125,10 +124,8 @@ export interface Settings {
   theme: ThemeId;
   /** the panel layout, or the Command Center (swarm dashboard) */
   view: 'terminal' | 'command';
-  /** the crypto terminal: the 3D market island, or the classic panels */
-  cryptoView: 'island' | 'panels';
-  /** how the market island looks: night, matrix, neo, chrome or gold */
-  islandTheme: IslandThemeId;
+  /** the classic look: the crypto swarm's Command Center, or the order-flow panels */
+  cryptoView: 'command' | 'panels';
   /** the professional terminal (dense workspaces, command line) or the classic swarm views */
   ui: 'pro' | 'classic';
   /** the professional terminal's workspace on screen */
@@ -193,8 +190,7 @@ const initial: Settings = {
   backfillMinutes: 30,
   theme: 'pro-amber',
   view: 'terminal',
-  cryptoView: 'island',
-  islandTheme: 'night',
+  cryptoView: 'command',
   ui: 'pro',
   workspace: 'markets',
   classicTheme: 'void',
@@ -246,7 +242,7 @@ export const useSettings = create<Settings & Actions>()(
     }),
     {
       name: 'oft-settings',
-      version: 9,
+      version: 10,
       // v1 had dark/light themes only
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
@@ -276,6 +272,8 @@ export const useSettings = create<Settings & Actions>()(
           if (p.workspace === 'meme') p.workspace = 'quant';
           p.view = 'terminal';
         }
+        // v10: the market island is gone; the crypto swarm has the Command Center
+        if (version < 10 && p.cryptoView !== 'panels') p.cryptoView = 'command';
         return p as unknown as Settings & Actions;
       },
       storage: createJSONStorage(() => safeStorage),

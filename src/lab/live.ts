@@ -33,8 +33,8 @@ export interface LiveSignal {
   why: string;
   /**
    * the strategy's own sizing, relative to its usual size: a volatility target
-   * or VaR budget takes more risk when the GARCH forecast is calm and less in
-   * a storm (clamped 0.5–1.5; the swarm's risk manager applies it)
+   * or VaR budget takes less risk in a storm (0.5–1.5 here; the swarm's risk
+   * manager only ever applies it to make a trade smaller — it decides the size)
    */
   sizeMult: number;
 }

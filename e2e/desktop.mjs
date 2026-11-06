@@ -118,26 +118,26 @@ try {
   await page.click('.ui-toggle');
 
   step('the classic look opens on the crypto terminal (the meme swarm is retired)');
-  // the crypto terminal opens on the market island; only the money sits on screen, bottom centre
-  await page.waitForSelector('.island', { timeout: 15_000 });
-  await page.waitForSelector('.isl-money', { timeout: 15_000 });
-  const money = await page.locator('.isl-money').innerText();
-  expect(/PAPER ACCOUNT/.test(money) && /\$30\.00/.test(money) && /TODAY/.test(money) && /FLOOR/.test(money), 'the money strip: the swarm, its paper account, today, the position, the floor');
-  const gl3d = await page.locator('.island-canvas').count();
-  const nogl = await page.locator('.island-nogl').count();
-  expect(gl3d === 1 || nogl === 1, gl3d ? 'the island is drawn in 3D' : 'without WebGL the island says so and points to Panels');
-  await page.screenshot({ path: `${OUT}desktop-island.png` });
-  // themes: five swatches in the market card dress the island
-  expect((await page.locator('.isl-theme').count()) === 5, 'five island themes offered (night, matrix, neo, chrome, gold)');
-  await page.click('.isl-theme[title="Matrix theme"]');
-  await page.waitForSelector('.island[data-theme="matrix"]', { timeout: 5_000 });
-  expect(true, 'the matrix theme dresses the island');
-  await page.click('.isl-theme[title="Night theme"]');
-  await page.waitForSelector('.island[data-theme="night"]', { timeout: 5_000 });
+  // the crypto terminal opens on the swarm's Command Center: the core, the gauges, the deploy gate
+  await page.waitForSelector('.cc > .cc-top', { timeout: 15_000 });
+  const ccText = await page.locator('.cc').innerText();
+  expect(/SWARM COMMAND/.test(ccText) && /PAPER/.test(ccText) && /\$30\.00/.test(ccText), 'the Command Center shows the swarm, its paper account and $30');
+  expect((await page.locator('.cc-gauge').count()) === 10, 'ten swarm gauges: the agents, the deploy gate, the council, the forest, the optimizer and the limits');
+  await page.locator('.cc-gauge.clickable').first().click();
+  await page.waitForSelector('.cc-drawer .cc-deploy', { timeout: 10_000 });
+  expect((await page.locator('.cc-drawer .cc-gate-step').count()) === 5, 'the deploy gate shows the chain: rules → council → forest → risk → execute');
+  await page.screenshot({ path: `${OUT}desktop-deploy-gate.png` });
+  await page.keyboard.press('Escape');
+  await page.click('.cc-power');
+  await page.waitForSelector('.cc-power.on', { timeout: 20_000 });
+  expect(await page.evaluate(() => window.novus.cswarm.state().then((s) => s.running)), 'Start swarm starts the crypto swarm on paper');
+  await page.screenshot({ path: `${OUT}desktop-command.png` });
+  await page.click('.cc-power');
+  await page.waitForSelector('.cc-power:not(.on)', { timeout: 20_000 });
   // the classic panels are one click away
   await page.click('.island-toggle');
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });
-  expect(true, 'Panels switches the crypto terminal to the classic order-flow layout');
+  expect(true, 'Panels switches the classic look to the order-flow layout');
   // the crypto swarm: its tab puts its panel in the layout; it starts on paper and stops
   await page.click('.cc-orderflow-btn');
   await page.waitForSelector('.cs', { timeout: 15_000 });

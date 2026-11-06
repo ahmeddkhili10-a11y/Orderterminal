@@ -395,7 +395,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             Classic order-flow terminal
           </button>
           <span className="muted" style={{ fontSize: 11 }}>
-            The professional terminal has the workspaces (F1–F4), the Strategy Lab and the QUANT desk; the classic one has the order-flow charts, the 3D island and the AMT bots.
+            The professional terminal has the workspaces (F1–F4), the Strategy Lab and the QUANT desk; the classic one has the crypto swarm's Command Center, the order-flow charts and the AMT bots.
           </span>
         </div>
       </div>

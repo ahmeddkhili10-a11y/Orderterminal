@@ -126,11 +126,12 @@ export function sizeTrade(o, cfg = RISK_DEFAULTS) {
   const dd = book.peak > 0 ? (book.peak - equity) / book.peak : 0;
   if (dd >= cfg.ddCut2) (mult *= 0.5), notes.push(`drawdown ${(dd * 100).toFixed(0)}%: half size`);
   else if (dd >= cfg.ddCut1) (mult *= 0.75), notes.push(`drawdown ${(dd * 100).toFixed(0)}%: ¾ size`);
-  // a Lab strategy's own tested sizing (volatility target or VaR budget), already clamped
-  if (Number.isFinite(o.sizeMult) && o.sizeMult !== 1) {
-    const m = Math.max(0.5, Math.min(1.5, o.sizeMult));
+  // a Lab strategy's own tested sizing (volatility target or VaR budget) may only ask for LESS:
+  // the risk manager decides the size, and a strategy never overrules it
+  if (Number.isFinite(o.sizeMult) && o.sizeMult < 1) {
+    const m = Math.max(0.5, o.sizeMult);
     mult *= m;
-    notes.push(`strategy sizing ${m.toFixed(2)}×`);
+    notes.push(`strategy asks for ${m.toFixed(2)}× in this volatility`);
   }
   if (Number.isFinite(o.expR)) {
     if (o.expR >= 0.3) (mult *= 1.15), notes.push('strong odds +15%');

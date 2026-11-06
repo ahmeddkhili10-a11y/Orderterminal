@@ -220,10 +220,10 @@ being called an edge; the tests check this.
   (1 % of the account, compounding), and the trade follows the exits it was
   tested with (stop, target, trail, time limit, opposite signal). Its messages
   carry the tested Sharpe, t and verdict.
-- **→ Meme swarm** gives the strategy a vote in the meme swarm's council, read
-  on each coin's own market-cap chart. Only rules that make sense on a short,
-  wild chart vote (momentum, trend, breakout, volume). They were tested on
-  major coins, not meme coins, so they vote but never veto.
+- It only **proposes**: the council, the forest, the guardian and the risk
+  manager decide, and any of them can veto. Its tested sizing can only make a
+  trade smaller, never bigger. The swarm's Command Center has a **deploy gate**
+  (the **Lab · deploy** gauge) to deploy, pause and remove strategies.
 - **DEPL** lists what is deployed; switch each on or off, or remove it.
 
 ## Honest limits

@@ -751,3 +751,156 @@ export function deltaHedge(prices: number[], opts: { strikePct: number; iv: numb
 export const kellyBet = (p: number, win: number, loss = 1) => (win > 0 && loss > 0 ? p / loss - (1 - p) / win : 0);
 /** Kelly leverage for a return stream with mean m and variance v per period (continuous approximation) */
 export const kellyLeverage = (m: number, v: number) => (v > 0 ? m / v : 0);
+
+// ---------- CAPM, the efficient frontier and the Kelly portfolio ----------
+
+export interface Capm {
+  /** Jensen's alpha per period, its t-statistic, beta and its t, R² */
+  alpha: number;
+  tAlpha: number;
+  beta: number;
+  tBeta: number;
+  r2: number;
+  /** residual (idiosyncratic) standard deviation per period */
+  residSd: number;
+  n: number;
+}
+
+/**
+ * The capital asset pricing model as a regression (Sharpe 1964; Jensen 1968):
+ * the asset's excess return on the market's. Beta is the market exposure,
+ * alpha what is left over, R² the share of the asset's variance the market
+ * explains. Returns per period, risk-free rate per period.
+ */
+export function capm(asset: ArrayLike<number>, market: ArrayLike<number>, rf = 0): Capm | null {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < Math.min(asset.length, market.length); i++)
+    if (Number.isFinite(asset[i]) && Number.isFinite(market[i])) {
+      xs.push(market[i] - rf);
+      ys.push(asset[i] - rf);
+    }
+  const n = xs.length;
+  if (n < 10) return null;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    sxx += (xs[i] - mx) ** 2;
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    syy += (ys[i] - my) ** 2;
+  }
+  if (!(sxx > 0)) return null;
+  const beta = sxy / sxx;
+  const alpha = my - beta * mx;
+  const sse = Math.max(0, syy - beta * sxy);
+  const s2 = sse / Math.max(1, n - 2);
+  const seB = Math.sqrt(s2 / sxx);
+  const seA = Math.sqrt(s2 * (1 / n + (mx * mx) / sxx));
+  return { alpha, tAlpha: seA > 0 ? alpha / seA : NaN, beta, tBeta: seB > 0 ? beta / seB : NaN, r2: syy > 0 ? 1 - sse / syy : NaN, residSd: Math.sqrt(s2), n };
+}
+
+/** mean vector and covariance matrix of aligned return series (rets[asset][t]) */
+export function meanCov(rets: number[][]): { mu: number[]; cov: number[][] } {
+  const k = rets.length;
+  const n = Math.min(...rets.map((r) => r.length));
+  const mu = rets.map((r) => r.slice(0, n).reduce((a, b) => a + b, 0) / n);
+  const cov = Array.from({ length: k }, () => new Array(k).fill(0));
+  for (let i = 0; i < k; i++)
+    for (let j = i; j < k; j++) {
+      let s = 0;
+      for (let t = 0; t < n; t++) s += (rets[i][t] - mu[i]) * (rets[j][t] - mu[j]);
+      cov[i][j] = cov[j][i] = s / Math.max(1, n - 1);
+    }
+  return { mu, cov };
+}
+
+const dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * b[i], 0);
+const mulMV = (m: number[][], v: number[]) => m.map((row) => dot(row, v));
+export const portVar = (w: number[], cov: number[][]) => dot(w, mulMV(cov, w));
+
+/** Euclidean projection onto {w ≥ 0, Σw = c} (Duchi et al. 2008) */
+export function projectSimplex(v: number[], c = 1): number[] {
+  const u = [...v].sort((a, b) => b - a);
+  let css = 0;
+  let theta = 0;
+  for (let i = 0; i < u.length; i++) {
+    css += u[i];
+    const t = (css - c) / (i + 1);
+    if (u[i] - t > 0) theta = t;
+  }
+  return v.map((x) => Math.max(0, x - theta));
+}
+
+/** projection onto {w ≥ 0, Σw ≤ c} */
+const projectCapped = (v: number[], c: number) => {
+  const p = v.map((x) => Math.max(0, x));
+  return p.reduce((a, b) => a + b, 0) <= c ? p : projectSimplex(v, c);
+};
+
+/** maximise f(w) = μ'w·λ − w'Σw (or its growth form) over a convex set by projected gradient ascent */
+function ascend(mu: number[], cov: number[][], lambda: number, project: (v: number[]) => number[], half = false, iters = 600): number[] {
+  const k = mu.length;
+  const L = 2 * Math.max(1e-12, cov.reduce((a, r, i) => a + Math.abs(r[i]), 0));
+  let w = project(new Array(k).fill(1 / k));
+  for (let it = 0; it < iters; it++) {
+    const g = mulMV(cov, w);
+    // gradient of λμ'w − w'Σw is λμ − 2Σw; of μ'w − ½w'Σw (Kelly growth) is μ − Σw
+    const grad = mu.map((m, i) => (half ? m - g[i] : lambda * m - 2 * g[i]));
+    const next = project(w.map((x, i) => x + grad[i] / (half ? L / 2 : L)));
+    const moved = next.reduce((a, x, i) => a + Math.abs(x - w[i]), 0);
+    w = next;
+    if (moved < 1e-10) break;
+  }
+  return w;
+}
+
+export interface Portfolio {
+  w: number[];
+  ret: number;
+  vol: number;
+  sharpe: number;
+}
+
+const portOf = (w: number[], mu: number[], cov: number[][], rf: number): Portfolio => {
+  const ret = dot(w, mu);
+  const vol = Math.sqrt(Math.max(0, portVar(w, cov)));
+  return { w, ret, vol, sharpe: vol > 0 ? (ret - rf) / vol : NaN };
+};
+
+/**
+ * The long-only efficient frontier (Markowitz 1952): for each risk appetite
+ * λ, the fully invested portfolio maximising λ·return − variance. From the
+ * minimum-variance portfolio (λ = 0) to the single best asset.
+ */
+export function efficientFrontier(mu: number[], cov: number[][], rf = 0, points = 40): { frontier: Portfolio[]; minVar: Portfolio; tangency: Portfolio } {
+  const scale = cov.reduce((a, r, i) => a + r[i], 0) / mu.length / Math.max(1e-12, Math.max(...mu.map(Math.abs)));
+  const lambdas = [0, ...Array.from({ length: points - 1 }, (_, i) => scale * 1e-2 * Math.pow(1e4, i / (points - 2)))];
+  const frontier: Portfolio[] = [];
+  for (const lam of lambdas) {
+    const p = portOf(ascend(mu, cov, lam, (v) => projectSimplex(v, 1)), mu, cov, rf);
+    if (!frontier.length || p.ret > frontier[frontier.length - 1].ret + 1e-12) frontier.push(p);
+  }
+  const minVar = frontier[0];
+  const tangency = frontier.reduce((b, p) => (p.sharpe > b.sharpe ? p : b), frontier[0]);
+  return { frontier, minVar, tangency };
+}
+
+/**
+ * The growth-optimal (Kelly) portfolio: maximise the expected log growth,
+ * ≈ μ'w − ½w'Σw for excess returns, long-only, gross exposure at most `cap`
+ * (Kelly 1956; Thorp 2006). Unconstrained it is Σ⁻¹μ.
+ */
+export function kellyPortfolio(mu: number[], cov: number[][], rf = 0, cap = 1): Portfolio {
+  const ex = mu.map((m) => m - rf);
+  const w = ascend(ex, cov, 1, (v) => projectCapped(v, cap), true, 2000);
+  const p = portOf(w, mu, cov, rf);
+  // the cash share earns the risk-free rate
+  const cash = 1 - w.reduce((a, b) => a + b, 0);
+  return { ...p, ret: p.ret + cash * rf, sharpe: p.vol > 0 ? (p.ret + cash * rf - rf) / p.vol : NaN };
+}
+
+/** expected log growth of a leverage f on an asset with excess return m and variance v per period (continuous) */
+export const kellyGrowth = (f: number, m: number, v: number, rf = 0) => rf + f * m - 0.5 * f * f * v;

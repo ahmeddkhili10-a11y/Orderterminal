@@ -7,7 +7,7 @@ import { startAmtService } from '../desktop/amt';
 import { startLunoAlerts } from '../luno/lane';
 import { startBotAlerts } from '../desktop/botAlerts';
 import { startCryptoSwarmLink } from '../cswarm/store';
-import { Island } from '../island/Island';
+import { CommandCenter } from '../command/CommandCenter';
 import { startTelegramService } from '../desktop/telegram';
 import { startCollectors } from '../market/collectors';
 import { hub } from '../market/hub';
@@ -76,7 +76,6 @@ export function App() {
   const layoutRef = useRef<ILayoutApi>(null);
   const proRefs = useRef<Partial<Record<Workspace, ILayoutApi | null>>>({});
   const fired = useSettings((s) => s.fired);
-  const view = useSettings((s) => s.view);
   const cryptoView = useSettings((s) => s.cryptoView);
   const pro = useSettings((s) => s.ui) === 'pro';
   const ws = useSettings((s) => s.workspace);
@@ -252,10 +251,10 @@ export function App() {
           </button>
         </div>
       )}
-      {!pro && view === 'terminal' && cryptoView === 'island' && <Island />}
-      {/* the panels stay mounted under the Command Center and the island, so they keep their state */}
+      {!pro && cryptoView === 'command' && <CommandCenter />}
+      {/* the panels stay mounted under the Command Center, so they keep their state */}
       {!pro && (
-        <div className="layout-host" style={view === 'command' || cryptoView === 'island' ? { display: 'none' } : undefined}>
+        <div className="layout-host" style={cryptoView === 'command' ? { display: 'none' } : undefined}>
           <div className="layout-inner">
             <Layout ref={layoutRef} model={classicModel} factory={factory} onModelChange={(m) => saveLayout(m.toJson())} onRenderTabSet={popButton(classicModel)} realtimeResize />
           </div>

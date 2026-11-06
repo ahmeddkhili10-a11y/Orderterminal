@@ -111,74 +111,44 @@ expect 20–60 minutes before their first proposals.
 - Moskowitz, T., Ooi, Y. H. & Pedersen, L. H. (2012). Time series momentum. *Journal of Financial Economics* 104(2).
 - Wen, Z., Bouri, E., Xu, Y. & Zhao, Y. (2022). Intraday return predictability in the cryptocurrency markets: momentum, reversal, or both. *North American Journal of Economics and Finance* 62.
 
-## The market island
+## The Command Center
 
-The crypto tab opens on the market island: the whole terminal is one 3D world
-you move through. No panels on it — only the small market card (top left), the
-connectors (top bar) and the money (bottom centre).
+The crypto swarm has the Command Center — the black-and-chrome screen the meme
+swarm had, carried over: the classic look opens on it, and **SWRM** (F3) opens
+it in the professional terminal.
 
-- **The lake in the middle is the order book.** Across is price, back to front
-  is time (15 minutes ago to now), height is the liquidity resting at that price
-  at that time: walls of orders rise as hills. **The glowing river is the
-  price**, flowing to the orb of the price now. **Trades are lights** where and
-  when they printed: gold for buyers, red for sellers.
-- **The Exchange** (west) is the live book as a city: a tower per price level,
-  bids cyan on one side of the avenue, asks orange on the other, nearest the
-  price at the front. Towers grow and shrink as the book changes.
-- **The Fields** (east) are the volume profile: a crop row per price, as tall
-  as the volume traded there; the point of control is the golden row.
-- **The Harbor** (the south-east bay) is the tape. The biggest trades sail in
-  as boats with a wake behind them, bigger for bigger trades: gold sails moor
-  west of the pier (buyers), red sails east (sellers), as in the book. When one
-  docks, "BOUGHT $x" or "SOLD $x" rises over the pier and the crane swings its
-  cargo ashore. The crates in the yard are the last minute's buying (west) and
-  selling (east); the buoys at the harbour mouth blink green while buyers lead,
-  red while sellers do. Hover a boat for its trade, the crates for the minute's
-  flow.
-- **The Lighthouse** (south-west) is volatility. Three rings of light up the
-  tower are the 1, 5 and 15-minute moves (the top is the fastest): green up,
-  red down, brighter for bigger. As the market gets wilder the beam turns
-  faster and warms from white to red, the swell rises, clouds gather and rain
-  falls; a hard 1-minute move brings lightning. While you visit, the beam
-  follows your pointer like a searchlight. Hover a ring for its move.
-- **The Council** (north) is the swarm: a domed hall with a robot on the plaza
-  for each agent, hovering on a small jet, with a ring of light on the ground
-  as its gauge and a face screen that shows how it feels. The debate is acted
-  out in order:
-  - the **proposer** takes the podium under a stage light, talks with its
-    hands, and a link of light runs from it to the hall;
-  - each **voter** steps forward in turn and links to the proposer: green
-    sparks and a raised hand for, red sparks and crossed arms against, grey for
-    an abstention, purple and both arms up for a veto. Its bubble says who it
-    answers ("CROWD · votes against → TREND") and a ✓ / ✗ / – stays by its name
-    until the verdict;
-  - the **verdict** turns every link and the hall green (trade) or red (pass),
-    the banner says why, and every robot jumps. When the order goes out, a gold
-    link runs from the proposer to the price.
-  The speaker's name glows and its ring pulses, so you always know who is
-  talking. While the swarm is stopped the robots power down.
-- **Explore**: click a place or a minion and the camera flies there; its reading
-  appears beside it as a hologram, with a line to what it describes. Hover
-  anything for a peek. Drag to look round, scroll to zoom, **W A S D** or the
-  arrows to glide over the island, **Q / E** to turn; click the sea or press
-  **Esc** to fly home.
-- **The money** is a slim strip at the bottom centre: the swarm (wake / stop),
-  the account, today, the open position and the floor.
-- **Themes**: five swatches at the end of the market card dress the island
-  (your choice is remembered):
-  - **Night**: the default, a moonlit island in a deep blue sea.
-  - **Matrix**: black and phosphor green, glowing contour lines over the land
-    and code falling like rain.
-  - **Neo**: neo-futuristic; a violet dusk, neon cyan and magenta, glass and
-    light.
-  - **Chrome**: polished metal; land, sea, buildings and robots reflect a
-    studio sky.
-  - **Gold**: gold land on a dark bronze sea under a warm sky.
+- **Top**: the swarm's talk scrolling past, **⇢ Deploy** and **Start / Stop**.
+- **Left**: the account and its P&L curve; the coin in focus (5-minute candles
+  from the swarm's exchange, entry and exit marks, stop and target lines); the
+  feeds (each coin, its daily trend, price and funding); capital at risk (each
+  open position in R).
+- **Centre — the swarm core**: what the agents read flows in from the left
+  (feeds, Scalper, Auctioneer, Trend, the Lab's strategies, funding), each coin
+  is a sphere of particles — bigger as its signals heat up, cyan for the daily
+  trend, magenta for signal heat — held coins sit at the far tip, and the
+  results flow out to the right. 3D where the machine draws WebGL, flat
+  otherwise. Click a coin to focus it.
+- **Right**: the account (equity, peak, drawdown, **Account · rules** opens the
+  full swarm panel: paper or live, keys, agents, risk), the results and the
+  execution tape.
+- **Bottom — the gauges**: Scalper, Auctioneer, Trend; **Lab · deploy** (the
+  deploy gate); the Council (how many proposals it lets through); the Forest
+  (its accuracy, or samples while it learns); the Optimizer (risk a trade and
+  the drawdown it is cutting for); Exposure; the daily Loss limit; the Floor.
+  Then the live feed.
 
-  A theme changes only colours and surfaces: buyers and bids stay on the cool
-  or gold side, sellers and asks on the warm or red side, in every theme.
-- **▦ Panels** on the top bar switches to the classic panels (footprint,
-  heatmap, DOM, bots, the Crypto Swarm panel); **◈ Island** brings it back.
+### The deploy gate
 
-One canvas draws everything, at 30 frames a second, and nothing while the tab
-is hidden. Without 3D graphics (WebGL) the island says so; the panels still work.
+Click **Lab · deploy** (or **⇢ Deploy**) to deploy Strategy Lab strategies into
+the swarm, switch them on and off or remove them. The chain is fixed:
+
+1. the strategy's own tested entry rules fire on a closed candle;
+2. the council votes (the proposer, the daily trend, the tape, the crowd);
+3. the forest gives its odds and can veto;
+4. the guardian checks the market and can veto; the risk manager decides the
+   size — and can veto;
+5. only then is the trade executed, and the strategy's own exits manage it.
+
+A deployed strategy can never overrule the council, the forest or the risk
+manager. Its tested sizing (a volatility target or a VaR budget) can only ask
+for a **smaller** trade in a storm, never a bigger one.

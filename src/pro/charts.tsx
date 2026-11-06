@@ -155,3 +155,70 @@ export function AreaChart({ values, forecast = [], level, height = 170, format =
     </div>
   );
 }
+
+/** a scatter with lines: points (labelled dots) and polylines in data units, axes with ticks */
+export function ScatterChart({ points = [], lines = [], height = 240, xFormat = (v) => v.toFixed(2), yFormat = (v) => v.toFixed(2), xLabel, yLabel }: { points?: { x: number; y: number; label?: string; color?: string; r?: number; ring?: boolean }[]; lines?: { pts: [number, number][]; color: string; dash?: string; width?: number }[]; height?: number; xFormat?: (v: number) => string; yFormat?: (v: number) => string; xLabel?: string; yLabel?: string }) {
+  const [ref, W] = useChartWidth();
+  const H = height;
+  const xs = [...points.map((p) => p.x), ...lines.flatMap((l) => l.pts.map((p) => p[0]))].filter(Number.isFinite);
+  const ys = [...points.map((p) => p.y), ...lines.flatMap((l) => l.pts.map((p) => p[1]))].filter(Number.isFinite);
+  if (!xs.length || !ys.length) return <div className="pro-empty">No data</div>;
+  let x0 = Math.min(0, ...xs);
+  let x1 = Math.max(...xs);
+  let y0 = Math.min(...ys);
+  let y1 = Math.max(...ys);
+  const px = (x1 - x0) * 0.08 || 1;
+  const py = (y1 - y0) * 0.1 || 1;
+  x1 += px;
+  y0 -= py;
+  y1 += py;
+  if (x0 < 0) x0 -= px;
+  const L = 52;
+  const B = 22;
+  const X = (x: number) => L + ((x - x0) / (x1 - x0)) * (W - L - 10);
+  const Y = (y: number) => H - B - ((y - y0) / (y1 - y0)) * (H - B - 8);
+  const ticks = (a: number, b: number) => Array.from({ length: 5 }, (_, i) => a + ((b - a) * i) / 4);
+  return (
+    <div className="pro-chart" ref={ref}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" style={{ height: H }}>
+        {ticks(y0, y1).map((t, i) => (
+          <g key={`y${i}`}>
+            <line x1={L} x2={W - 10} y1={Y(t)} y2={Y(t)} className="pro-grid" />
+            <text x={L - 4} y={Y(t) + 3} className="pro-tick" textAnchor="end">
+              {yFormat(t)}
+            </text>
+          </g>
+        ))}
+        {ticks(x0, x1).map((t, i) => (
+          <text key={`x${i}`} x={X(t)} y={H - 6} className="pro-tick" textAnchor="middle">
+            {xFormat(t)}
+          </text>
+        ))}
+        {y0 < 0 && y1 > 0 && <line x1={L} x2={W - 10} y1={Y(0)} y2={Y(0)} className="pro-split" />}
+        {xLabel && (
+          <text x={W - 12} y={H - B - 4} className="pro-tick" textAnchor="end">
+            {xLabel}
+          </text>
+        )}
+        {yLabel && (
+          <text x={L + 4} y={14} className="pro-tick">
+            {yLabel}
+          </text>
+        )}
+        {lines.map((l, k) => (
+          <path key={k} d={path(l.pts.map(([x, y]) => [X(x), Y(y)]))} fill="none" stroke={l.color} strokeWidth={l.width ?? 1.6} strokeDasharray={l.dash} />
+        ))}
+        {points.map((p, k) => (
+          <g key={k}>
+            <circle cx={X(p.x)} cy={Y(p.y)} r={p.r ?? 3.5} fill={p.ring ? 'none' : p.color ?? 'var(--pro-head, #ffd200)'} stroke={p.color ?? 'var(--pro-head, #ffd200)'} strokeWidth={p.ring ? 2 : 0} />
+            {p.label && (
+              <text x={X(p.x) + 6} y={Y(p.y) - 5} className="pro-tick" style={{ fill: p.color ?? undefined }}>
+                {p.label}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}

@@ -41,9 +41,8 @@ const ws = params.get('ws');
 if (ws === 'markets' || ws === 'lab' || ws === 'swarm' || ws === 'quant') s.set({ workspace: ws });
 if (ws === 'meme') s.set({ workspace: 'quant' });
 // the crypto terminal (the retired meme command view opens the crypto terminal)
-if (view === 'command') s.set({ view: 'terminal', cryptoView: 'panels' });
-// the crypto terminal: the market island, or (view=terminal, as before) the classic panels
-else if (view === 'island') s.set({ view: 'terminal', cryptoView: 'island' });
+if (view === 'command' || view === 'island') s.set({ view: 'terminal', cryptoView: 'command' });
+// view=terminal (as before) or panels: the classic order-flow panels
 else if (view === 'terminal' || view === 'panels') s.set({ view: 'terminal', cryptoView: 'panels' });
 
 const simLoad = Number(params.get('simLoad'));

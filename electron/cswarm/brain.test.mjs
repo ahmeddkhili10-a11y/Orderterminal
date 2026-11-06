@@ -48,6 +48,20 @@ describe('crypto swarm brain', () => {
     expect(rClass(3)).toBe(3);
   });
 
+  it('a deployed Lab strategy only proposes: the forest, the guardian and the risk manager still veto it, and its sizing can only shrink a trade', () => {
+    const lab = cand({ agent: 'lab', setup: 'Lab · Kalman-filter trend' });
+    expect(councilR({ cand: lab, odds: oddsOk, riskGate: null, sizeNote: '' }).trade).toBe(true);
+    expect(councilR({ cand: lab, odds: { ...oddsOk, expR: -0.3, trust: 0.5 }, riskGate: null, sizeNote: '' }).summary).toBe('vetoed by Forest');
+    expect(councilR({ cand: lab, odds: oddsOk, riskGate: 'paused after 3 losses', sizeNote: '' }).summary).toBe('vetoed by Risk');
+    expect(councilR({ cand: cand({ agent: 'lab', ctx: { ...cand().ctx, book: { imbalance: 0, spreadBps: 20 } } }), odds: oddsOk, riskGate: null, sizeNote: '' }).summary).toBe('vetoed by Guardian');
+    const book = newBook(1000, Date.now());
+    const base = sizeTrade({ price: 100_000, stop: 99_000, side: 'buy', equity: 1000, book, openNotional: 0 });
+    const bigger = sizeTrade({ price: 100_000, stop: 99_000, side: 'buy', equity: 1000, book, openNotional: 0, sizeMult: 1.5 });
+    const smaller = sizeTrade({ price: 100_000, stop: 99_000, side: 'buy', equity: 1000, book, openNotional: 0, sizeMult: 0.6 });
+    expect(bigger.riskUsd).toBeCloseTo(base.riskUsd, 9);
+    expect(smaller.riskUsd).toBeLessThan(base.riskUsd);
+  });
+
   it('the council: proposer and risk carry a clean trade; the tape against it or a veto stops it', () => {
     const go = councilR({ cand: cand(), odds: oddsOk, riskGate: null, sizeNote: 'risking 1% ($0.30)' });
     expect(go.trade).toBe(true);

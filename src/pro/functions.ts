@@ -55,7 +55,8 @@ export const FUNCTIONS: Fn[] = [
   { code: 'BT', name: 'Backtest builder', panel: 'labbuilder', ws: 'lab', desc: 'Build a strategy by hand and test it' },
   { code: 'DEPL', name: 'Deployed', panel: 'labdeployed', ws: 'lab', desc: 'Strategies trading in the swarms' },
   // crypto swarm
-  { code: 'SWRM', name: 'Crypto swarm', panel: 'cswarm', ws: 'swarm', desc: 'Agents, council, trades and rules' },
+  { code: 'SWRM', name: 'Swarm command', panel: 'swarmcmd', ws: 'swarm', desc: 'The swarm core, gauges, deploy gate, tape and live feed' },
+  { code: 'SWCF', name: 'Swarm rules', panel: 'cswarm', ws: 'swarm', desc: 'Agents, council, trades, rules, paper or live account' },
   { code: 'AMT', name: 'AMT bots', panel: 'amt', ws: 'swarm', desc: 'Auction-market-theory bots' },
   { code: 'TKT', name: 'Order ticket', panel: 'ticket', ws: 'swarm', desc: 'Place orders on any exchange' },
   { code: 'PORT', name: 'Portfolio', panel: 'accounts', ws: 'swarm', desc: 'Balances, positions, orders, fills' },
@@ -66,6 +67,9 @@ export const FUNCTIONS: Fn[] = [
   { code: 'VTGT', name: 'Volatility targeting', panel: 'qvtgt', ws: 'quant', desc: 'Volatility estimators, position sizing, Kelly' },
   { code: 'MOM', name: 'Momentum', panel: 'qmom', ws: 'quant', desc: 'Time-series momentum, trend t, Kalman slope, rank' },
   { code: 'REGM', name: 'Regimes', panel: 'qregm', ws: 'quant', desc: 'Hurst, variance ratio, OU half-life, hidden Markov' },
+  { code: 'CAPM', name: 'CAPM', panel: 'qcapm', ws: 'quant', desc: 'Beta, alpha, R², security market line' },
+  { code: 'EF', name: 'Efficient frontier', panel: 'qef', ws: 'quant', desc: 'Markowitz frontier, max Sharpe, min variance, Kelly portfolio' },
+  { code: 'KELLY', name: 'Kelly criterion', panel: 'qkelly', ws: 'quant', desc: 'Growth-optimal leverage, growth curve, the swarm’s own Kelly' },
   // accounts and messages
   { code: 'WALL', name: 'Wallet', panel: 'wallet', ws: 'swarm', desc: 'Phantom balances (and the retired meme swarm wallet)' },
   { code: 'TG', name: 'Telegram', panel: 'telegram', ws: 'swarm', desc: 'Your Telegram bot' },
@@ -82,8 +86,8 @@ export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
 export const KEYS: Record<Workspace, string[]> = {
   markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
   lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'SWRM', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
-  swarm: ['SWRM', 'DEPL', 'TKT', 'PORT', 'AMT', 'GP', 'ALRT', 'CALC', 'TG'],
-  quant: ['VAR', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV', 'FCST', 'HVOL', 'CORR'],
+  swarm: ['SWRM', 'SWCF', 'DEPL', 'TKT', 'PORT', 'AMT', 'GP', 'ALRT', 'CALC', 'TG'],
+  quant: ['VAR', 'CAPM', 'EF', 'KELLY', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV', 'FCST'],
 };
 
 export interface Parsed {

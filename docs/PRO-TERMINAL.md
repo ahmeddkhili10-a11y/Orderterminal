@@ -2,7 +2,7 @@
 
 Novus Ordo opens on a professional, Bloomberg-style terminal: dense, flat,
 square, every number on screen backed by live data. The classic swarm views
-(the Command Center and the 3D island) are one click away (**◐ Classic** on
+(the crypto swarm's Command Center and the order-flow panels) are one click away (**◐ Classic** on
 the top bar; **▤ Pro terminal** brings this back).
 
 ## Layout
@@ -26,15 +26,18 @@ the top bar; **▤ Pro terminal** brings this back).
 | `HMAP` | Heat map | | `RSCH` | Research |
 | `GP` | Price graph | | `BT` | Backtest builder |
 | `GIP` | Footprint | | `DEPL` | Deployed strategies |
-| `LHM` | Liquidity heat map | | `SWRM` | Crypto swarm |
+| `LHM` | Liquidity heat map | | `TKT` | Order ticket |
 | `CORR` | Correlation matrix, beta | | `AMT` | AMT bots |
-| `HVOL` | Volatility monitor | | `TKT` | Order ticket |
+| `HVOL` | Volatility monitor | | | |
 | `GV` | GARCH volatility: heat calendar of the hours ahead, model, VaR | | | |
 | `FCST` | Candle forecast: next high, low, P(up), track record | | | |
 | `DES` | Description / summary | | `PORT` | Portfolio |
 | `BOOK` | Order book | | `ALRT` | Alerts |
 | `DOM` | Depth ladder | | `LUNO` | Luno lane (rands) |
 | `DPTH` | Depth chart | | `VAR` | Value at risk (F4) |
+| `SWRM` | Swarm command (F3) | | `CAPM` | CAPM (F4) |
+| `SWCF` | Swarm rules (F3) | | `EF` | Efficient frontier (F4) |
+| | | | `KELLY` | Kelly criterion (F4) |
 | `TAS` | Time & sales | | `DHG` | Delta hedging (F4) |
 | `CVD` | Cumulative delta | | `WALL` | Wallet |
 | `FLOW` | Flow pulse | | `TG` | Telegram |
@@ -80,6 +83,18 @@ coin on the board, and the tables list a set of coins you choose.
 - **REGM — regimes.** Hurst exponent, variance ratio, Ornstein–Uhlenbeck
   half-life and s-score (trending, mean-reverting or random), and a two-state
   hidden Markov model (calm or turbulent, with the odds hour by hour).
+- **CAPM — capital asset pricing.** Each coin against the market (bitcoin or
+  an equal-weight index): beta, Jensen's alpha and its t, R², the return CAPM
+  expects for that beta, Treynor and information ratios, Sharpe, idiosyncratic
+  volatility, and the security market line.
+- **EF — efficient frontier.** The long-only Markowitz frontier of the coins,
+  with the minimum-variance and maximum-Sharpe (tangency) portfolios, the
+  capital market line, equal weight and the Kelly portfolio, and their weights.
+  Expected returns are shrunk toward the coins' average (choose how much).
+- **KELLY — the Kelly criterion.** Each coin's growth-optimal leverage and
+  half Kelly with their growth, the growth curve by leverage (peak at full
+  Kelly, back to cash's at twice it), the growth-optimal portfolio under a
+  leverage cap, and Kelly on the crypto swarm's own trade record.
 - **GV** gains a model choice (best by BIC, GARCH or **GJR-GARCH**) and the
   news-impact curve, which shows GJR's extra response to falls.
 

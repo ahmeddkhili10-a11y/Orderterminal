@@ -6338,3 +6338,51 @@ table.grid.meme-tape td {
 }
 .q-kelly label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; letter-spacing: 0.06em; }
 .old-swarm { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 4px; }
+
+/* the Command Center as a panel (professional terminal, F3) */
+.cc-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  position: relative;
+  overflow: hidden;
+  --gap: 8px;
+}
+.cc-gauge.clickable { cursor: pointer; }
+.cc-gauge.clickable:hover { filter: brightness(1.25); }
+.cc-gauge.clickable .cc-gauge-label::after { content: ' ⇢'; opacity: 0.7; }
+.cc-deploy-open { white-space: nowrap; }
+/* the deploy gate */
+.cc-deploy { display: flex; flex-direction: column; gap: 8px; }
+.cc-gate { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cc-gate-step {
+  font-size: 11px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.cc-gate-step b { color: var(--accent); margin-right: 4px; font-family: var(--mono, monospace); }
+.cc-gate-step:not(:last-child)::after { content: ' →'; color: var(--muted); }
+.cc-gate-note { font-size: 12px; line-height: 1.45; }
+.cc-dep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.cc-dep.on { border-color: color-mix(in srgb, var(--buy) 45%, var(--border)); }
+.cc-dep-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.cc-dep-main .mono { font-size: 11px; }
+.cc-dep-last { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-dep-btn { white-space: nowrap; }
+.cc-logline.k-trade b, .cc-logline.k-win b { color: var(--buy); }
+.cc-logline.k-loss b, .cc-logline.k-error b { color: var(--sell); }
+.cc-logline.k-pass { opacity: 0.75; }
+/* the crypto swarm's market rows: coin, trend, price, funding */
+.cc-feed.cs { grid-template-columns: 10px minmax(30px, auto) 12px 1fr minmax(44px, auto); cursor: pointer; }
+.cc-feed.cs > .mono:nth-child(4) { text-align: right; white-space: nowrap; }
+.cc-feed.cs:hover .cc-feed-name { color: var(--text); }

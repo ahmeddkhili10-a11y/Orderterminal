@@ -182,13 +182,17 @@ export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'swarm' | 'quant', () => IJ
       ),
     ),
   lab: () => model(row(100, ts(30, tab('lablib'), tab('prohelp')), row(70, ts(68, tab('labresearch'), tab('labbuilder')), ts(32, tab('labdeployed'), tab('fcst'), tab('garch'), tab('correl'))))),
-  swarm: () => model(row(100, ts(44, tab('cswarm')), row(32, ts(60, tab('historical'), tab('footprint')), ts(40, tab('labdeployed'), tab('alerts'))), row(24, ts(55, tab('ticket'), tab('amt')), ts(45, tab('accounts'), tab('calculator'), tab('wallet'), tab('telegram'))))),
-  quant: () => model(row(100, row(50, ts(56, tab('qmom'), tab('qregm')), ts(44, tab('qvar'))), row(50, ts(56, tab('qdelta'), tab('qvtgt')), ts(44, tab('garch'), tab('fcst'), tab('historical'))))),
+  swarm: () => model(row(100, ts(100, tab('swarmcmd'), tab('cswarm'), tab('labdeployed'), tab('historical'), tab('ticket'), tab('accounts'), tab('amt'), tab('alerts'), tab('calculator'), tab('wallet'), tab('telegram')))),
+  quant: () => model(row(100, row(50, ts(56, tab('qef'), tab('qmom'), tab('qregm')), ts(44, tab('qvar'), tab('qcapm'))), row(50, ts(56, tab('qkelly'), tab('qdelta'), tab('qvtgt')), ts(44, tab('garch'), tab('fcst'), tab('historical'))))),
 };
+
+/** bumped per workspace when its starting layout changes, so the new one is used once */
+const PRO_VERSION: Partial<Record<keyof typeof PRO_LAYOUTS, number>> = { swarm: 2, quant: 2 };
+const proKey = (ws: keyof typeof PRO_LAYOUTS) => `${LAYOUT_KEY}:pro:${ws}${PRO_VERSION[ws] ? `:v${PRO_VERSION[ws]}` : ''}`;
 
 export function loadProLayout(ws: keyof typeof PRO_LAYOUTS): IJsonModel {
   try {
-    const raw = safeStorage.getItem(`${LAYOUT_KEY}:pro:${ws}`) as string | null;
+    const raw = safeStorage.getItem(proKey(ws)) as string | null;
     if (raw) return sanitize(JSON.parse(raw));
   } catch {
     /* fall back to the starting layout */
@@ -196,7 +200,7 @@ export function loadProLayout(ws: keyof typeof PRO_LAYOUTS): IJsonModel {
   return PRO_LAYOUTS[ws]();
 }
 export function saveProLayout(ws: keyof typeof PRO_LAYOUTS, json: IJsonModel) {
-  safeStorage.setItem(`${LAYOUT_KEY}:pro:${ws}`, JSON.stringify(json));
+  safeStorage.setItem(proKey(ws), JSON.stringify(json));
 }
 
 export function loadLayout(): IJsonModel {
