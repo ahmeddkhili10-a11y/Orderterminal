@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { switchUi } from '../pro/ProBar';
 import type { IJsonModel } from 'flexlayout-react';
 import { byodInfo, type ByodInfo } from '../history/byod';
 import { desktop, isDesktop } from '../desktop/bridge';
@@ -274,7 +275,7 @@ export function LayoutsModal({ onClose, onApply, current }: { onClose: () => voi
   );
 }
 
-const CATS: Category[] = ['Meme', 'Charts', 'Orderflow', 'Order book', 'Derivatives', 'Market', 'Account', 'Algo', 'Tools'];
+const CATS: Category[] = ['Charts', 'Orderflow', 'Order book', 'Derivatives', 'Market', 'Quant', 'Strategy Lab', 'Account', 'Algo', 'Tools'];
 
 export type Placement = 'active' | 'left' | 'right' | 'bottom' | 'dock-left' | 'dock-right' | 'dock-bottom';
 
@@ -387,14 +388,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       <div className="form-row">
         <span>Screen</span>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className={`chip${s.view === 'command' ? ' active' : ''}`} onClick={() => (s.set({ view: 'command' }), onClose())}>
-            Meme terminal
+          <button className={`chip${s.ui === 'pro' ? ' active' : ''}`} onClick={() => (switchUi('pro'), onClose())}>
+            Professional terminal
           </button>
-          <button className={`chip${s.view === 'terminal' ? ' active' : ''}`} onClick={() => (s.set({ view: 'terminal' }), onClose())}>
+          <button className={`chip${s.ui !== 'pro' ? ' active' : ''}`} onClick={() => (switchUi('classic'), s.set({ view: 'terminal' }), onClose())}>
             Classic order-flow terminal
           </button>
           <span className="muted" style={{ fontSize: 11 }}>
-            The app opens on the meme terminal; the order-flow charts and AMT bots are in the classic one.
+            The professional terminal has the workspaces (F1–F4), the Strategy Lab and the QUANT desk; the classic one has the order-flow charts, the 3D island and the AMT bots.
           </span>
         </div>
       </div>

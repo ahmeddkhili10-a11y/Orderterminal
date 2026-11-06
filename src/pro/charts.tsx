@@ -21,8 +21,8 @@ export function useChartWidth(fallback = 600) {
 
 const path = (pts: [number, number][]) => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
 
-export function LineChart({ series, height = 160, marker, log = true, labels }: { series: { values: number[]; color: string; width?: number; dash?: string }[]; height?: number; marker?: number; log?: boolean; labels?: ReactNode }) {
-  const W = 600;
+export function LineChart({ series, height = 160, marker, log = true, labels, format }: { series: { values: number[]; color: string; width?: number; dash?: string }[]; height?: number; marker?: number; log?: boolean; labels?: ReactNode; format?: (v: number) => string }) {
+  const [ref, W] = useChartWidth();
   const H = height;
   const all = series.flatMap((s) => s.values).filter((v) => Number.isFinite(v) && (!log || v > 0));
   if (!all.length) return <div className="pro-empty">No data</div>;
@@ -35,13 +35,13 @@ export function LineChart({ series, height = 160, marker, log = true, labels }: 
   const x = (i: number) => (i / Math.max(1, n - 1)) * (W - 48);
   const ticks = [lo, (lo + hi) / 2, hi].map((t) => (log ? Math.exp(t) : t));
   return (
-    <div className="pro-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img">
+    <div className="pro-chart" ref={ref}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" style={{ height: H }}>
         {ticks.map((t, i) => (
           <g key={i}>
             <line x1={0} x2={W - 48} y1={y(t)} y2={y(t)} className="pro-grid" />
             <text x={W - 44} y={y(t) + 3} className="pro-tick">
-              {log ? `${t.toFixed(2)}×` : t.toFixed(2)}
+              {format ? format(t) : log ? `${t.toFixed(2)}×` : t.toFixed(2)}
             </text>
           </g>
         ))}

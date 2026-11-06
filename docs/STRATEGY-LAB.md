@@ -21,7 +21,7 @@ says plainly when it finds none.
 
 ## The library
 
-Nineteen entry rules and seven filters, each written from its paper:
+Twenty-one entry rules and nine filters, each written from its paper:
 
 | Rule | Family | Papers |
 |---|---|---|
@@ -44,18 +44,58 @@ Nineteen entry rules and seven filters, each written from its paper:
 | Random-forest direction | ml | Breiman (2001); Gu, Kelly & Xiu (2020) |
 | Volatility-scaled momentum (GARCH) | momentum | Moskowitz, Ooi & Pedersen (2012); Bollerslev (1986); Liu & Tsyvinski (2021) |
 | Next-candle forecast | ml | Nison (1991); Marshall, Young & Rose (2006); Lu, Shiu & Liu (2012); Breiman (2001) |
+| Kalman-filter trend | trend | Kalman (1960); Harvey (1990) |
+| Ornstein–Uhlenbeck reversion | reversion | Uhlenbeck & Ornstein (1930); Avellaneda & Lee (2010); Bertram (2010) |
 
 Filters: long-term trend (Faber 2007), volatility regime (Moreira & Muir 2017;
 Barroso & Santa-Clara 2015), trend strength ADX (Wilder 1978), participation
 (Blume, Easley & O'Hara 1994), trading session (Baur et al. 2019; Wen et al.
 2022), funding crowding (He et al. 2022; Christin et al. 2023), GARCH
-volatility regime (Bollerslev 1986; Moreira & Muir 2017; Hansen & Lunde 2005).
+volatility regime (Bollerslev 1986; Moreira & Muir 2017; Hansen & Lunde 2005),
+variance-ratio regime (Lo & MacKinlay 1988; Hurst 1951), hidden-Markov regime
+(Hamilton 1989; Ang & Timmermann 2012).
 
 Exits: a stop in ATR **or in GARCH forecast volatility** (σ for the next bar,
 known at the bar's close: the stop widens before a storm, not after), an
 optional target in R, a trailing stop from +1R, a time limit, and whether an
 opposite signal closes the trade. A third of the mixed strategies try a GARCH
 stop; the builder has a **GARCH STOP (σ)** box.
+
+## Sizing and hedging
+
+Every strategy can also choose how big to be and whether to hedge:
+
+- **Unit size** — a fixed position, as before.
+- **Volatility target** — the position runs at an annual volatility (30, 60 or
+  100 %) on the GARCH forecast, capped at 3× notional and rebalanced when the
+  weight drifts a quarter (Moreira & Muir 2017; Harvey et al. 2018).
+- **VaR budget** — the position carries the same 1-day 99 % value at risk (3,
+  6 or 10 % of capital) from the GARCH forecast and its fitted tails.
+- **Delta hedge against bitcoin** — short β × the position in BTC, β
+  re-estimated on 30 days of returns, so what is left is the coin's own move
+  (needs BTC among the coins).
+
+Rebalancing and the hedge leg pay the same fees and slippage. In the crypto
+swarm the tested sizing carries over: the risk manager scales a Lab trade by
+the long-run GARCH σ over today's (0.5–1.5×). The swarm does not place the
+bitcoin hedge leg; its message says so, with the size, so you can place it
+with `TKT`.
+
+## How the engine chooses ingredients
+
+The mixing step is an adaptive search (the cross-entropy method). Each
+ingredient — each filter, ATR or GARCH stop, the sizing, the hedge — starts
+with even odds; after every batch of 40 mixes the odds move toward what the
+best quarter used, in sample. The rule is drawn evenly from the seeds:
+learned rules score flatteringly on the data they were fitted to, and chasing
+that would chase overfitting. **What it learned** on the Research screen shows,
+for every ingredient, how often it was tried, the in-sample score of the mixes
+with and without it, the final odds, and — among the finalists, on data the
+search never saw — the out-of-sample Sharpe with and without it.
+
+New inputs for every learned rule and the meta-labeller: the Kalman slope's t,
+the Ornstein–Uhlenbeck s-score, the variance ratio, the hidden-Markov odds of
+turbulence and Yang–Zhang volatility against GARCH's.
 
 ## GARCH
 

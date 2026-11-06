@@ -20,7 +20,7 @@
 //   Guardian     market conditions: a wide spread or a volatility spike is a veto.
 //   Forest       the statistics, learned from every paper, live and shadow trade.
 //   Risk         the compounding risk manager (risk.mjs): a gate is a veto.
-import { Forest } from '../../src/meme/swarm/forest.ts';
+import { Forest } from '../../src/cswarm/forest.ts';
 
 export const PROPOSERS = ['scalper', 'auction', 'trend', 'lab'];
 export const COUNCIL = ['scalper', 'auction', 'trend', 'tape', 'crowd', 'guardian', 'forest', 'risk'];

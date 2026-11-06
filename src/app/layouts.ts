@@ -171,7 +171,7 @@ const LAYOUT_KEY = 'novus-layout-v2';
 const SAVED_KEY = 'oft-saved-layouts';
 
 /** the professional terminal's workspaces: their starting layouts */
-export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'swarm' | 'meme', () => IJsonModel> = {
+export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'swarm' | 'quant', () => IJsonModel> = {
   markets: () =>
     model(
       row(
@@ -182,8 +182,8 @@ export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'swarm' | 'meme', () => IJs
       ),
     ),
   lab: () => model(row(100, ts(30, tab('lablib'), tab('prohelp')), row(70, ts(68, tab('labresearch'), tab('labbuilder')), ts(32, tab('labdeployed'), tab('fcst'), tab('garch'), tab('correl'))))),
-  swarm: () => model(row(100, ts(44, tab('cswarm')), row(32, ts(60, tab('historical'), tab('footprint')), ts(40, tab('labdeployed'), tab('alerts'))), row(24, ts(55, tab('ticket'), tab('amt')), ts(45, tab('accounts'), tab('calculator'))))),
-  meme: () => model(row(100, ts(42, tab('memeswarm')), row(34, ts(55, tab('memescan')), ts(45, tab('memetoken'))), row(24, ts(55, tab('wallet')), ts(45, tab('telegram'), tab('journal'))))),
+  swarm: () => model(row(100, ts(44, tab('cswarm')), row(32, ts(60, tab('historical'), tab('footprint')), ts(40, tab('labdeployed'), tab('alerts'))), row(24, ts(55, tab('ticket'), tab('amt')), ts(45, tab('accounts'), tab('calculator'), tab('wallet'), tab('telegram'))))),
+  quant: () => model(row(100, row(50, ts(56, tab('qmom'), tab('qregm')), ts(44, tab('qvar'))), row(50, ts(56, tab('qdelta'), tab('qvtgt')), ts(44, tab('garch'), tab('fcst'), tab('historical'))))),
 };
 
 export function loadProLayout(ws: keyof typeof PRO_LAYOUTS): IJsonModel {

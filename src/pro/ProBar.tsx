@@ -5,7 +5,6 @@ import { fmtPct, fmtPrice } from '../core/format';
 import { useCSwarm } from '../cswarm/store';
 import { useLab, startLabLink } from '../lab/store';
 import { hub } from '../market/hub';
-import { useSwarm } from '../meme/swarm/swarm';
 import { useSettings } from '../store/settings';
 import { useHubVersion, useTicker } from '../ui/controls';
 import { isProTheme, PRO_THEME_IDS, THEMES, type ThemeId } from '../ui/theme';
@@ -28,10 +27,9 @@ export function switchUi(ui: 'pro' | 'classic') {
 export function WorkspaceTabs() {
   const ws = useSettings((s) => s.workspace);
   const set = useSettings((s) => s.set);
-  const meme = useSwarm((s) => s.enabled);
   const cs = useCSwarm((s) => s.state);
   const lab = useLab((s) => s.status);
-  const dot = (id: Workspace) => (id === 'swarm' ? (cs?.running ? (cs.mode === 'live' ? ' live' : ' on') : '') : id === 'meme' ? (meme ? ' on' : '') : id === 'lab' ? (lab?.running ? ' on' : lab?.deployed.some((d) => d.on) ? ' on' : '') : ' on');
+  const dot = (id: Workspace) => (id === 'swarm' ? (cs?.running ? (cs.mode === 'live' ? ' live' : ' on') : '') : id === 'lab' ? (lab?.running ? ' on' : lab?.deployed.some((d) => d.on) ? ' on' : '') : ' on');
   return (
     <div className="pro-ws" role="tablist" aria-label="Workspaces">
       {WORKSPACES.map((w) => (
@@ -202,8 +200,6 @@ export function StatusLine() {
   const H = hub();
   const f = H.primary;
   const cs = useCSwarm((s) => s.state);
-  const meme = useSwarm((s) => s.enabled);
-  const memeLive = useSwarm((s) => s.mode === 'live');
   const lab = useLab((s) => s.status);
   const now = new Date();
   const dep = lab?.deployed.filter((d) => d.on).length ?? 0;
@@ -217,7 +213,6 @@ export function StatusLine() {
         CRYPTO SWARM {cs ? (cs.running ? `${cs.mode.toUpperCase()} · RUNNING` : `${cs.mode.toUpperCase()} · STOPPED`) : '—'}
         {cs && cs.equity !== null ? ` · $${cs.equity.toFixed(2)}` : ''}
       </span>
-      <span>MEME SWARM {meme ? (memeLive ? 'LIVE' : 'PAPER') : 'OFF'}</span>
       <span>
         LAB {lab?.running ? `RESEARCHING ${lab.progress ? Math.round((lab.progress.done / Math.max(1, lab.progress.total)) * 100) : 0}%` : `${dep} DEPLOYED`}
       </span>

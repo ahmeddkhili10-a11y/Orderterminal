@@ -7,7 +7,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import type { AmtBot, AmtBotInput, AmtEvent, AmtParams, CcxtMarket } from '../desktop/bridge';
 import { desktop } from '../desktop/bridge';
 import { onAmtEvent } from '../desktop/amt';
-import { alertHere } from '../meme/swarm/notify';
+import { alertHere } from '../alerts/here';
 import { escapeHtml } from '../shared/telegram';
 import { getSettings } from '../store/settings';
 

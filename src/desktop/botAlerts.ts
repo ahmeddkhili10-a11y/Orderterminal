@@ -5,7 +5,7 @@
 import type { AmtBot, AmtEvent } from './bridge';
 import { desktop } from './bridge';
 import { onAmtEvent } from './amt';
-import { alertHere } from '../meme/swarm/notify';
+import { alertHere } from '../alerts/here';
 import { isLaneBot } from '../luno/lane';
 import { escapeHtml } from '../shared/telegram';
 import { getSettings } from '../store/settings';

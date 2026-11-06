@@ -146,17 +146,14 @@ try {
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${OUT}settings-appearance.png` });
 
-  // the meme terminal: what the app opens on; Wallet and Scanner open the drawer
+  // the QUANT desk (F4): every quant window renders on simulator data
   await page.keyboard.press('Escape');
-  await page.goto(`http://localhost:${PORT}/?venue=sim&agg=sim&history=exchange&view=command`);
-  await page.waitForSelector('.cc-core', { timeout: 20_000 });
-  await page.click('.cc-wallet-btn');
-  await page.waitForSelector('.cc-drawer');
-  await page.click('.cc-drawer-head .chip:has-text("Scanner")');
-  await page.waitForSelector('.cc-drawer .panel.meme');
-  await page.screenshot({ path: `${OUT}meme-terminal.png` });
-  if ((await page.locator('.cc-gauges .cc-gauge').count()) !== 10) errors.push('meme terminal: expected 10 swarm gauges');
-  console.log('meme terminal: ok');
+  await page.goto(`http://localhost:${PORT}/?venue=sim&agg=sim&filter=none&ui=pro&ws=quant`);
+  for (const t of ['MOM · Momentum', 'VAR · Value at risk', 'DHG · Delta hedging']) await page.waitForSelector(`.flexlayout__tab_button:has-text("${t}")`, { timeout: 20_000 });
+  await page.waitForTimeout(8000);
+  await page.screenshot({ path: `${OUT}quant-desk.png` });
+  if ((await page.locator('text=crashed').count()) !== 0) errors.push('quant desk: a panel crashed');
+  console.log('quant desk: ok');
 } catch (e) {
   failed = true;
   console.error(e);

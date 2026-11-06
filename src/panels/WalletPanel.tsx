@@ -279,6 +279,85 @@ export function WalletPanel({ config: c, setConfig }: PanelProps<WalletConfig>) 
           </div>
         </div>
       )}
+      <OldSwarmWallet />
+    </div>
+  );
+}
+
+/**
+ * The meme swarm was retired. Its trading wallet may still hold SOL or coins:
+ * this lets the owner see them, sell the coins and send everything to the
+ * verified Phantom home — the only place withdrawals can go.
+ */
+function OldSwarmWallet() {
+  const [w, setW] = useState<{ address: string; home: string | null; armed: boolean } | null>(null);
+  const [bal, setBal] = useState<WalletBalances | null>(null);
+  const [info, setInfo] = useState<TokenInfo>({ prices: {}, meta: {} });
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const rpc = useSettings((s) => s.memeRpcSecretId) || undefined;
+  const load = async () => {
+    if (!desktop?.swarm) return;
+    const x = await desktop.swarm.wallet().catch(() => null);
+    if (!x) return setW(null);
+    setW({ address: x.address, home: x.home, armed: x.limits.armed });
+    const b = await balancesFor(x.address, rpc).catch(() => null);
+    setBal(b);
+    if (b?.tokens.length) setInfo(await infoFor(b.tokens.map((t) => t.mint)).catch(() => ({ prices: {}, meta: {} })));
+  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (!w) return null;
+  const run = async (what: string, f: () => Promise<unknown>) => {
+    setBusy(true);
+    setMsg('');
+    try {
+      await f();
+      setMsg(`${what}: done`);
+    } catch (e) {
+      setMsg(`${what}: ${(e as Error)?.message ?? e}`);
+    }
+    setBusy(false);
+    void load();
+  };
+  const tokens = (bal?.tokens ?? []).filter((t) => t.amount > 0);
+  return (
+    <div className="old-swarm">
+      <div className="section-title">Retired meme swarm — its old trading wallet</div>
+      <div className="muted" style={{ padding: '0 10px 6px' }}>
+        The meme swarm has been removed; nothing buys from this wallet any more. Sell what it still holds and send the SOL to your Phantom.
+      </div>
+      <div className="swarm-arm">
+        <span className="mono">
+          {w.address.slice(0, 4)}…{w.address.slice(-4)} · {bal ? `${fmtNum(bal.sol, 4)} SOL` : '…'}
+        </span>
+        {w.armed && (
+          <button className="chip" disabled={busy} onClick={() => void run('disarm', () => desktop!.swarm.setLimits({ armed: false }))}>
+            Disarm
+          </button>
+        )}
+        {w.home ? (
+          <button className="chip" disabled={busy || !bal || bal.sol <= 0} onClick={() => void run('send to Phantom', () => desktop!.swarm.withdraw('all', rpc))}>
+            Send all SOL to Phantom {w.home.slice(0, 4)}…{w.home.slice(-4)}…
+          </button>
+        ) : (
+          <span className="muted">no home wallet was verified — export the key from Settings to move the funds yourself</span>
+        )}
+      </div>
+      {tokens.map((t) => (
+        <div key={t.mint} className="swarm-arm">
+          <span className="mono">
+            {info.meta[t.mint]?.symbol ?? `${t.mint.slice(0, 4)}…`} {fmtNum(t.amount, 2)}
+            {info.prices[t.mint] ? ` ≈ ${fmtUsd(info.prices[t.mint] * t.amount)}` : ''}
+          </span>
+          <button className="chip" disabled={busy} onClick={() => void run(`sell ${info.meta[t.mint]?.symbol ?? 'coin'}`, () => desktop!.swarm.sell(t.mint, BigInt(Math.floor(t.amount * 10 ** t.decimals)).toString(), rpc))}>
+            Sell all
+          </button>
+        </div>
+      ))}
+      {msg && <div className="muted" style={{ padding: '2px 10px' }}>{msg}</div>}
     </div>
   );
 }

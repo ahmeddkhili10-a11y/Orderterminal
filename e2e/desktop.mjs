@@ -66,7 +66,8 @@ try {
 
   step('opens on the professional terminal: workspaces, command line, Strategy Lab, screens');
   await page.waitForSelector('.pro-cmdbar', { timeout: 15_000 });
-  expect((await page.locator('.pro-ws-tab').count()) === 4, 'four workspaces: markets, strategy lab, crypto swarm, meme desk');
+  expect((await page.locator('.pro-ws-tab').count()) === 4, 'four workspaces: markets, strategy lab, crypto swarm, quant desk');
+  expect((await page.locator('.pro-ws-tab:has-text("MEME")').count()) === 0, 'the meme desk is gone');
   expect((await page.locator('.pro-key').count()) >= 8, 'function keys for the workspace');
   await page.waitForSelector('.flexlayout__tab_button:has-text("MON · Monitor")', { timeout: 15_000 });
   expect(true, 'the markets workspace opens with the monitor');
@@ -96,45 +97,27 @@ try {
   expect(scr2.windows.some((w) => w.kind === 'panel' && w.id === popId && w.displayId === scr.displays[0].id), 'the popped-out window is sent to a screen');
   await pop.screenshot({ path: `${OUT}desktop-pro-popout.png` }).catch(() => undefined);
   await page.evaluate((id) => window.novus.screens.close(id), popId);
+  // F4: the QUANT desk — momentum, regimes, value at risk, delta hedging, volatility targeting
+  await page.keyboard.press('Escape');
+  await page.mouse.click(5, 300);
+  await page.keyboard.press('F4');
+  await page.waitForSelector('.pro-ws-tab.active:has-text("QUANT DESK")', { timeout: 10_000 });
+  for (const t of ['MOM · Momentum', 'VAR · Value at risk', 'DHG · Delta hedging']) await page.waitForSelector(`.flexlayout__tab_button:has-text("${t}")`, { timeout: 10_000 });
+  expect(true, 'F4 opens the QUANT desk with momentum, value at risk and delta hedging');
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('REGM');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.flexlayout__tab_button--selected:has-text("REGM · Regimes")', { timeout: 10_000 });
+  expect(true, 'REGM on the command line opens the regimes screen');
+  await page.screenshot({ path: `${OUT}desktop-pro-quant.png` });
+  expect((await page.locator('text=crashed').count()) === 0, 'no quant panel crashed');
   await page.selectOption('.pro-theme-select', 'pro-eikon');
   expect((await page.evaluate(() => document.documentElement.dataset.theme)) === 'pro-eikon', 'professional themes switch');
   await page.selectOption('.pro-theme-select', 'pro-amber');
   // the rest of this test drives the classic swarm views
   await page.click('.ui-toggle');
 
-  step('opens on the meme terminal');
-  await page.waitForSelector('.cc-core', { timeout: 15_000 });
-  expect(true, 'the app opens on the meme terminal');
-  await page.click('.cc-wallet-btn');
-  await page.waitForSelector('.cc-drawer .swarm-rules');
-  expect(true, 'Wallet in the top bar opens the swarm wallet');
-  // the phone side: the address to Telegram, and Phantom verified by a small deposit from the phone
-  await page.click('.cc-drawer button:has-text("Create swarm wallet")');
-  await page.waitForSelector('.cc-drawer .swarm-address', { timeout: 10_000 });
-  expect((await page.locator('.cc-drawer button:has-text("Refresh")').count()) === 1, 'the swarm wallet balance has a Refresh button');
-  await page.click('.cc-drawer button:has-text("Refresh")');
-  await page.waitForSelector('.cc-drawer button:has-text("Refresh"):not([disabled])', { timeout: 40_000 });
-  expect(true, 'Refresh checks the balance and comes back');
-  expect((await page.locator('.cc-drawer button:has-text("Send to my phone")').count()) === 1 && (await page.locator('.cc-drawer button:has-text("Verify Phantom from my phone")').count()) === 1, 'the swarm wallet offers the phone: address to Telegram, verify Phantom from the phone');
-  await app.evaluate(({ dialog }) => {
-    globalThis.__realBox = dialog.showMessageBox;
-    dialog.showMessageBox = async () => ({ response: 1 });
-  });
-  await page.click('.cc-drawer button:has-text("Verify Phantom from my phone")');
-  await page.waitForSelector('.cc-drawer .swarm-arm:has-text("send exactly")', { timeout: 10_000 });
-  await page.screenshot({ path: `${OUT}desktop-wallet-phone.png` });
-  const pending = await page.evaluate(() => window.novus.swarm.verifyState());
-  expect(/^0\.001\d{3}$/.test(pending?.sol ?? '') && pending.until > Date.now(), `phone verification waits for exactly ${pending?.sol} SOL`);
-  await page.click('.cc-drawer .swarm-arm button:has-text("Cancel")');
-  expect((await page.evaluate(() => window.novus.swarm.verifyState())) === null, 'phone verification cancels');
-  // the later checks expect an empty vault: the test swarm wallet goes again
-  await page.evaluate(() => window.novus.swarm.remove());
-  await app.evaluate(({ dialog }) => {
-    dialog.showMessageBox = globalThis.__realBox;
-  });
-  await page.keyboard.press('Escape');
-  // the rest checks the order-flow terminal: one click from the meme terminal's bar
-  await page.click('.cc-orderflow-btn');
+  step('the classic look opens on the crypto terminal (the meme swarm is retired)');
   // the crypto terminal opens on the market island; only the money sits on screen, bottom centre
   await page.waitForSelector('.island', { timeout: 15_000 });
   await page.waitForSelector('.isl-money', { timeout: 15_000 });
@@ -156,20 +139,15 @@ try {
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });
   expect(true, 'Panels switches the crypto terminal to the classic order-flow layout');
   // the crypto swarm: its tab puts its panel in the layout; it starts on paper and stops
+  await page.click('.cc-orderflow-btn');
   await page.waitForSelector('.cs', { timeout: 15_000 });
-  expect((await page.locator('.view-tab').count()) === 2, 'two terminal tabs: Meme swarm and Crypto swarm');
+  expect((await page.locator('.view-tab').count()) === 1, 'one terminal tab: the crypto swarm');
   await page.click('.cs button:has-text("Start crypto swarm")');
   await page.waitForSelector('.cs-live-dot', { timeout: 20_000 });
   await page.waitForTimeout(2500);
   const csText = await page.locator('.cs').innerText();
   expect(/Paper account/.test(csText) && /\$30\.00/.test(csText) && /Scalper/.test(csText) && /Auctioneer/.test(csText) && /Trend/.test(csText), 'the crypto swarm runs on paper with its agents and $30 account');
   await page.screenshot({ path: `${OUT}desktop-cswarm.png` });
-  // Ctrl+1 / Ctrl+2 switch terminals; the crypto swarm keeps running behind the meme terminal
-  await page.keyboard.press('Control+1');
-  await page.waitForSelector('.cc-core', { timeout: 15_000 });
-  expect(await page.evaluate(() => window.novus.cswarm.state().then((s) => s.running)), 'the crypto swarm keeps running while the meme terminal is on screen');
-  await page.keyboard.press('Control+2');
-  await page.waitForSelector('.cs-live-dot', { timeout: 15_000 });
   await page.click('.cs button:text-is("Stop")');
   await page.waitForSelector('.cs button:has-text("Start crypto swarm")', { timeout: 15_000 });
   expect(true, 'the crypto swarm stops');
@@ -614,16 +592,10 @@ try {
 
   expect((await page.locator('text=crashed').count()) === 0, 'no panel crashed');
 
-  step('Command Center');
+  step('Luno lane');
   const errorsBefore = errors.length;
-  await page.click('.cc-toggle');
-  await page.waitForSelector('.cc-core canvas', { timeout: 15_000 });
-  await page.waitForTimeout(2500);
-  const mode = await page.evaluate(() => (document.querySelector('.cc3d canvas') ? '3D' : 'flat'));
-  await page.screenshot({ path: `${OUT}desktop-command.png` });
-  expect(errors.length === errorsBefore, `the Command Center draws (${mode}) without errors`);
-  // the optional Luno lane: its drawer opens and offers the key (none saved for Luno here)
-  await page.click('.topbar button:has-text("Luno")');
+  // the optional Luno lane is its own panel now (LUNO): it opens and offers the key (none saved for Luno here)
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('novus:open-panel', { detail: { panel: 'luno', ws: 'swarm' } })));
   await page.waitForSelector('.luno-lane', { timeout: 10_000 });
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${OUT}desktop-luno.png` });

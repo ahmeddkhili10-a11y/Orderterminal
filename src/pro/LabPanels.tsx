@@ -172,9 +172,6 @@ function Detail({ r, tfH, onDeploy }: { r: Ranked; tfH: number; onDeploy: (targe
         <button className="btn" onClick={() => onDeploy({ crypto: true, meme: false })} title="Trade it in the crypto swarm: it proposes, the council votes, the risk manager sizes">
           Deploy → Crypto swarm
         </button>
-        <button className="btn ghost" onClick={() => onDeploy({ crypto: false, meme: true })} title="A vote in the meme swarm's council on each coin's own chart (never a veto)">
-          → Meme swarm
-        </button>
       </div>
       <div className="lab-grid2">
         <div>
@@ -502,7 +499,7 @@ export function LabResearch() {
   const deploy = (targets: { crypto: boolean; meme: boolean }) =>
     void desktop!.lab
       .deploy({ rank: r!.rank }, targets)
-      .then(() => setMsg(`Deployed “${r!.spec.name}” to the ${targets.crypto ? 'crypto' : 'meme'} swarm — it trades when the swarm runs.`))
+      .then(() => setMsg(`Deployed “${r!.spec.name}” to the crypto swarm — it trades when the swarm runs.`))
       .catch((e) => setMsg(String(e?.message ?? e)));
   const p = status.progress;
   return (
@@ -858,7 +855,7 @@ export function LabDeployed() {
                 <td className="l b" title={rulesOf(d.spec, d.tfH).join('\n')}>
                   {d.name}
                 </td>
-                <td className="l">{[d.targets.crypto && 'Crypto swarm', d.targets.meme && 'Meme swarm'].filter(Boolean).join(', ')}</td>
+                <td className="l">{d.targets.crypto ? 'Crypto swarm' : 'Meme swarm (retired: not trading)'}</td>
                 <td className="mono">{d.tfH}h</td>
                 <td className="l mono">{d.coins.join(' ')}</td>
                 <td className="mono">{num(d.stats.sharpe)}</td>

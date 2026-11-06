@@ -132,7 +132,7 @@ export interface Settings {
   /** the professional terminal (dense workspaces, command line) or the classic swarm views */
   ui: 'pro' | 'classic';
   /** the professional terminal's workspace on screen */
-  workspace: 'markets' | 'lab' | 'swarm' | 'meme';
+  workspace: 'markets' | 'lab' | 'swarm' | 'quant';
   /** the classic look's theme, kept while the professional terminal is on */
   classicTheme: ThemeId;
   filter: FilterId;
@@ -192,7 +192,7 @@ const initial: Settings = {
   byodToken: '',
   backfillMinutes: 30,
   theme: 'pro-amber',
-  view: 'command',
+  view: 'terminal',
   cryptoView: 'island',
   islandTheme: 'night',
   ui: 'pro',
@@ -246,7 +246,7 @@ export const useSettings = create<Settings & Actions>()(
     }),
     {
       name: 'oft-settings',
-      version: 8,
+      version: 9,
       // v1 had dark/light themes only
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
@@ -270,6 +270,11 @@ export const useSettings = create<Settings & Actions>()(
           p.theme = 'pro-amber';
           p.ui = 'pro';
           p.workspace = 'markets';
+        }
+        // v9: the meme swarm is retired; F4 is the QUANT desk and the classic look opens on the crypto swarm
+        if (version < 9) {
+          if (p.workspace === 'meme') p.workspace = 'quant';
+          p.view = 'terminal';
         }
         return p as unknown as Settings & Actions;
       },

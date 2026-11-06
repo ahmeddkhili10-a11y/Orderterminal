@@ -17,7 +17,7 @@ import { PANEL_MAP } from '../panels/registry';
 import { safeStorage } from '../store/settings';
 
 /** panels that must stay in the main window (their service runs there) */
-export const DOCKED_ONLY = new Set(['memeswarm', 'memescan', 'memetoken', 'wallet', 'telegram']);
+export const DOCKED_ONLY = new Set(['wallet', 'telegram']);
 export const canPopOut = (panel: string) => !!desktop?.screens && !DOCKED_ONLY.has(panel) && !!PANEL_MAP[panel];
 
 export function popOut(panel: string, title: string, config: Record<string, unknown>) {

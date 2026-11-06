@@ -5,9 +5,6 @@ import { AlertsPanel, ALERTS_DEFAULTS } from './AlertsPanel';
 import { AmtScalper, AMT_DEFAULTS } from './AmtScalper';
 import { CryptoSwarm, CRYPTO_SWARM_DEFAULTS } from './CryptoSwarm';
 import { DatabasePanel, DATABASE_DEFAULTS } from './DatabasePanel';
-import { MemeScanner, MEME_SCANNER_DEFAULTS } from './MemeScanner';
-import { MemeSwarm, MEME_SWARM_DEFAULTS } from './MemeSwarm';
-import { MemeToken, MEME_TOKEN_DEFAULTS } from './MemeToken';
 import { OrderTicket, TICKET_DEFAULTS } from './OrderTicket';
 import { WalletPanel, WALLET_DEFAULTS } from './WalletPanel';
 import { YahooPanel, YAHOO_DEFAULTS } from './YahooPanel';
@@ -37,10 +34,12 @@ import { Watchlist, WATCHLIST_DEFAULTS } from './Watchlist';
 import { WhaleTracker, WHALES_DEFAULTS } from './WhaleTracker';
 import { Correl, CORR_DEFAULTS, HEAT_DEFAULTS, HeatGrid, Monitor, MONITOR_DEFAULTS, VOL_DEFAULTS, VolMonitor } from '../pro/MarketPanels';
 import { CandleForecastPanel, FCST_DEFAULTS, GarchPanel, GARCH_DEFAULTS } from '../pro/VolPanels';
+import { DeltaHedgePanel, DELTA_DEFAULTS, MomentumPanel, MOM_DEFAULTS, RegimePanel, REGM_DEFAULTS, VarPanel, VAR_DEFAULTS, VolTargetPanel, VTGT_DEFAULTS } from '../pro/QuantPanels';
+import { LunoLane } from './LunoLane';
 import { BUILDER_DEFAULTS, LabBuilder, LabDeployed, LabLibrary, LabResearch, LIB_DEFAULTS, RESEARCH_PANEL_DEFAULTS } from '../pro/LabPanels';
 import { ProHelp } from '../pro/HelpPanel';
 
-export type Category = 'Meme' | 'Charts' | 'Orderflow' | 'Order book' | 'Derivatives' | 'Market' | 'Account' | 'Algo' | 'Strategy Lab' | 'Tools';
+export type Category = 'Charts' | 'Orderflow' | 'Order book' | 'Derivatives' | 'Market' | 'Quant' | 'Account' | 'Algo' | 'Strategy Lab' | 'Tools';
 
 export interface PanelDef {
   id: string;
@@ -60,14 +59,17 @@ export const PANELS: PanelDef[] = [
   { id: 'volmon', title: 'HVOL · Volatility', category: 'Market', component: VolMonitor, defaults: { ...VOL_DEFAULTS }, description: 'Realised volatility over a day, a week and a month, its term structure and rank.' },
   { id: 'garch', title: 'GV · GARCH volatility', category: 'Market', component: GarchPanel, defaults: { ...GARCH_DEFAULTS }, description: 'Each coin’s fitted GARCH model: forecast volatility for the hours ahead as a heat calendar, the long-run level, persistence, half-life and value at risk.' },
   { id: 'fcst', title: 'FCST · Candle forecast', category: 'Market', component: CandleForecastPanel, defaults: { ...FCST_DEFAULTS }, description: 'Forecast of the next candle (range from GARCH and candle shapes, direction from a random forest), with its out-of-sample record and what drives it.' },
+  { id: 'qvar', title: 'VAR · Value at risk', category: 'Quant', component: VarPanel, defaults: { ...VAR_DEFAULTS }, description: 'Value at risk and expected shortfall by five methods (historical, normal, Cornish–Fisher, EWMA, GARCH) at any horizon and confidence, a portfolio line, and each method backtested with Kupiec and Christoffersen tests.' },
+  { id: 'qdelta', title: 'DHG · Delta hedging', category: 'Quant', component: DeltaHedgePanel, defaults: { ...DELTA_DEFAULTS }, description: 'Black–Scholes greeks for an option on the coin, the perpetual hedge to hold, a strike ladder, and a delta-hedging backtest by hedge frequency — the volatility risk premium in money.' },
+  { id: 'qvtgt', title: 'VTGT · Volatility targeting', category: 'Quant', component: VolTargetPanel, defaults: { ...VTGT_DEFAULTS }, description: 'Volatility by five range estimators, EWMA and GARCH; the position that runs at your target volatility; a vol-targeted buy-and-hold against plain; a Kelly calculator.' },
+  { id: 'qmom', title: 'MOM · Momentum', category: 'Quant', component: MomentumPanel, defaults: { ...MOM_DEFAULTS }, description: 'Time-series momentum over a week to six months, scaled by volatility, regression and Kalman trend t-statistics, a composite signal and the cross-sectional rank.' },
+  { id: 'qregm', title: 'REGM · Regimes', category: 'Quant', component: RegimePanel, defaults: { ...REGM_DEFAULTS }, description: 'Trending, mean-reverting or random (Hurst, variance ratio, Ornstein–Uhlenbeck half-life), and calm or turbulent (a two-state hidden Markov model), coin by coin.' },
+  { id: 'luno', title: 'LUNO · Luno lane', category: 'Account', component: LunoLane, defaults: {}, description: 'Optional: crypto against rands on Luno — daily trend bots beside the swarm.' },
   { id: 'lablib', title: 'LIB · Strategy Library', category: 'Strategy Lab', component: LabLibrary, defaults: { ...LIB_DEFAULTS }, description: 'Every rule and filter in the Strategy Lab with the papers behind it and why it should work.' },
   { id: 'labresearch', title: 'RSCH · Research', category: 'Strategy Lab', component: LabResearch, defaults: { ...RESEARCH_PANEL_DEFAULTS }, description: 'Search published rules and their combinations on years of history; rank the top five with out-of-sample tests, Monte Carlo and a deflated Sharpe ratio; deploy them.' },
   { id: 'labbuilder', title: 'BT · Backtest Builder', category: 'Strategy Lab', component: LabBuilder, defaults: { ...BUILDER_DEFAULTS }, description: 'Build a strategy from the library by hand — entry, filters, exits — and backtest it in and out of sample.' },
   { id: 'labdeployed', title: 'DEPL · Deployed', category: 'Strategy Lab', component: LabDeployed, defaults: {}, description: 'The strategies trading in the swarms, on/off, and what the Lab agent has said.' },
   { id: 'prohelp', title: 'HELP · Functions', category: 'Tools', component: ProHelp, defaults: {}, description: 'Every function code and key in the professional terminal.' },
-  { id: 'memeswarm', title: 'Meme Swarm', category: 'Meme', component: MemeSwarm, defaults: { ...MEME_SWARM_DEFAULTS }, description: 'Five bots on the meme-coin chain: Scout finds coins, Sentinel rejects rugs, Herald scores virality, Strategist picks entries, Manager runs the trades (paper, or live from the swarm wallet) — with hit rates by conviction.' },
-  { id: 'memescan', title: 'Meme Scanner', category: 'Meme', component: MemeScanner, defaults: { ...MEME_SCANNER_DEFAULTS }, description: 'Live Solana meme coins: every pump.fun launch, coins near graduation, migrated and DexScreener-listed coins — heat, flow, room to your target and rug flags.' },
-  { id: 'memetoken', title: 'Meme Token', category: 'Meme', component: MemeToken, defaults: { ...MEME_TOKEN_DEFAULTS }, description: 'One meme coin: bonding curve, market cap, on-chain safety checks, buy/sell flow, creator activity, live trades and chart.' },
   { id: 'footprint', title: 'Footprint Chart', category: 'Charts', component: FootprintChart, defaults: { ...FOOTPRINT_DEFAULTS }, description: 'Bid×ask clusters, delta, imbalances, POC, heatmap/CVD/VP/bubble overlays, time/tick/volume/range bars.' },
   { id: 'heatmap', title: 'Liquidity Heatmap', category: 'Charts', component: LiquidityHeatmap, defaults: { ...HEATMAP_DEFAULTS }, aggregated: true, description: 'Historical depth-of-market heatmap with trade bubbles and live book profile.' },
   { id: 'historical', title: 'Historical Chart', category: 'Charts', component: HistoricalChart, defaults: { ...HISTORICAL_DEFAULTS }, description: 'Candlesticks or TPO market profile with VWAP, session volume profile, MAs and EMA clouds.' },

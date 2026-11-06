@@ -13,32 +13,19 @@ import { desktop, type CcxtExchangeInfo } from '../desktop/bridge';
 import { useAmtLive } from '../desktop/amt';
 import { useBoot } from './boot';
 import { sealTerminal } from './LockScreen';
-import { solTickerFeed, useSolTicker } from '../meme/solTicker';
-import { openDrawer } from '../command/CommandCenter';
-import { useSwarm } from '../meme/swarm/swarm';
 import { useCSwarm } from '../cswarm/store';
 import { ProThemePicker, switchUi, WorkspaceTabs } from '../pro/ProBar';
 import { ScreensMenu } from '../pro/Screens';
 
-/**
- * The two terminals, as tabs. Both swarms run whichever is on screen: the
- * meme swarm on Solana, the crypto swarm on Hyperliquid — separate wallets,
- * separate records. Ctrl+1 and Ctrl+2 switch too.
- */
+/** The classic look's terminal tab: the crypto swarm on Hyperliquid, its order flow and its account. */
 export function ViewTabs() {
   const view = useSettings((s) => s.view);
   const set = useSettings((s) => s.set);
-  const memeOn = useSwarm((s) => s.enabled);
-  const memeLive = useSwarm((s) => s.mode === 'live');
   const cs = useCSwarm((s) => s.state);
   const go = (v: 'command' | 'terminal') => switchView(v, set);
   return (
     <div className="view-tabs" role="tablist" aria-label="Terminals">
-      <button role="tab" aria-selected={view === 'command'} className={`view-tab cc-toggle${view === 'command' ? ' active' : ''}`} onClick={() => go('command')} title="Meme swarm — Solana meme coins, its own wallet (Ctrl+1)">
-        <span className={`vt-dot${memeOn ? (memeLive ? ' live' : ' on') : ''}`} />
-        Meme swarm
-      </button>
-      <button role="tab" aria-selected={view === 'terminal'} className={`view-tab cc-orderflow-btn${view === 'terminal' ? ' active' : ''}`} onClick={() => go('terminal')} title="Crypto swarm — order flow on Hyperliquid: footprint, heatmap, DOM, its own account (Ctrl+2)">
+      <button role="tab" aria-selected={view === 'terminal'} className={`view-tab cc-orderflow-btn${view === 'terminal' ? ' active' : ''}`} onClick={() => go('terminal')} title="Crypto swarm — order flow on Hyperliquid: footprint, heatmap, DOM, its own account">
         <span className={`vt-dot${cs?.running ? (cs.mode === 'live' ? ' live' : ' on') : ''}`} />
         Crypto swarm
       </button>
@@ -64,37 +51,6 @@ function feedDot(f: Feed) {
     cls: `status-dot status-${silent ? 'connecting' : f.status.state}`,
     title: `${f.adapter.name}: ${f.status.state}${f.status.error ? ' — ' + f.status.error : ''}${silent ? ` — no trades for ${Math.round(silent / 60)} min while the order book is live` : ''}`,
   };
-}
-
-/** SOL in USD, live, for the Command Center: price, 24 h change, high/low and the last 10 minutes. */
-function SolChip() {
-  useEffect(solTickerFeed, []);
-  const t = useSolTicker();
-  const ch = t.open > 0 ? ((t.price - t.open) / t.open) * 100 : undefined;
-  const sp = t.spark;
-  const lo = Math.min(...sp);
-  const hi = Math.max(...sp);
-  const path = sp.length > 1 ? sp.map((v, i) => `${i ? 'L' : 'M'}${((i / (sp.length - 1)) * 80).toFixed(1)},${(hi > lo ? 18 - ((v - lo) / (hi - lo)) * 16 : 10).toFixed(1)}`).join(' ') : '';
-  const live = t.price > 0 && Date.now() - t.at < 30_000;
-  return (
-    <div className="group sol-chip" title={`SOL/USD from ${t.source || '…'}${t.state.startsWith('error') ? ` (Binance: ${t.state})` : ''} — the price the swarm values its coins in`}>
-      <span className="sol-mark">◎</span>
-      <b className="sol-name">SOL</b>
-      <span className={`price-big ${(ch ?? 0) >= 0 ? 'up' : 'down'}`}>{t.price > 0 ? `$${t.price.toFixed(2)}` : '—'}</span>
-      {ch !== undefined && <span className={(ch ?? 0) >= 0 ? 'up mono' : 'down mono'}>{fmtPct(ch)}</span>}
-      {t.high > 0 && (
-        <span className="mono muted hide-sm sol-hl">
-          H {t.high.toFixed(2)} · L {t.low.toFixed(2)} · vol ${t.volUsd >= 1e9 ? `${(t.volUsd / 1e9).toFixed(2)}B` : `${(t.volUsd / 1e6).toFixed(0)}M`}
-        </span>
-      )}
-      {path && (
-        <svg className="sol-spark hide-sm" width="80" height="20" viewBox="0 0 80 20" aria-hidden>
-          <path d={path} className={(ch ?? 0) >= 0 ? 'up' : 'down'} />
-        </svg>
-      )}
-      <span className={`status-dot status-${live ? 'open' : t.state.startsWith('error') ? 'error' : 'connecting'}`} />
-    </div>
-  );
 }
 
 export type ModalKind = 'connection' | 'layouts' | 'add' | 'settings' | 'keys' | null;
@@ -320,10 +276,8 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
   useTicker(500);
   useHubVersion();
   const showFps = useSettings((s) => s.showFps);
-  const view = useSettings((s) => s.view);
   const pro = useSettings((s) => s.ui) === 'pro';
-  const command = !pro && view === 'command';
-  const cryptoView = useSettings((s) => s.cryptoView);
+    const cryptoView = useSettings((s) => s.cryptoView);
   const setSettings = useSettings((s) => s.set);
   const fps = useFps();
   const H = hub();
@@ -343,10 +297,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       </div>
       {pro ? <WorkspaceTabs /> : <ViewTabs />}
       <div className="sep" />
-      {/* the Command Center is about Solana: SOL's price instead of the order-flow market */}
-      {command ? (
-        <SolChip />
-      ) : (
+      {
         <>
           <SymbolPicker />
           <div className="group">
@@ -366,21 +317,9 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
             )}
           </button>
         </>
-      )}
+      }
       <div style={{ flex: 1 }} />
-      {command ? (
-        <>
-          <button className="chip primary-chip chrome-chip cc-wallet-btn" onClick={() => openDrawer('wallet')} title="Your swarm wallet: create it, fund it from Phantom, set it up for your balance, go live">
-            <span className="cc-toggle-dot" /> <span className="lbl keep">Wallet</span>
-          </button>
-          <button className="chip primary-chip chrome-chip" onClick={() => openDrawer('scanner')} title="Every meme coin the terminal can see, live">
-            ⌕ <span className="lbl keep">Scanner</span>
-          </button>
-          <button className="chip primary-chip chrome-chip" onClick={() => openDrawer('luno')} title="Optional: real crypto against rands on Luno — daily trend bots beside the swarm">
-            R <span className="lbl keep">Luno</span>
-          </button>
-        </>
-      ) : pro ? null : (
+      {pro ? null : (
         <>
           <button className="chip primary-chip chrome-chip island-toggle" onClick={() => setSettings({ cryptoView: cryptoView === 'island' ? 'panels' : 'island' })} title={cryptoView === 'island' ? 'The classic panels: footprint, heatmap, DOM, bots' : 'The market island in 3D'}>
             {cryptoView === 'island' ? '▦' : '◈'} <span className="lbl keep">{cryptoView === 'island' ? 'Panels' : 'Island'}</span>
@@ -394,7 +333,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       )}
       <SafeModeChip />
       <AlgoKill />
-      {!command && !pro && (
+      {!pro && (
         <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('amt')} title="AMT trading bots: scalp and intraday, paper or live, backtests">
           <BotIcon /> <span className="lbl keep">Bots</span>
         </button>
@@ -402,7 +341,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       <button className="chip primary-chip chrome-chip" onClick={() => onOpen('keys')} title="Connections: exchange API keys (Binance, Coinbase…), Telegram bot, Solana RPC">
         <ConnectIcon /> <span className="lbl keep">Connect</span>
       </button>
-      {!command && !pro && (
+      {!pro && (
         <>
         <button className="chip" onClick={() => onOpen('add')} title="Add a panel">
           + <span className="lbl">Panel</span>

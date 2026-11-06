@@ -5,12 +5,9 @@ import 'flexlayout-react/style/dark.css';
 import { startAlerts, useToasts } from '../alerts/engine';
 import { startAmtService } from '../desktop/amt';
 import { startLunoAlerts } from '../luno/lane';
-import { startPhoneLink } from '../meme/swarm/phone';
 import { startBotAlerts } from '../desktop/botAlerts';
 import { startCryptoSwarmLink } from '../cswarm/store';
 import { Island } from '../island/Island';
-import { CommandCenter } from '../command/CommandCenter';
-import { startSwarmService } from '../meme/swarm/swarm';
 import { startTelegramService } from '../desktop/telegram';
 import { startCollectors } from '../market/collectors';
 import { hub } from '../market/hub';
@@ -23,7 +20,7 @@ import { startLabLink } from '../lab/store';
 import { AddPanelModal, ConnectionModal, LayoutsModal, SettingsModal, type Placement } from './Modals';
 import { KeysModal } from './KeysModal';
 import { PanelHost } from './PanelHost';
-import { switchView, TopBar, type ModalKind } from './TopBar';
+import { TopBar, type ModalKind } from './TopBar';
 
 export function useThemeAttr() {
   const theme = useSettings((s) => s.theme);
@@ -46,7 +43,7 @@ function Toasts() {
   );
 }
 
-const WS: Workspace[] = ['markets', 'lab', 'swarm', 'meme'];
+const WS: Workspace[] = ['markets', 'lab', 'swarm', 'quant'];
 
 /** ⧉ on each tab bar: pop the selected panel out into its own window (desktop) */
 function popButton(m: Model) {
@@ -97,10 +94,8 @@ export function App() {
     startTelegramService();
     startAmtService();
     startLunoAlerts();
-    startPhoneLink();
     startBotAlerts();
     startCryptoSwarmLink();
-    startSwarmService();
     startLabLink();
   }, []);
 
@@ -133,19 +128,6 @@ export function App() {
     window.addEventListener('novus:ensure-panel', ensure);
     return () => window.removeEventListener('novus:ensure-panel', ensure);
   });
-  // Ctrl+1 / Ctrl+2: the meme swarm and the crypto swarm, like browser tabs
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-      if (useSettings.getState().ui === 'pro') return;
-      if (e.key === '1' || e.key === '2') {
-        e.preventDefault();
-        switchView(e.key === '1' ? 'command' : 'terminal', useSettings.getState().set);
-      }
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, []);
   // panels ask for the Connections window through a window event
   useEffect(() => {
     const open = () => setModal('keys');
@@ -270,7 +252,6 @@ export function App() {
           </button>
         </div>
       )}
-      {!pro && view === 'command' && <CommandCenter />}
       {!pro && view === 'terminal' && cryptoView === 'island' && <Island />}
       {/* the panels stay mounted under the Command Center and the island, so they keep their state */}
       {!pro && (

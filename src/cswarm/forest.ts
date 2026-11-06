@@ -15,7 +15,6 @@
 // hand-written tree with base rates from the published research (most coins
 // die; under 1 % graduate). The learned forest takes over as data comes in:
 // weight n / (n + 60) for n followed coins.
-import { FEATURES } from './features';
 
 export const CLASSES = ['dead', 'flat', '2×', '5×'] as const;
 export type Probs = [number, number, number, number];
@@ -119,7 +118,7 @@ export class Forest {
   /** Grow the forest (async: yields between trees so the terminal keeps drawing). */
   static async train(rows: Sample[], cfg: ForestConfig = FOREST_DEFAULTS, now = Date.now(), yieldEvery = 5): Promise<Forest> {
     const rnd = rngOf(cfg.seed + rows.length);
-    const nf = rows[0]?.x.length ?? FEATURES.length;
+    const nf = rows[0]?.x.length ?? 0;
     const trees: Node[] = [];
     const oob: { sum: number[]; k: number }[] = rows.map(() => ({ sum: [0, 0, 0, 0], k: 0 }));
     const used = new Array(nf).fill(0);

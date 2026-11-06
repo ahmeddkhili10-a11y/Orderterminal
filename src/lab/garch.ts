@@ -196,6 +196,16 @@ export function fitBest(returns: ArrayLike<number>): GarchFit | null {
 }
 
 /** the conditional variance of every bar of a return series, with fitted parameters (no look-ahead) */
+/** the best fit of one kind (GARCH or GJR-GARCH) over both error distributions, by BIC; no kind = the best of all four */
+export function fitModel(returns: ArrayLike<number>, kind?: GarchKind): GarchFit | null {
+  if (!kind) return fitBest(returns);
+  const fits = (['normal', 't'] as const).map((d) => fitGarch(returns, kind, d)).filter((f): f is GarchFit => !!f);
+  return fits.sort((x, y) => x.bic - y.bic)[0] ?? null;
+}
+
+/** the news-impact curve (Engle & Ng 1993): next-bar variance after a shock ε, with today's variance at its long-run level */
+export const newsImpact = (fit: GarchFit, eps: number) => fit.omega + (fit.alpha + (eps < 0 ? fit.gamma : 0)) * eps * eps + fit.beta * fit.longRun;
+
 export function garchVar(fit: GarchFit, returns: ArrayLike<number>): Float64Array {
   const eps = Array.from(returns, (x) => (Number.isFinite(x) ? x - fit.mu : 0));
   return filterVar(eps, fit.omega, fit.alpha, fit.beta, fit.gamma, fit.longRun);

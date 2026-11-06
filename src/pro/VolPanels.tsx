@@ -12,10 +12,10 @@ import { fmtPrice } from '../core/format';
 import type { Kline, VenueId } from '../core/types';
 import { ADAPTERS } from '../exchanges';
 import { candleForecast, type CandleReport } from '../lab/candles';
-import { fitBest, forecastPath, garchVar, horizonVol, hourProfile, valueAtRisk, type GarchFit } from '../lab/garch';
+import { fitModel, forecastPath, garchVar, horizonVol, hourProfile, newsImpact, valueAtRisk, type GarchFit } from '../lab/garch';
 import { useSettings } from '../store/settings';
 import { Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
-import { AreaChart, Bars, useChartWidth } from './charts';
+import { AreaChart, Bars, LineChart, useChartWidth } from './charts';
 import { BOARD_VENUES, useBoardVenue, useKlines } from './data';
 
 const venueOpts = () => [{ value: 'auto' as const, label: 'Primary venue' }, ...BOARD_VENUES.map((v) => ({ value: v, label: ADAPTERS[v].name }))];
@@ -35,10 +35,10 @@ interface CoinVol {
   var99: number;
 }
 
-function analyse(coin: string, k: Kline[], ahead: number): CoinVol | null {
+function analyse(coin: string, k: Kline[], ahead: number, model: GarchConfig['model'] = 'best'): CoinVol | null {
   if (k.length < 300) return null;
   const lr = k.slice(1).map((x, i) => Math.log(x.close / k[i].close));
-  const fit = fitBest(lr);
+  const fit = fitModel(lr, model === 'best' ? undefined : model);
   if (!fit) return null;
   const bpy = 24 * 365;
   const h = garchVar(fit, lr);
@@ -75,8 +75,10 @@ export interface GarchConfig {
   venue: VenueId | 'auto';
   coins: string;
   ahead: number;
+  /** best of all four by BIC, or force plain GARCH or GJR-GARCH (the leverage effect) */
+  model?: 'best' | 'garch' | 'gjr';
 }
-export const GARCH_DEFAULTS: GarchConfig = { venue: 'auto', coins: 'BTC ETH SOL BNB XRP DOGE AVAX LINK ADA SUI', ahead: 48 };
+export const GARCH_DEFAULTS: GarchConfig = { venue: 'auto', coins: 'BTC ETH SOL BNB XRP DOGE AVAX LINK ADA SUI', ahead: 48, model: 'best' };
 
 export function GarchPanel({ config: c, setConfig }: PanelProps<GarchConfig>) {
   const board = useBoardVenue();
@@ -85,7 +87,7 @@ export function GarchPanel({ config: c, setConfig }: PanelProps<GarchConfig>) {
   const k = useKlines(venue, coins, '1h', 1000);
   const [text, setText] = useState(c.coins);
   const [sel, setSel] = useState<string | null>(null);
-  const rows = useMemo(() => coins.map((b) => (k.data[b] ? analyse(b, k.data[b], c.ahead) : null)).filter(Boolean) as CoinVol[], [k.data, c.ahead, coins.join()]);
+  const rows = useMemo(() => coins.map((b) => (k.data[b] ? analyse(b, k.data[b], c.ahead, c.model ?? 'best') : null)).filter(Boolean) as CoinVol[], [k.data, c.ahead, c.model, coins.join()]);
   const pick = rows.find((r) => r.coin === sel) ?? rows[0];
   const hours = rows[0]?.hours ?? [];
   return (
@@ -93,9 +95,18 @@ export function GarchPanel({ config: c, setConfig }: PanelProps<GarchConfig>) {
       <Toolbar>
         <input className="ctl mono" value={text} onChange={(e) => setText(e.target.value.toUpperCase())} onBlur={() => setConfig({ coins: text })} style={{ width: 220 }} title="Coins, separated by spaces" />
         <Select value={c.ahead} options={[24, 48, 72].map((n) => ({ value: n, label: `next ${n} h` }))} onChange={(ahead) => setConfig({ ahead })} />
+        <Select
+          value={c.model ?? 'best'}
+          options={[
+            { value: 'best' as const, label: 'best model (BIC)' },
+            { value: 'gjr' as const, label: 'GJR-GARCH' },
+            { value: 'garch' as const, label: 'GARCH' },
+          ]}
+          onChange={(model) => setConfig({ model })}
+        />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
         <Spacer />
-        <span className="pro-status">{k.loading ? 'fitting…' : 'GARCH / GJR-GARCH · normal or t · best by BIC · 1000 hourly bars'}</span>
+        <span className="pro-status">{k.loading ? 'fitting…' : `${(c.model ?? 'best') === 'best' ? 'GARCH / GJR-GARCH · normal or t · best by BIC' : (c.model === 'gjr' ? 'GJR-GARCH' : 'GARCH') + ' · normal or t by BIC'} · 1000 hourly bars`}</span>
       </Toolbar>
       <div className="pro-scroll">
         {!rows.length ? (
@@ -170,6 +181,23 @@ export function GarchPanel({ config: c, setConfig }: PanelProps<GarchConfig>) {
                   {pick.coin} — CONDITIONAL VOLATILITY (ANNUALISED), FORECAST DASHED, LONG RUN RULED
                 </div>
                 <AreaChart values={pick.sigAnn.slice(-500)} forecast={pick.hours.map((h) => h.ann)} level={pick.longAnn} format={(v) => `${(v * 100).toFixed(0)}%`} />
+                <div className="pro-section">
+                  {pick.coin} — NEWS-IMPACT CURVE: NEXT HOUR'S VOLATILITY AFTER A SHOCK OF −5 TO +5 σ ({pick.fit.kind === 'gjr' ? `GJR: falls add γ = ${pick.fit.gamma.toFixed(3)}` : 'symmetric GARCH'})
+                </div>
+                <LineChart
+                  log={false}
+                  height={130}
+                  format={(v) => `${(v * 100).toFixed(0)}%`}
+                  series={[
+                    { values: Array.from({ length: 41 }, (_, i) => Math.sqrt(newsImpact(pick.fit, ((i - 20) / 4) * Math.sqrt(pick.fit.longRun)) * 24 * 365)), color: 'var(--pro-head, #ffd200)', width: 1.8 },
+                    { values: Array.from({ length: 41 }, () => pick.longAnn), color: 'var(--muted)', width: 1, dash: '3 3' },
+                  ]}
+                  labels={
+                    <>
+                      left: a fall, right: a rise, middle: no news · <span className="muted">dashed: the long run</span> — an asymmetric curve is the leverage effect (Engle & Ng 1993; Glosten, Jagannathan & Runkle 1993)
+                    </>
+                  }
+                />
                 <div className="lab-line muted">
                   GARCH forecasts revert to the long run at the speed of the persistence ({pick.fit.persistence.toFixed(3)} an hour: half of a shock is gone in about {Number.isFinite(pick.fit.halfLife) ? `${pick.fit.halfLife.toFixed(0)} hours` : 'forever'}). The hour-of-day pattern rides on top. Feeds the Strategy Lab: GARCH volatility is an input to every learned model and the meta-labeller, scales the volatility-adjusted momentum rule, sets GARCH stops, gates the GARCH regime filter, and drives the simulated worlds every leading strategy must beat.
                 </div>

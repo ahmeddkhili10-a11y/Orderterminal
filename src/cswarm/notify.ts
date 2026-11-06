@@ -7,7 +7,7 @@ import type { CSwarmNotify, CSwarmPosition } from '../desktop/bridge';
 import { desktop } from '../desktop/bridge';
 import { escapeHtml } from '../shared/telegram';
 import { getSettings } from '../store/settings';
-import { alertHere } from '../meme/swarm/notify';
+import { alertHere } from '../alerts/here';
 
 const MARK = { for: '✓', against: '✗', abstain: '–', veto: '⛔' } as const;
 const NAME: Record<string, string> = { scalper: 'Scalper', auction: 'Auctioneer', trend: 'Trend', tape: 'Tape', crowd: 'Crowd', guardian: 'Guardian', forest: 'Forest', risk: 'Risk' };

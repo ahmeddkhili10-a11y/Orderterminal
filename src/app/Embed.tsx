@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { hub } from '../market/hub';
 import { startCollectors } from '../market/collectors';
-import { startSwarmService } from '../meme/swarm/swarm';
 import { PANEL_MAP } from '../panels/registry';
 import { useThemeAttr } from './App';
 
@@ -32,8 +31,6 @@ export function Embed({ panelId, params }: { panelId: string; params: URLSearchP
   useEffect(() => {
     hub();
     startCollectors();
-    // the Meme Swarm's on/off switch works here too
-    if (panelId === 'memeswarm') startSwarmService();
   }, [panelId]);
   if (!def)
     return (

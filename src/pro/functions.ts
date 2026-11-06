@@ -2,7 +2,7 @@
 // line (or clicked on the function keys) that open a screen in a workspace.
 // A coin before the code makes it the market first: "ETH GP", "SOL BOOK".
 
-export type Workspace = 'markets' | 'lab' | 'swarm' | 'meme';
+export type Workspace = 'markets' | 'lab' | 'swarm' | 'quant';
 
 export interface Fn {
   code: string;
@@ -17,7 +17,7 @@ export const WORKSPACES: { id: Workspace; name: string; key: string; desc: strin
   { id: 'markets', name: 'MARKETS', key: 'F1', desc: 'Quotes, charts, order book, flow, derivatives, news' },
   { id: 'lab', name: 'STRATEGY LAB', key: 'F2', desc: 'Research published strategies, test, rank and deploy them' },
   { id: 'swarm', name: 'CRYPTO SWARM', key: 'F3', desc: 'The crypto swarm on Hyperliquid, its trades and orders' },
-  { id: 'meme', name: 'MEME DESK', key: 'F4', desc: 'The meme swarm on Solana, its scanner and wallet' },
+  { id: 'quant', name: 'QUANT DESK', key: 'F4', desc: 'Value at risk, delta hedging, volatility targeting, momentum, regimes, GARCH' },
 ];
 
 export const FUNCTIONS: Fn[] = [
@@ -60,12 +60,16 @@ export const FUNCTIONS: Fn[] = [
   { code: 'TKT', name: 'Order ticket', panel: 'ticket', ws: 'swarm', desc: 'Place orders on any exchange' },
   { code: 'PORT', name: 'Portfolio', panel: 'accounts', ws: 'swarm', desc: 'Balances, positions, orders, fills' },
   { code: 'ALRT', name: 'Alerts', panel: 'alerts', ws: 'swarm', desc: 'Price and flow alerts' },
-  // meme desk
-  { code: 'MEME', name: 'Meme swarm', panel: 'memeswarm', ws: 'meme', desc: 'Five bots trading Solana meme coins' },
-  { code: 'SCAN', name: 'Meme scanner', panel: 'memescan', ws: 'meme', desc: 'Every new and graduating meme coin' },
-  { code: 'MTOK', name: 'Meme token', panel: 'memetoken', ws: 'meme', desc: 'One coin: curve, safety, flow, chart' },
-  { code: 'WALL', name: 'Wallet', panel: 'wallet', ws: 'meme', desc: 'Phantom and the swarm wallet' },
-  { code: 'TG', name: 'Telegram', panel: 'telegram', ws: 'meme', desc: 'Your Telegram bot' },
+  // quant desk
+  { code: 'VAR', name: 'Value at risk', panel: 'qvar', ws: 'quant', desc: 'VaR and expected shortfall: five methods, any horizon, backtested' },
+  { code: 'DHG', name: 'Delta hedging', panel: 'qdelta', ws: 'quant', desc: 'Option greeks, the hedge to hold, hedging backtest' },
+  { code: 'VTGT', name: 'Volatility targeting', panel: 'qvtgt', ws: 'quant', desc: 'Volatility estimators, position sizing, Kelly' },
+  { code: 'MOM', name: 'Momentum', panel: 'qmom', ws: 'quant', desc: 'Time-series momentum, trend t, Kalman slope, rank' },
+  { code: 'REGM', name: 'Regimes', panel: 'qregm', ws: 'quant', desc: 'Hurst, variance ratio, OU half-life, hidden Markov' },
+  // accounts and messages
+  { code: 'WALL', name: 'Wallet', panel: 'wallet', ws: 'swarm', desc: 'Phantom balances (and the retired meme swarm wallet)' },
+  { code: 'TG', name: 'Telegram', panel: 'telegram', ws: 'swarm', desc: 'Your Telegram bot' },
+  { code: 'LUNO', name: 'Luno lane', panel: 'luno', ws: 'swarm', desc: 'Crypto against rands on Luno: daily trend bots' },
   // tools
   { code: 'CALC', name: 'Calculator', panel: 'calculator', ws: 'swarm', desc: 'Size, risk/reward, liquidation' },
   { code: 'NOTE', name: 'Journal', panel: 'journal', ws: 'swarm', desc: 'Timestamped notes' },
@@ -77,9 +81,9 @@ export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
 /** the function keys shown for each workspace */
 export const KEYS: Record<Workspace, string[]> = {
   markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
-  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'SWRM', 'GV', 'FCST', 'CORR', 'HVOL'],
-  swarm: ['SWRM', 'DEPL', 'TKT', 'PORT', 'AMT', 'GP', 'ALRT', 'CALC'],
-  meme: ['MEME', 'SCAN', 'MTOK', 'WALL', 'TG'],
+  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'SWRM', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
+  swarm: ['SWRM', 'DEPL', 'TKT', 'PORT', 'AMT', 'GP', 'ALRT', 'CALC', 'TG'],
+  quant: ['VAR', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV', 'FCST', 'HVOL', 'CORR'],
 };
 
 export interface Parsed {

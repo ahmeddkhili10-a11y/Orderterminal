@@ -6312,3 +6312,29 @@ table.grid.meme-tape td {
     display: none;
   }
 }
+
+/* QUANT desk */
+.pro-table td.q-p1 { background: color-mix(in srgb, var(--buy) 10%, transparent); }
+.pro-table td.q-p2 { background: color-mix(in srgb, var(--buy) 22%, transparent); }
+.pro-table td.q-p3 { background: color-mix(in srgb, var(--buy) 38%, transparent); }
+.pro-table td.q-n1 { background: color-mix(in srgb, var(--sell) 10%, transparent); }
+.pro-table td.q-n2 { background: color-mix(in srgb, var(--sell) 22%, transparent); }
+.pro-table td.q-n3 { background: color-mix(in srgb, var(--sell) 38%, transparent); }
+.pro-table tr.q-total td { border-top: 1px solid var(--pro-head, var(--warn)); font-weight: 600; }
+.dh-hedge {
+  margin: 4px 8px 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+.dh-hedge b { font-family: var(--mono, monospace); }
+.q-kelly {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.q-kelly label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; letter-spacing: 0.06em; }
+.old-swarm { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 4px; }
