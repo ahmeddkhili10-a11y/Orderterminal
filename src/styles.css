@@ -6383,6 +6383,10 @@ table.grid.meme-tape td {
 .cc-logline.k-loss b, .cc-logline.k-error b { color: var(--sell); }
 .cc-logline.k-pass { opacity: 0.75; }
 /* the crypto swarm's market rows: coin, trend, price, funding */
-.cc-feed.cs { grid-template-columns: 10px minmax(30px, auto) 12px 1fr minmax(44px, auto); cursor: pointer; }
-.cc-feed.cs > .mono:nth-child(4) { text-align: right; white-space: nowrap; }
-.cc-feed.cs:hover .cc-feed-name { color: var(--text); }
+
+.cc-feed.cc-mkt { grid-template-columns: 10px minmax(30px, auto) 12px 1fr minmax(44px, auto); cursor: pointer; }
+.cc-feed.cc-mkt > .mono:nth-child(4) { text-align: right; white-space: nowrap; }
+.cc-feed.cc-mkt:hover .cc-feed-name { color: var(--text); }
+.cc-drawer-head { flex-wrap: wrap; }
+.view-switch .view-tab { white-space: nowrap; }
+.cc-tools-open { white-space: nowrap; }

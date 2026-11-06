@@ -2,22 +2,23 @@
 // line (or clicked on the function keys) that open a screen in a workspace.
 // A coin before the code makes it the market first: "ETH GP", "SOL BOOK".
 
-export type Workspace = 'markets' | 'lab' | 'swarm' | 'quant';
+export type Workspace = 'markets' | 'lab' | 'quant';
+/** where a function lives: a terminal workspace, or the crypto swarm's own view */
+export type FnHome = Workspace | 'swarm';
 
 export interface Fn {
   code: string;
   name: string;
   /** the panel it opens */
   panel: string;
-  ws: Workspace;
+  ws: FnHome;
   desc: string;
 }
 
 export const WORKSPACES: { id: Workspace; name: string; key: string; desc: string }[] = [
   { id: 'markets', name: 'MARKETS', key: 'F1', desc: 'Quotes, charts, order book, flow, derivatives, news' },
   { id: 'lab', name: 'STRATEGY LAB', key: 'F2', desc: 'Research published strategies, test, rank and deploy them' },
-  { id: 'swarm', name: 'CRYPTO SWARM', key: 'F3', desc: 'The crypto swarm on Hyperliquid, its trades and orders' },
-  { id: 'quant', name: 'QUANT DESK', key: 'F4', desc: 'Value at risk, delta hedging, volatility targeting, momentum, regimes, GARCH' },
+  { id: 'quant', name: 'QUANT DESK', key: 'F3', desc: 'Value at risk, delta hedging, volatility targeting, momentum, regimes, GARCH' },
 ];
 
 export const FUNCTIONS: Fn[] = [
@@ -55,7 +56,7 @@ export const FUNCTIONS: Fn[] = [
   { code: 'BT', name: 'Backtest builder', panel: 'labbuilder', ws: 'lab', desc: 'Build a strategy by hand and test it' },
   { code: 'DEPL', name: 'Deployed', panel: 'labdeployed', ws: 'lab', desc: 'Strategies trading in the swarms' },
   // crypto swarm
-  { code: 'SWRM', name: 'Swarm command', panel: 'swarmcmd', ws: 'swarm', desc: 'The swarm core, gauges, deploy gate, tape and live feed' },
+  { code: 'SWRM', name: 'Crypto swarm', panel: 'command', ws: 'swarm', desc: 'Switch to the crypto swarm view: the core, gauges, deploy gate, tape' },
   { code: 'SWCF', name: 'Swarm rules', panel: 'cswarm', ws: 'swarm', desc: 'Agents, council, trades, rules, paper or live account' },
   { code: 'AMT', name: 'AMT bots', panel: 'amt', ws: 'swarm', desc: 'Auction-market-theory bots' },
   { code: 'TKT', name: 'Order ticket', panel: 'ticket', ws: 'swarm', desc: 'Place orders on any exchange' },
@@ -69,7 +70,7 @@ export const FUNCTIONS: Fn[] = [
   { code: 'REGM', name: 'Regimes', panel: 'qregm', ws: 'quant', desc: 'Hurst, variance ratio, OU half-life, hidden Markov' },
   { code: 'CAPM', name: 'CAPM', panel: 'qcapm', ws: 'quant', desc: 'Beta, alpha, R², security market line' },
   { code: 'EF', name: 'Efficient frontier', panel: 'qef', ws: 'quant', desc: 'Markowitz frontier, max Sharpe, min variance, Kelly portfolio' },
-  { code: 'KELLY', name: 'Kelly criterion', panel: 'qkelly', ws: 'quant', desc: 'Growth-optimal leverage, growth curve, the swarm’s own Kelly' },
+  { code: 'KELLY', name: 'Kelly criterion', panel: 'qkelly', ws: 'quant', desc: 'Growth-optimal leverage, growth curve, a strategy’s Kelly bet' },
   // accounts and messages
   { code: 'WALL', name: 'Wallet', panel: 'wallet', ws: 'swarm', desc: 'Phantom balances (and the retired meme swarm wallet)' },
   { code: 'TG', name: 'Telegram', panel: 'telegram', ws: 'swarm', desc: 'Your Telegram bot' },
@@ -85,8 +86,7 @@ export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
 /** the function keys shown for each workspace */
 export const KEYS: Record<Workspace, string[]> = {
   markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
-  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'SWRM', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
-  swarm: ['SWRM', 'SWCF', 'DEPL', 'TKT', 'PORT', 'AMT', 'GP', 'ALRT', 'CALC', 'TG'],
+  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
   quant: ['VAR', 'CAPM', 'EF', 'KELLY', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV', 'FCST'],
 };
 
@@ -116,7 +116,7 @@ export function parseCommand(text: string): Parsed {
     else if (/^[A-Z0-9]{2,10}$/.test(w) && !coin) coin = w;
     else unknown.push(w);
   }
-  return { coin, fn, workspace: workspace ?? fn?.ws ?? null, unknown };
+  return { coin, fn, workspace: workspace ?? (fn && fn.ws !== 'swarm' ? fn.ws : null), unknown };
 }
 
 /** suggestions for what is being typed: codes and names that match */

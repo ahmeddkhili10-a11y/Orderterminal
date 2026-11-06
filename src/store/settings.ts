@@ -127,9 +127,9 @@ export interface Settings {
   /** the classic look: the crypto swarm's Command Center, or the order-flow panels */
   cryptoView: 'command' | 'panels';
   /** the professional terminal (dense workspaces, command line) or the classic swarm views */
-  ui: 'pro' | 'classic';
+  ui: 'pro' | 'classic' | 'swarm';
   /** the professional terminal's workspace on screen */
-  workspace: 'markets' | 'lab' | 'swarm' | 'quant';
+  workspace: 'markets' | 'lab' | 'quant';
   /** the classic look's theme, kept while the professional terminal is on */
   classicTheme: ThemeId;
   filter: FilterId;
@@ -242,7 +242,7 @@ export const useSettings = create<Settings & Actions>()(
     }),
     {
       name: 'oft-settings',
-      version: 10,
+      version: 11,
       // v1 had dark/light themes only
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
@@ -274,6 +274,12 @@ export const useSettings = create<Settings & Actions>()(
         }
         // v10: the market island is gone; the crypto swarm has the Command Center
         if (version < 10 && p.cryptoView !== 'panels') p.cryptoView = 'command';
+        // v11: the crypto swarm is its own view, apart from the terminal (Markets, Strategy Lab, Quant desk)
+        if (version < 11) {
+          if (p.workspace === 'swarm') p.workspace = 'markets';
+          if (p.ui === 'classic' && p.cryptoView === 'command') p.ui = 'swarm';
+          p.cryptoView = 'panels';
+        }
         return p as unknown as Settings & Actions;
       },
       storage: createJSONStorage(() => safeStorage),

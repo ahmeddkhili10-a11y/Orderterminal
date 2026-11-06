@@ -17,6 +17,27 @@ import { useCSwarm } from '../cswarm/store';
 import { ProThemePicker, switchUi, WorkspaceTabs } from '../pro/ProBar';
 import { ScreensMenu } from '../pro/Screens';
 
+/**
+ * The two views, side by side on the top bar: the terminal (markets, the
+ * Strategy Lab, the quant desk) and the crypto swarm (its Command Center and
+ * everything that trades your accounts). Ctrl+1 and Ctrl+2 switch too.
+ */
+export function ViewSwitch() {
+  const ui = useSettings((s) => s.ui);
+  const cs = useCSwarm((s) => s.state);
+  return (
+    <div className="view-tabs view-switch" role="tablist" aria-label="Views">
+      <button role="tab" aria-selected={ui === 'pro'} className={`view-tab vs-terminal${ui === 'pro' ? ' active' : ''}`} onClick={() => switchUi('pro')} title="The terminal: markets, the Strategy Lab and the quant desk (Ctrl+1)">
+        ▤ Terminal
+      </button>
+      <button role="tab" aria-selected={ui === 'swarm'} className={`view-tab vs-swarm${ui === 'swarm' ? ' active' : ''}`} onClick={() => switchUi('swarm')} title="The crypto swarm: its Command Center, deployed strategies, accounts and orders (Ctrl+2)">
+        <span className={`vt-dot${cs?.running ? (cs.mode === 'live' ? ' live' : ' on') : ''}`} />
+        Crypto swarm
+      </button>
+    </div>
+  );
+}
+
 /** The classic look's terminal tab: the crypto swarm on Hyperliquid, its order flow and its account. */
 export function ViewTabs() {
   const view = useSettings((s) => s.view);
@@ -276,9 +297,9 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
   useTicker(500);
   useHubVersion();
   const showFps = useSettings((s) => s.showFps);
-  const pro = useSettings((s) => s.ui) === 'pro';
-    const cryptoView = useSettings((s) => s.cryptoView);
-  const setSettings = useSettings((s) => s.set);
+  const ui = useSettings((s) => s.ui);
+  const pro = ui === 'pro';
+  const swarmView = ui === 'swarm';
   const fps = useFps();
   const H = hub();
   const f = H.primary;
@@ -295,9 +316,10 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <span className="brand-by hide-sm">by Quincy Gininda</span>
         </span>
       </div>
-      {pro ? <WorkspaceTabs /> : <ViewTabs />}
+      <ViewSwitch />
+      {pro && <WorkspaceTabs />}
       <div className="sep" />
-      {
+      {!swarmView && (
         <>
           <SymbolPicker />
           <div className="group">
@@ -317,23 +339,11 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
             )}
           </button>
         </>
-      }
-      <div style={{ flex: 1 }} />
-      {pro ? null : (
-        <>
-          <button className="chip primary-chip chrome-chip island-toggle" onClick={() => setSettings({ cryptoView: cryptoView === 'command' ? 'panels' : 'command' })} title={cryptoView === 'command' ? 'The classic panels: footprint, heatmap, DOM, bots' : 'The swarm Command Center: the core, the gauges, the deploy gate'}>
-            {cryptoView === 'command' ? '▦' : '◈'} <span className="lbl keep">{cryptoView === 'command' ? 'Panels' : 'Command'}</span>
-          </button>
-          {cryptoView === 'panels' && (
-            <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('cswarm')} title="The crypto swarm: its agents, council, trades and rules">
-              ◈ <span className="lbl keep">Swarm</span>
-            </button>
-          )}
-        </>
       )}
+      <div style={{ flex: 1 }} />
       <SafeModeChip />
       <AlgoKill />
-      {!pro && (
+      {ui === 'classic' && (
         <button className="chip primary-chip chrome-chip" onClick={() => onOpenPanel('amt')} title="AMT trading bots: scalp and intraday, paper or live, backtests">
           <BotIcon /> <span className="lbl keep">Bots</span>
         </button>
@@ -341,7 +351,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       <button className="chip primary-chip chrome-chip" onClick={() => onOpen('keys')} title="Connections: exchange API keys (Binance, Coinbase…), Telegram bot, Solana RPC">
         <ConnectIcon /> <span className="lbl keep">Connect</span>
       </button>
-      {!pro && (
+      {ui === 'classic' && (
         <>
         <button className="chip" onClick={() => onOpen('add')} title="Add a panel">
           + <span className="lbl">Panel</span>
@@ -370,9 +380,11 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
           <FilterSelect />
         </>
       )}
-      <button className="chip ui-toggle" onClick={() => switchUi(pro ? 'classic' : 'pro')} title={pro ? 'The classic look: the crypto swarm Command Center and the order-flow panels' : 'The professional terminal: workspaces, command line, Strategy Lab'}>
-        {pro ? '◐ Classic' : '▤ Pro terminal'}
-      </button>
+      {ui === 'classic' && (
+        <button className="chip ui-toggle" onClick={() => switchUi('pro')} title="Back to the terminal: workspaces, command line, Strategy Lab">
+          ▤ Terminal
+        </button>
+      )}
       <button className="chip seal primary-chip chrome-chip" onClick={() => void sealTerminal()} title="Lock the terminal — back to the ENTER LEDGER KEY page. Market data and bots keep running.">
         <LockIcon /> <span className="lbl keep">Lock</span>
       </button>

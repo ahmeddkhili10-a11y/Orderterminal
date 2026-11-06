@@ -8,15 +8,14 @@
 //          minimum-variance and maximum-Sharpe (tangency) portfolios, the
 //          capital market line, equal weight and the Kelly portfolio
 //   KELLY  the Kelly criterion: each coin's growth-optimal leverage and its
-//          growth curve, the growth-optimal portfolio, and Kelly on the
-//          crypto swarm's own trade record
+//          growth curve, the growth-optimal portfolio, and a strategy's Kelly
+//          bet from its win rate and payoff
 //
 // Means are the noisiest inputs in all three: the frontier and Kelly shrink
 // them toward the coins' average (a James–Stein-style blend), and the screens
 // say how much to trust them.
 import { useMemo, useState } from 'react';
 import type { Kline, VenueId } from '../core/types';
-import { useCSwarm } from '../cswarm/store';
 import { ADAPTERS } from '../exchanges';
 import { capm, efficientFrontier, kellyBet, kellyGrowth, kellyPortfolio, meanCov, moments4, type Capm, type Portfolio } from '../lab/quant';
 import { useSettings } from '../store/settings';
@@ -305,7 +304,6 @@ export function KellyPanel({ config: c, setConfig }: PanelProps<KellyConfig>) {
   const k = useKlines(venue, coins, '1d', 400);
   const rf = c.rf / 100;
   const [sel, setSel] = useState<string | null>(null);
-  const cs = useCSwarm((s) => s.state);
   const res = useMemo(() => {
     const al = aligned(k.data, coins, 365);
     if (!al.coins.length) return null;
@@ -325,14 +323,10 @@ export function KellyPanel({ config: c, setConfig }: PanelProps<KellyConfig>) {
     return { coins: al.coins, rows, port, n: al.n };
   }, [k.data, c.rf, c.shrink, c.cap, coins.join()]);
   const pick = res?.rows.find((r) => r.coin === sel) ?? res?.rows.find((r) => r.coin === base) ?? res?.rows[0];
-  // Kelly on the swarm's own record: closed trades in R
-  const rs = (cs?.closed ?? []).map((p) => p.r).filter((x): x is number => Number.isFinite(x));
-  const wins = rs.filter((r) => r > 0);
-  const losses = rs.filter((r) => r <= 0);
-  const pW = rs.length ? wins.length / rs.length : NaN;
-  const avgW = wins.length ? wins.reduce((a, b) => a + b, 0) / wins.length : NaN;
-  const avgL = losses.length ? -losses.reduce((a, b) => a + b, 0) / losses.length : NaN;
-  const swarmKelly = rs.length >= 5 && avgW > 0 && avgL > 0 ? kellyBet(pW, avgW, avgL) : NaN;
+  // Kelly for a strategy's bets: win rate and the average win in R (losses of 1R)
+  const [win, setWin] = useState(45);
+  const [payoff, setPayoff] = useState(2);
+  const stratKelly = kellyBet(win / 100, payoff, 1);
   return (
     <div className="pro-panel">
       <Toolbar>
@@ -406,23 +400,28 @@ export function KellyPanel({ config: c, setConfig }: PanelProps<KellyConfig>) {
                   </div>
                 </div>
                 <div>
-                  <div className="pro-section">KELLY ON THE CRYPTO SWARM'S OWN TRADES</div>
-                  {rs.length >= 5 ? (
-                    <div className="lab-kv mono">
-                      <span>last {rs.length} trades</span>
-                      <span>win rate {pct(pW, 0)}</span>
-                      <span>avg win {num(avgW)}R · avg loss {num(avgL)}R</span>
-                      <span className={swarmKelly > 0 ? 'up' : 'down'}>Kelly risk a trade {pct(swarmKelly, 1)}</span>
-                      <span>the swarm uses {pct((cs?.cfg.risk.kellyShare ?? 0.25) * Math.max(0, swarmKelly), 2)} ({num((cs?.cfg.risk.kellyShare ?? 0.25) * 100, 0)}% of Kelly), within {cs?.cfg.risk.minRiskPct}–{cs?.cfg.risk.maxRiskPct}%</span>
-                    </div>
-                  ) : (
-                    <div className="lab-line muted">The swarm sizes with a fraction of Kelly once it has {cs?.cfg.risk.minTrades ?? 20} closed trades; it has {rs.length} so far.</div>
-                  )}
+                  <div className="pro-section">KELLY FOR A STRATEGY — WIN RATE AND PAYOFF</div>
+                  <div className="q-kelly">
+                    <label>
+                      WIN RATE
+                      <NumberInput value={win} step={1} min={1} width={60} onChange={(v) => setWin(Math.min(99, v))} suffix="%" />
+                    </label>
+                    <label>
+                      AVG WIN (R)
+                      <NumberInput value={payoff} step={0.1} min={0.1} width={60} onChange={setPayoff} />
+                    </label>
+                  </div>
+                  <div className="lab-kv mono">
+                    <span className={stratKelly > 0 ? 'up' : 'down'}>Kelly {pct(stratKelly, 1)} of the account at risk a trade</span>
+                    <span>half {pct(stratKelly / 2, 1)}</span>
+                    <span>quarter {pct(stratKelly / 4, 1)}</span>
+                    {stratKelly <= 0 && <span className="down">no edge: do not take it</span>}
+                  </div>
                 </div>
               </div>
             )}
             <div className="lab-line muted">
-              Kelly's bet maximises the long-run growth of capital: the edge over the variance. It assumes the edge is known — and an over-estimated edge makes the Kelly bet ruinous, which is why practitioners use a half or a quarter of it (MacLean, Thorp & Ziemba 2011). The crypto swarm's risk manager sizes with a quarter of Kelly on its own record, inside its risk limits; the Strategy Lab's Monte Carlo shows the drawdowns at 1 % risk a trade.
+              Kelly's bet maximises the long-run growth of capital: the edge over the variance. It assumes the edge is known — and an over-estimated edge makes the Kelly bet ruinous, which is why practitioners use a half or a quarter of it (MacLean, Thorp & Ziemba 2011). Use the Strategy Lab's tested win rate and payoff here; its Monte Carlo shows the drawdowns at 1 % risk a trade.
             </div>
           </>
         )}

@@ -14,8 +14,8 @@ import { hub } from '../market/hub';
 import { useSettings } from '../store/settings';
 import { applyTheme } from '../ui/theme';
 import { loadLayout, loadProLayout, PRESETS, PRO_LAYOUTS, sanitize, saveLayout, saveProLayout, tab } from './layouts';
-import { CommandBar, StatusLine } from '../pro/ProBar';
-import type { Workspace } from '../pro/functions';
+import { CommandBar, openFunction, StatusLine, switchUi } from '../pro/ProBar';
+import type { FnHome, Workspace } from '../pro/functions';
 import { startLabLink } from '../lab/store';
 import { AddPanelModal, ConnectionModal, LayoutsModal, SettingsModal, type Placement } from './Modals';
 import { KeysModal } from './KeysModal';
@@ -43,7 +43,7 @@ function Toasts() {
   );
 }
 
-const WS: Workspace[] = ['markets', 'lab', 'swarm', 'quant'];
+const WS: Workspace[] = ['markets', 'lab', 'quant'];
 
 /** ⧉ on each tab bar: pop the selected panel out into its own window (desktop) */
 function popButton(m: Model) {
@@ -76,8 +76,11 @@ export function App() {
   const layoutRef = useRef<ILayoutApi>(null);
   const proRefs = useRef<Partial<Record<Workspace, ILayoutApi | null>>>({});
   const fired = useSettings((s) => s.fired);
-  const cryptoView = useSettings((s) => s.cryptoView);
-  const pro = useSettings((s) => s.ui) === 'pro';
+  const ui = useSettings((s) => s.ui);
+  const pro = ui === 'pro';
+  // the crypto swarm's own view: apart from the terminal; the terminal's workspaces stay mounted behind it
+  const swarm = ui === 'swarm';
+  const proLike = pro || swarm;
   const ws = useSettings((s) => s.workspace);
   // a workspace's layout is mounted the first time it is opened, then kept (its charts keep their state)
   const [visited, setVisited] = useState<Set<Workspace>>(() => new Set([ws]));
@@ -101,12 +104,18 @@ export function App() {
   // the command line and the function keys open a panel in its workspace
   useEffect(() => {
     const open = (e: Event) => {
-      const { panel, ws: target } = (e as CustomEvent<{ panel: string; ws: Workspace }>).detail;
+      const { panel, ws: target } = (e as CustomEvent<{ panel: string; ws: FnHome }>).detail;
       const st = useSettings.getState();
-      if (st.ui !== 'pro') {
+      // the crypto swarm's tools open in its own view
+      if (target === 'swarm') {
+        openFunction(panel, 'swarm');
+        return;
+      }
+      if (st.ui === 'classic') {
         openPanel(panel);
         return;
       }
+      if (st.ui === 'swarm') switchUi('pro');
       if (st.workspace !== target) st.set({ workspace: target });
       showIn(proModels[target], panel);
     };
@@ -127,6 +136,18 @@ export function App() {
     window.addEventListener('novus:ensure-panel', ensure);
     return () => window.removeEventListener('novus:ensure-panel', ensure);
   });
+  // Ctrl+1 the terminal, Ctrl+2 the crypto swarm
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (e.key === '1' || e.key === '2') {
+        e.preventDefault();
+        switchUi(e.key === '1' ? 'pro' : 'swarm');
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
   // panels ask for the Connections window through a window event
   useEffect(() => {
     const open = () => setModal('keys');
@@ -251,18 +272,17 @@ export function App() {
           </button>
         </div>
       )}
-      {!pro && cryptoView === 'command' && <CommandCenter />}
-      {/* the panels stay mounted under the Command Center, so they keep their state */}
-      {!pro && (
-        <div className="layout-host" style={cryptoView === 'command' ? { display: 'none' } : undefined}>
+      {swarm && <CommandCenter />}
+      {ui === 'classic' && (
+        <div className="layout-host">
           <div className="layout-inner">
             <Layout ref={layoutRef} model={classicModel} factory={factory} onModelChange={(m) => saveLayout(m.toJson())} onRenderTabSet={popButton(classicModel)} realtimeResize />
           </div>
         </div>
       )}
-      {pro &&
+      {proLike &&
         WS.filter((w) => visited.has(w)).map((w) => (
-          <div key={w} className="layout-host pro-host" data-ws={w} style={w === ws ? undefined : { display: 'none' }}>
+          <div key={w} className="layout-host pro-host" data-ws={w} style={pro && w === ws ? undefined : { display: 'none' }}>
             <div className="layout-inner">
               <Layout ref={(r) => void (proRefs.current[w] = r)} model={proModels[w]} factory={proFactories[w]} onModelChange={(m) => saveProLayout(w, m.toJson())} onRenderTabSet={popButton(proModels[w])} realtimeResize />
             </div>

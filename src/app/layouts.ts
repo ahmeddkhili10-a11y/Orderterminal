@@ -171,7 +171,7 @@ const LAYOUT_KEY = 'novus-layout-v2';
 const SAVED_KEY = 'oft-saved-layouts';
 
 /** the professional terminal's workspaces: their starting layouts */
-export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'swarm' | 'quant', () => IJsonModel> = {
+export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'quant', () => IJsonModel> = {
   markets: () =>
     model(
       row(
@@ -182,12 +182,11 @@ export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'swarm' | 'quant', () => IJ
       ),
     ),
   lab: () => model(row(100, ts(30, tab('lablib'), tab('prohelp')), row(70, ts(68, tab('labresearch'), tab('labbuilder')), ts(32, tab('labdeployed'), tab('fcst'), tab('garch'), tab('correl'))))),
-  swarm: () => model(row(100, ts(100, tab('swarmcmd'), tab('cswarm'), tab('labdeployed'), tab('historical'), tab('ticket'), tab('accounts'), tab('amt'), tab('alerts'), tab('calculator'), tab('wallet'), tab('telegram')))),
   quant: () => model(row(100, row(50, ts(56, tab('qef'), tab('qmom'), tab('qregm')), ts(44, tab('qvar'), tab('qcapm'))), row(50, ts(56, tab('qkelly'), tab('qdelta'), tab('qvtgt')), ts(44, tab('garch'), tab('fcst'), tab('historical'))))),
 };
 
 /** bumped per workspace when its starting layout changes, so the new one is used once */
-const PRO_VERSION: Partial<Record<keyof typeof PRO_LAYOUTS, number>> = { swarm: 2, quant: 2 };
+const PRO_VERSION: Partial<Record<keyof typeof PRO_LAYOUTS, number>> = { quant: 2 };
 const proKey = (ws: keyof typeof PRO_LAYOUTS) => `${LAYOUT_KEY}:pro:${ws}${PRO_VERSION[ws] ? `:v${PRO_VERSION[ws]}` : ''}`;
 
 export function loadProLayout(ws: keyof typeof PRO_LAYOUTS): IJsonModel {

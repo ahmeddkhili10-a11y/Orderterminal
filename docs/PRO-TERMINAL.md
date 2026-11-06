@@ -2,21 +2,26 @@
 
 Novus Ordo opens on a professional, Bloomberg-style terminal: dense, flat,
 square, every number on screen backed by live data. The classic swarm views
-(the crypto swarm's Command Center and the order-flow panels) are one click away (**◐ Classic** on
-the top bar; **▤ Pro terminal** brings this back).
+(the old order-flow layout) is in Settings.
 
 ## Layout
 
-- **Workspaces** across the top: **MARKETS** (F1), **STRATEGY LAB** (F2),
-  **CRYPTO SWARM** (F3), **QUANT DESK** (F4). Each keeps its own layout; drag,
+- **Two views**, side by side at the top left: **▤ Terminal** (Ctrl+1) — this
+  terminal — and **Crypto swarm** (Ctrl+2), a view of its own for running the
+  swarm and your accounts. They meet in one place: strategies deployed from the
+  Strategy Lab.
+- **Workspaces** across the top of the terminal: **MARKETS** (F1), **STRATEGY
+  LAB** (F2), **QUANT DESK** (F3). Each keeps its own layout; drag,
   split and close panels with **✎ Layout**.
 - **The command line** under them. Type a function code and press Enter; a
   coin first makes it the market: `ETH GP`, `SOL BOOK`, `HMAP`, `RSCH`.
   Suggestions appear as you type (↑/↓ to pick). **Ctrl+K** or **`** jumps to it.
 - **Function keys** for the workspace beside it, and a running **quote tape**
   of the most traded markets.
-- **The status line** at the bottom: the feed, the crypto swarm, the Lab, UTC
-  and local time.
+- **The status line** at the bottom: the feed, the Lab, UTC and local time.
+- **Swarm codes** (`SWRM`, `TKT`, `PORT`, `AMT`, `ALRT`, `TG`, `WALL`, `LUNO`,
+  `CALC`, `NOTE`, `DB`) switch to the crypto swarm view and open that tool
+  there; they never open inside the terminal.
 
 ## Functions
 
@@ -34,26 +39,26 @@ the top bar; **▤ Pro terminal** brings this back).
 | `DES` | Description / summary | | `PORT` | Portfolio |
 | `BOOK` | Order book | | `ALRT` | Alerts |
 | `DOM` | Depth ladder | | `LUNO` | Luno lane (rands) |
-| `DPTH` | Depth chart | | `VAR` | Value at risk (F4) |
-| `SWRM` | Swarm command (F3) | | `CAPM` | CAPM (F4) |
-| `SWCF` | Swarm rules (F3) | | `EF` | Efficient frontier (F4) |
-| | | | `KELLY` | Kelly criterion (F4) |
-| `TAS` | Time & sales | | `DHG` | Delta hedging (F4) |
+| `DPTH` | Depth chart | | `VAR` | Value at risk (F3) |
+| `SWRM` | Crypto swarm view | | `CAPM` | CAPM (F3) |
+| `SWCF` | Swarm rules (swarm view) | | `EF` | Efficient frontier (F3) |
+| | | | `KELLY` | Kelly criterion (F3) |
+| `TAS` | Time & sales | | `DHG` | Delta hedging (F3) |
 | `CVD` | Cumulative delta | | `WALL` | Wallet |
 | `FLOW` | Flow pulse | | `TG` | Telegram |
 | `BLCK` | Block trades | | `CALC` | Calculator |
 | `LIQ` | Liquidations | | `NOTE` | Journal |
 | `OI` | Open interest | | `DB` | Database |
 | `FUND` | Funding | | `HELP` | Every function |
-| `OMON` | Options | | `VTGT` | Volatility targeting (F4) |
-| `SPRD` | Venue spread | | `MOM` | Momentum (F4) |
-| `VP` | Volume profile | | `REGM` | Regimes (F4) |
+| `OMON` | Options | | `VTGT` | Volatility targeting (F3) |
+| `SPRD` | Venue spread | | `MOM` | Momentum (F3) |
+| `VP` | Volume profile | | `REGM` | Regimes (F3) |
 | `SCRN` | Screener | | | |
 | `WL` | Watchlist | | | |
 | `TOP` | Top news | | | |
 | `WEI` | World markets (Yahoo Finance) | | | |
 
-## The QUANT desk (F4)
+## The QUANT desk (F3)
 
 Quantitative-finance tools that open beside any instrument. Each follows the
 coin on the board, and the tables list a set of coins you choose.

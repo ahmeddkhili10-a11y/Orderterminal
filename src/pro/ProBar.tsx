@@ -2,34 +2,40 @@
 // its function keys and a running quote tape, and the status line.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtPct, fmtPrice } from '../core/format';
-import { useCSwarm } from '../cswarm/store';
 import { useLab, startLabLink } from '../lab/store';
 import { hub } from '../market/hub';
 import { useSettings } from '../store/settings';
 import { useHubVersion, useTicker } from '../ui/controls';
 import { isProTheme, PRO_THEME_IDS, THEMES, type ThemeId } from '../ui/theme';
 import { useBoardVenue, useTickers } from './data';
-import { FN_MAP, KEYS, parseCommand, suggest, WORKSPACES, type Workspace } from './functions';
+import { openDrawer } from '../command/drawer';
+import { FN_MAP, KEYS, parseCommand, suggest, WORKSPACES, type FnHome, type Workspace } from './functions';
 
 /** Open a function's panel in its workspace (App listens). */
-export function openFunction(panel: string, ws: Workspace) {
+export function openFunction(panel: string, ws: FnHome) {
+  // the crypto swarm's tools live in its own view, not in the terminal
+  if (ws === 'swarm') {
+    switchUi('swarm');
+    if (panel !== 'command') openDrawer(panel === 'cswarm' ? 'rules' : panel);
+    return;
+  }
   window.dispatchEvent(new CustomEvent('novus:open-panel', { detail: { panel, ws } }));
 }
 
 /** Switch between the professional terminal and the classic swarm views, keeping each look's theme. */
-export function switchUi(ui: 'pro' | 'classic') {
+export function switchUi(ui: 'pro' | 'classic' | 'swarm') {
   const s = useSettings.getState();
   if (ui === s.ui) return;
-  if (ui === 'classic') s.set({ ui, theme: isProTheme(s.theme) ? s.classicTheme : s.theme });
+  // the swarm view and the classic look wear the swarm themes; the terminal its own
+  if (ui !== 'pro') s.set({ ui, theme: isProTheme(s.theme) ? s.classicTheme : s.theme });
   else s.set({ ui, classicTheme: isProTheme(s.theme) ? s.classicTheme : s.theme, theme: isProTheme(s.theme) ? s.theme : 'pro-amber' });
 }
 
 export function WorkspaceTabs() {
   const ws = useSettings((s) => s.workspace);
   const set = useSettings((s) => s.set);
-  const cs = useCSwarm((s) => s.state);
   const lab = useLab((s) => s.status);
-  const dot = (id: Workspace) => (id === 'swarm' ? (cs?.running ? (cs.mode === 'live' ? ' live' : ' on') : '') : id === 'lab' ? (lab?.running ? ' on' : lab?.deployed.some((d) => d.on) ? ' on' : '') : ' on');
+  const dot = (id: Workspace) => (id === 'lab' ? (lab?.running ? ' on' : lab?.deployed.some((d) => d.on) ? ' on' : '') : ' on');
   return (
     <div className="pro-ws" role="tablist" aria-label="Workspaces">
       {WORKSPACES.map((w) => (
@@ -121,7 +127,7 @@ export function CommandBar() {
       did.push(`${p.fn.code} ${p.fn.name}`);
     } else if (p.workspace) {
       set({ workspace: p.workspace });
-      did.push(WORKSPACES.find((w) => w.id === p.workspace)!.name);
+      did.push(WORKSPACES.find((w) => w.id === p.workspace)?.name ?? '');
     }
     setHint(p.unknown.length ? `Unknown: ${p.unknown.join(' ')} — type HELP or a code like MON, GP, RSCH` : did.join(' · '));
     setText('');
@@ -170,7 +176,7 @@ export function CommandBar() {
                 <b className="mono">{f.code}</b>
                 <span>{f.name}</span>
                 <em>{f.desc}</em>
-                <small>{WORKSPACES.find((w) => w.id === f.ws)!.name}</small>
+                <small>{WORKSPACES.find((w) => w.id === f.ws)?.name ?? 'CRYPTO SWARM'}</small>
               </div>
             ))}
           </div>
@@ -199,7 +205,6 @@ export function StatusLine() {
   useHubVersion();
   const H = hub();
   const f = H.primary;
-  const cs = useCSwarm((s) => s.state);
   const lab = useLab((s) => s.status);
   const now = new Date();
   const dep = lab?.deployed.filter((d) => d.on).length ?? 0;
@@ -208,10 +213,6 @@ export function StatusLine() {
       <span>
         <span className={`status-dot status-${f.status.state}`} /> {f.adapter.name} {f.inst.symbol} {f.status.state.toUpperCase()}
         {f.status.latencyMs !== undefined ? ` ${f.status.latencyMs.toFixed(0)}ms` : ''} · {f.rate.toFixed(0)} msg/s
-      </span>
-      <span>
-        CRYPTO SWARM {cs ? (cs.running ? `${cs.mode.toUpperCase()} · RUNNING` : `${cs.mode.toUpperCase()} · STOPPED`) : '—'}
-        {cs && cs.equity !== null ? ` · $${cs.equity.toFixed(2)}` : ''}
       </span>
       <span>
         LAB {lab?.running ? `RESEARCHING ${lab.progress ? Math.round((lab.progress.done / Math.max(1, lab.progress.total)) * 100) : 0}%` : `${dep} DEPLOYED`}

@@ -7,7 +7,10 @@ describe('the command line', () => {
     expect(parseCommand('eth gp <GO>')).toMatchObject({ coin: 'ETH', fn: { code: 'GP' }, workspace: 'markets' });
     expect(parseCommand('RSCH')).toMatchObject({ coin: null, fn: { code: 'RSCH' }, workspace: 'lab' });
     expect(parseCommand('SOL')).toMatchObject({ coin: 'SOL', fn: null, workspace: null });
-    expect(parseCommand('F3').workspace).toBe('swarm');
+    expect(parseCommand('F3').workspace).toBe('quant');
+    // the crypto swarm is its own view, not a terminal workspace
+    expect(WORKSPACES.map((w) => w.id)).toEqual(['markets', 'lab', 'quant']);
+    expect(parseCommand('SWRM')).toMatchObject({ fn: { code: 'SWRM', ws: 'swarm' }, workspace: null });
     expect(parseCommand('lab').workspace).toBe('lab');
   });
   it('suggests codes first, then names', () => {
@@ -17,7 +20,9 @@ describe('the command line', () => {
   });
   it('every function opens a real panel, codes are unique, keys exist', () => {
     expect(new Set(FUNCTIONS.map((f) => f.code)).size).toBe(FUNCTIONS.length);
-    for (const f of FUNCTIONS) expect(PANEL_MAP[f.panel], f.code).toBeTruthy();
+    // every function opens a real panel (SWRM switches to the crypto swarm view itself)
+    for (const f of FUNCTIONS) if (f.panel !== 'command') expect(PANEL_MAP[f.panel], f.code).toBeTruthy();
+    expect(FUNCTIONS.filter((f) => f.ws === 'swarm').map((f) => f.code)).toEqual(expect.arrayContaining(['SWRM', 'TKT', 'PORT', 'AMT']));
     for (const w of WORKSPACES) for (const k of KEYS[w.id]) expect(FN_MAP[k], k).toBeTruthy();
   });
 });

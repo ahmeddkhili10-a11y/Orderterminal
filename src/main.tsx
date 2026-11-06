@@ -36,12 +36,13 @@ if (filter && FILTERS.some((f) => f.id === filter)) s.set({ filter: filter as Fi
 const view = params.get('view');
 // ?ui=pro|classic picks the look; the older ?view= links (and tests) mean the classic views
 const ui = params.get('ui') ?? (view ? 'classic' : null);
-if (ui === 'pro' || ui === 'classic') switchUi(ui);
+if (ui === 'pro' || ui === 'classic' || ui === 'swarm') switchUi(ui);
 const ws = params.get('ws');
-if (ws === 'markets' || ws === 'lab' || ws === 'swarm' || ws === 'quant') s.set({ workspace: ws });
+if (ws === 'markets' || ws === 'lab' || ws === 'quant') s.set({ workspace: ws });
 if (ws === 'meme') s.set({ workspace: 'quant' });
+if (ws === 'swarm') switchUi('swarm');
 // the crypto terminal (the retired meme command view opens the crypto terminal)
-if (view === 'command' || view === 'island') s.set({ view: 'terminal', cryptoView: 'command' });
+if (view === 'command' || view === 'island') switchUi('swarm');
 // view=terminal (as before) or panels: the classic order-flow panels
 else if (view === 'terminal' || view === 'panels') s.set({ view: 'terminal', cryptoView: 'panels' });
 

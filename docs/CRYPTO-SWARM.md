@@ -113,9 +113,14 @@ expect 20–60 minutes before their first proposals.
 
 ## The Command Center
 
-The crypto swarm has the Command Center — the black-and-chrome screen the meme
-swarm had, carried over: the classic look opens on it, and **SWRM** (F3) opens
-it in the professional terminal.
+The crypto swarm is a view of its own, apart from the terminal: **Crypto
+swarm** on the top bar (or Ctrl+2; Ctrl+1 goes back to the terminal). It is
+the Command Center — the black-and-chrome screen the meme swarm had, carried
+over — with everything that runs strategies on your accounts in its drawer:
+**⇢ Deploy strategies**, **Swarm · rules**, **Accounts**, **Order ticket**,
+**AMT bots**, **Alerts**, **Telegram**, **Wallet**, **Luno**, **Calculator**,
+**Journal** and **Database** (**☰ Accounts & tools** opens it). The terminal
+shows none of it; the only link is the strategies the Strategy Lab deploys.
 
 - **Top**: the swarm's talk scrolling past, **⇢ Deploy** and **Start / Stop**.
 - **Left**: the account and its P&L curve; the coin in focus (5-minute candles

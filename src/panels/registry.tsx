@@ -37,16 +37,7 @@ import { CandleForecastPanel, FCST_DEFAULTS, GarchPanel, GARCH_DEFAULTS } from '
 import { DeltaHedgePanel, DELTA_DEFAULTS, MomentumPanel, MOM_DEFAULTS, RegimePanel, REGM_DEFAULTS, VarPanel, VAR_DEFAULTS, VolTargetPanel, VTGT_DEFAULTS } from '../pro/QuantPanels';
 import { LunoLane } from './LunoLane';
 import { CapmPanel, CAPM_DEFAULTS, EF_DEFAULTS, FrontierPanel, KellyPanel, KELLY_DEFAULTS } from '../pro/PortfolioPanels';
-import { CommandCenter } from '../command/CommandCenter';
 
-/** the Command Center as a panel (the professional terminal's F3) */
-function SwarmCommandPanel() {
-  return (
-    <div className="cc-panel">
-      <CommandCenter />
-    </div>
-  );
-}
 import { BUILDER_DEFAULTS, LabBuilder, LabDeployed, LabLibrary, LabResearch, LIB_DEFAULTS, RESEARCH_PANEL_DEFAULTS } from '../pro/LabPanels';
 import { ProHelp } from '../pro/HelpPanel';
 
@@ -77,7 +68,7 @@ export const PANELS: PanelDef[] = [
   { id: 'qregm', title: 'REGM · Regimes', category: 'Quant', component: RegimePanel, defaults: { ...REGM_DEFAULTS }, description: 'Trending, mean-reverting or random (Hurst, variance ratio, Ornstein–Uhlenbeck half-life), and calm or turbulent (a two-state hidden Markov model), coin by coin.' },
   { id: 'qcapm', title: 'CAPM · Capital asset pricing', category: 'Quant', component: CapmPanel, defaults: { ...CAPM_DEFAULTS }, description: 'Each coin against the market (bitcoin or an equal-weight index): beta, Jensen’s alpha and its t, R², the return CAPM expects, Treynor and information ratios, and the security market line.' },
   { id: 'qef', title: 'EF · Efficient frontier', category: 'Quant', component: FrontierPanel, defaults: { ...EF_DEFAULTS }, description: 'The long-only Markowitz frontier of the coins: minimum-variance and maximum-Sharpe portfolios, the capital market line, equal weight and the Kelly portfolio, with their weights.' },
-  { id: 'qkelly', title: 'KELLY · Kelly criterion', category: 'Quant', component: KellyPanel, defaults: { ...KELLY_DEFAULTS }, description: 'Growth-optimal leverage coin by coin and its growth curve, the growth-optimal portfolio, and Kelly on the crypto swarm’s own trade record.' },
+  { id: 'qkelly', title: 'KELLY · Kelly criterion', category: 'Quant', component: KellyPanel, defaults: { ...KELLY_DEFAULTS }, description: 'Growth-optimal leverage coin by coin and its growth curve, the growth-optimal portfolio, and a strategy’s Kelly bet from its win rate and payoff.' },
   { id: 'luno', title: 'LUNO · Luno lane', category: 'Account', component: LunoLane, defaults: {}, description: 'Optional: crypto against rands on Luno — daily trend bots beside the swarm.' },
   { id: 'lablib', title: 'LIB · Strategy Library', category: 'Strategy Lab', component: LabLibrary, defaults: { ...LIB_DEFAULTS }, description: 'Every rule and filter in the Strategy Lab with the papers behind it and why it should work.' },
   { id: 'labresearch', title: 'RSCH · Research', category: 'Strategy Lab', component: LabResearch, defaults: { ...RESEARCH_PANEL_DEFAULTS }, description: 'Search published rules and their combinations on years of history; rank the top five with out-of-sample tests, Monte Carlo and a deflated Sharpe ratio; deploy them.' },
@@ -110,7 +101,6 @@ export const PANELS: PanelDef[] = [
   { id: 'accounts', title: 'Exchange Accounts', category: 'Account', component: AccountsPanel, defaults: { ...ACCOUNTS_DEFAULTS }, description: 'Balances, positions, open orders and fills from any CCXT exchange using keys in your vault.' },
   { id: 'wallet', title: 'Phantom Wallet', category: 'Account', component: WalletPanel, defaults: { ...WALLET_DEFAULTS }, description: 'Connect Phantom (signed proof of ownership) or watch any Solana address: SOL, tokens and USD value.' },
   { id: 'database', title: 'Database', category: 'Account', component: DatabasePanel, defaults: { ...DATABASE_DEFAULTS }, description: 'Local SQLite: recorded trades per instrument, retention, CSV export, key and wallet counts.' },
-  { id: 'swarmcmd', title: 'SWRM · Swarm command', category: 'Algo', component: SwarmCommandPanel, defaults: {}, description: 'The crypto swarm at a glance: the swarm core, its gauges, the account, the execution tape and the live feed — and the deploy gate where Strategy Lab strategies plug in (they propose; the council, the forest and the risk manager decide).' },
   { id: 'cswarm', title: 'Crypto Swarm', category: 'Algo', component: CryptoSwarm, defaults: { ...CRYPTO_SWARM_DEFAULTS }, description: 'A team of agents trading crypto perpetuals on Hyperliquid: Scalper, Auctioneer and Trend propose; Tape, Crowd, Guardian, Forest and Risk vote. Compounding risk, its own account, paper or live, every trade on Telegram with its chart.' },
   { id: 'amt', title: 'AMT Bots', category: 'Algo', component: AmtScalper, defaults: { ...AMT_DEFAULTS }, description: 'Auction Market Theory bots for any symbol — Scalp (rolling value, order flow, minutes) or Intraday (initial balance, prior-day value, holds for hours). Paper or live, on/off switch, backtest on recorded trades.' },
   { id: 'telegram', title: 'Telegram Bot', category: 'Tools', component: TelegramPanel, defaults: { ...TELEGRAM_DEFAULTS }, description: 'Send alerts to Telegram and answer /price and /status from your chat.' },

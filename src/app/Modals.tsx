@@ -389,13 +389,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <span>Screen</span>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className={`chip${s.ui === 'pro' ? ' active' : ''}`} onClick={() => (switchUi('pro'), onClose())}>
-            Professional terminal
+            Terminal
           </button>
-          <button className={`chip${s.ui !== 'pro' ? ' active' : ''}`} onClick={() => (switchUi('classic'), s.set({ view: 'terminal' }), onClose())}>
+          <button className={`chip${s.ui === 'swarm' ? ' active' : ''}`} onClick={() => (switchUi('swarm'), onClose())}>
+            Crypto swarm
+          </button>
+          <button className={`chip${s.ui === 'classic' ? ' active' : ''}`} onClick={() => (switchUi('classic'), s.set({ view: 'terminal', cryptoView: 'panels' }), onClose())}>
             Classic order-flow terminal
           </button>
           <span className="muted" style={{ fontSize: 11 }}>
-            The professional terminal has the workspaces (F1–F4), the Strategy Lab and the QUANT desk; the classic one has the crypto swarm's Command Center, the order-flow charts and the AMT bots.
+            The terminal (Ctrl+1) has Markets, the Strategy Lab and the Quant desk (F1–F3); the crypto swarm (Ctrl+2) is its own view, where strategies are deployed and your accounts trade; the classic look keeps the old order-flow layout.
           </span>
         </div>
       </div>

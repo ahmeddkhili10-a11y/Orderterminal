@@ -20,11 +20,11 @@ import { useBoot } from '../app/boot';
 import { useCSwarm } from '../cswarm/store';
 import { desktop, type CSwarmPosition, type CSwarmState } from '../desktop/bridge';
 import { startLabLink, useLab } from '../lab/store';
-import { CryptoSwarm, CRYPTO_SWARM_DEFAULTS, type CryptoSwarmConfig } from '../panels/CryptoSwarm';
-import { LunoLane } from '../panels/LunoLane';
+import { PANEL_MAP } from '../panels/registry';
+import { takePendingDrawer } from './drawer';
 import { useSettings } from '../store/settings';
 import { Canvas, font, type PointerState } from '../ui/canvas';
-import { useTicker } from '../ui/controls';
+import { useTicker, type PanelProps } from '../ui/controls';
 import { FILTERS, isProTheme, rgba, THEME_IDS, THEMES, themeOf, type Palette } from '../ui/theme';
 import { coreMemory, drawCore, type CoreInput } from './core';
 import { Core3D, webglAvailable } from './core3d';
@@ -393,31 +393,40 @@ export function DeployGate() {
   );
 }
 
-export type DrawerTab = 'deploy' | 'rules' | 'luno';
-const DRAWER_TABS: { id: DrawerTab; label: string }[] = [
+/** the swarm view's tools: the deploy gate, the swarm's rules and everything that trades your accounts */
+const DRAWER_TABS: { id: string; label: string; panel?: string }[] = [
   { id: 'deploy', label: '⇢ Deploy strategies' },
-  { id: 'rules', label: 'Swarm · rules · account' },
-  { id: 'luno', label: 'R Luno' },
+  { id: 'rules', label: 'Swarm · rules', panel: 'cswarm' },
+  { id: 'accounts', label: 'Accounts', panel: 'accounts' },
+  { id: 'ticket', label: 'Order ticket', panel: 'ticket' },
+  { id: 'amt', label: 'AMT bots', panel: 'amt' },
+  { id: 'alerts', label: 'Alerts', panel: 'alerts' },
+  { id: 'telegram', label: 'Telegram', panel: 'telegram' },
+  { id: 'wallet', label: 'Wallet', panel: 'wallet' },
+  { id: 'luno', label: 'Luno', panel: 'luno' },
+  { id: 'calculator', label: 'Calculator', panel: 'calculator' },
+  { id: 'journal', label: 'Journal', panel: 'journal' },
+  { id: 'database', label: 'Database', panel: 'database' },
 ];
+const tabOf = (t: string) => DRAWER_TABS.find((x) => x.id === t || x.panel === t)?.id ?? 'deploy';
 
-/** Open a Command Center drawer from anywhere. */
-export function openDrawer(tab: DrawerTab) {
-  window.dispatchEvent(new CustomEvent('novus:drawer', { detail: tab }));
-}
-
-function Drawer({ tab, onTab, onClose }: { tab: DrawerTab; onTab: (t: DrawerTab) => void; onClose: () => void }) {
-  const [cfg, setCfg] = useState<CryptoSwarmConfig>({ ...CRYPTO_SWARM_DEFAULTS });
+function Drawer({ tab, onTab, onClose }: { tab: string; onTab: (t: string) => void; onClose: () => void }) {
+  // each tool keeps its settings while the drawer is open
+  const [cfgs, setCfgs] = useState<Record<string, Record<string, unknown>>>({});
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
   }, [onClose]);
+  const t = DRAWER_TABS.find((x) => x.id === tab) ?? DRAWER_TABS[0];
+  const def = t.panel ? PANEL_MAP[t.panel] : null;
+  const Comp = def?.component as ((p: PanelProps<Record<string, unknown>>) => React.ReactElement) | undefined;
   return (
     <aside className="cc-drawer" aria-label="Drawer">
       <header className="cc-drawer-head">
-        {DRAWER_TABS.map((t) => (
-          <button key={t.id} className={`chip${tab === t.id ? ' active' : ''}`} onClick={() => onTab(t.id)}>
-            {t.label}
+        {DRAWER_TABS.map((x) => (
+          <button key={x.id} className={`chip${tab === x.id ? ' active' : ''}`} onClick={() => onTab(x.id)}>
+            {x.label}
           </button>
         ))}
         <span style={{ flex: 1 }} />
@@ -426,9 +435,8 @@ function Drawer({ tab, onTab, onClose }: { tab: DrawerTab; onTab: (t: DrawerTab)
         </button>
       </header>
       <div className="cc-drawer-body padded">
-        {tab === 'deploy' && <DeployGate />}
-        {tab === 'rules' && <CryptoSwarm config={cfg} setConfig={(p) => setCfg((c) => ({ ...c, ...p }))} nodeId="cc-cswarm" />}
-        {tab === 'luno' && <LunoLane />}
+        {t.id === 'deploy' && <DeployGate />}
+        {def && Comp && <Comp key={t.id} config={{ ...(def.defaults as Record<string, unknown>), ...(cfgs[t.id] ?? {}) }} setConfig={(p) => setCfgs((c) => ({ ...c, [t.id]: { ...(c[t.id] ?? {}), ...p } }))} nodeId={`cc-${t.id}`} />}
       </div>
     </aside>
   );
@@ -500,10 +508,16 @@ export function CommandCenter() {
   const n = useMemo(() => numbers(st), [st]);
   const live = st?.mode === 'live';
   const [busy, setBusy] = useState(false);
-  const [drawer, setDrawer] = useState<DrawerTab | null>(null);
+  const [drawer, setDrawer] = useState<string | null>(() => {
+    const p = takePendingDrawer();
+    return p ? tabOf(p) : null;
+  });
   const [pick, setPick] = useState<string | null>(null);
   useEffect(() => {
-    const open = (e: Event) => setDrawer((e as CustomEvent<DrawerTab>).detail);
+    const open = (e: Event) => {
+      takePendingDrawer();
+      setDrawer(tabOf((e as CustomEvent<string>).detail));
+    };
     window.addEventListener('novus:drawer', open);
     return () => window.removeEventListener('novus:drawer', open);
   }, []);
@@ -637,6 +651,9 @@ export function CommandCenter() {
         <button className="chip cc-deploy-open" onClick={() => setDrawer('deploy')} title="Deploy Strategy Lab strategies into the swarm">
           ⇢ Deploy
         </button>
+        <button className="chip cc-tools-open" onClick={() => setDrawer('accounts')} title="Accounts, order ticket, AMT bots, alerts, Telegram, wallet, Luno, calculator, journal, database">
+          ☰ Accounts &amp; tools
+        </button>
         <button className={`chip cc-power ${st.running ? 'on' : ''}`} disabled={busy} onClick={() => run(() => (st.running ? desktop!.cswarm.stop(false) : desktop!.cswarm.start()))}>
           {st.running ? '■ Stop swarm' : '▶ Start swarm'}
         </button>
@@ -688,7 +705,7 @@ export function CommandCenter() {
 
         <Card n="03" title="Feeds · markets">
           {coins.map((c) => (
-            <div key={c.coin} className="cc-feed cs" title={c.feedError ?? c.feed} onClick={() => setPick(c.coin)}>
+            <div key={c.coin} className="cc-feed cc-mkt" title={c.feedError ?? c.feed} onClick={() => setPick(c.coin)}>
               <span className={`status-dot status-${c.feed === 'open' ? 'open' : c.feedError ? 'error' : 'connecting'}`} />
               <span className="cc-feed-name">{c.coin}</span>
               <span className={`mono ${c.daily ? (c.daily.dir > 0 ? 'up' : 'down') : 'muted'}`}>{c.daily ? (c.daily.dir > 0 ? '▲' : '▼') : '·'}</span>

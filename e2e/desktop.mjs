@@ -66,7 +66,9 @@ try {
 
   step('opens on the professional terminal: workspaces, command line, Strategy Lab, screens');
   await page.waitForSelector('.pro-cmdbar', { timeout: 15_000 });
-  expect((await page.locator('.pro-ws-tab').count()) === 4, 'four workspaces: markets, strategy lab, crypto swarm, quant desk');
+  expect((await page.locator('.pro-ws-tab').count()) === 3, 'three terminal workspaces: markets, strategy lab, quant desk');
+  expect((await page.locator('.pro-ws-tab:has-text("SWARM")').count()) === 0, 'no crypto swarm inside the terminal');
+  expect((await page.locator('.view-switch .view-tab').count()) === 2, 'two views on the top bar: Terminal and Crypto swarm');
   expect((await page.locator('.pro-ws-tab:has-text("MEME")').count()) === 0, 'the meme desk is gone');
   expect((await page.locator('.pro-key').count()) >= 8, 'function keys for the workspace');
   await page.waitForSelector('.flexlayout__tab_button:has-text("MON · Monitor")', { timeout: 15_000 });
@@ -97,13 +99,13 @@ try {
   expect(scr2.windows.some((w) => w.kind === 'panel' && w.id === popId && w.displayId === scr.displays[0].id), 'the popped-out window is sent to a screen');
   await pop.screenshot({ path: `${OUT}desktop-pro-popout.png` }).catch(() => undefined);
   await page.evaluate((id) => window.novus.screens.close(id), popId);
-  // F4: the QUANT desk — momentum, regimes, value at risk, delta hedging, volatility targeting
+  // F3: the QUANT desk — momentum, regimes, value at risk, delta hedging, volatility targeting
   await page.keyboard.press('Escape');
   await page.mouse.click(5, 300);
-  await page.keyboard.press('F4');
+  await page.keyboard.press('F3');
   await page.waitForSelector('.pro-ws-tab.active:has-text("QUANT DESK")', { timeout: 10_000 });
   for (const t of ['MOM · Momentum', 'VAR · Value at risk', 'DHG · Delta hedging']) await page.waitForSelector(`.flexlayout__tab_button:has-text("${t}")`, { timeout: 10_000 });
-  expect(true, 'F4 opens the QUANT desk with momentum, value at risk and delta hedging');
+  expect(true, 'F3 opens the QUANT desk with momentum, value at risk and delta hedging');
   await page.click('.pro-cmd-input');
   await page.keyboard.type('REGM');
   await page.keyboard.press('Enter');
@@ -114,10 +116,10 @@ try {
   await page.selectOption('.pro-theme-select', 'pro-eikon');
   expect((await page.evaluate(() => document.documentElement.dataset.theme)) === 'pro-eikon', 'professional themes switch');
   await page.selectOption('.pro-theme-select', 'pro-amber');
-  // the rest of this test drives the classic swarm views
-  await page.click('.ui-toggle');
+  // the crypto swarm is its own view: one click on the top bar
+  await page.click('.vs-swarm');
 
-  step('the classic look opens on the crypto terminal (the meme swarm is retired)');
+  step('the crypto swarm is its own view, apart from the terminal');
   // the crypto terminal opens on the swarm's Command Center: the core, the gauges, the deploy gate
   await page.waitForSelector('.cc > .cc-top', { timeout: 15_000 });
   const ccText = await page.locator('.cc').innerText();
@@ -134,23 +136,27 @@ try {
   await page.screenshot({ path: `${OUT}desktop-command.png` });
   await page.click('.cc-power');
   await page.waitForSelector('.cc-power:not(.on)', { timeout: 20_000 });
-  // the classic panels are one click away
-  await page.click('.island-toggle');
+  expect((await page.locator('.pro-cmdbar').count()) === 0 && (await page.locator('.pro-ws-tab').count()) === 0, 'no terminal on the swarm view: no command line, no workspaces');
+  // Ctrl+1 the terminal, Ctrl+2 the swarm; a swarm code typed in the terminal opens it in the swarm view
+  await page.keyboard.press('Control+1');
+  await page.waitForSelector('.pro-cmdbar', { timeout: 10_000 });
+  expect((await page.locator('.cc > .cc-top').count()) === 0, 'Ctrl+1 is the terminal, without the swarm');
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('TKT');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.cc-drawer .chip.active:has-text("Order ticket")', { timeout: 10_000 });
+  expect(true, 'TKT on the terminal command line opens the order ticket in the swarm view');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+1');
+  await page.waitForSelector('.pro-cmdbar', { timeout: 10_000 });
+  await page.keyboard.press('Control+2');
+  await page.waitForSelector('.cc > .cc-top', { timeout: 10_000 });
+  expect(true, 'Ctrl+2 back to the crypto swarm');
+  // the classic order-flow look, from Settings, for the checks below
+  await page.click('button[title="Settings"]');
+  await page.click('.modal .chip:has-text("Classic order-flow terminal")');
   await page.waitForSelector('.flexlayout__layout', { state: 'visible' });
-  expect(true, 'Panels switches the classic look to the order-flow layout');
-  // the crypto swarm: its tab puts its panel in the layout; it starts on paper and stops
-  await page.click('.cc-orderflow-btn');
-  await page.waitForSelector('.cs', { timeout: 15_000 });
-  expect((await page.locator('.view-tab').count()) === 1, 'one terminal tab: the crypto swarm');
-  await page.click('.cs button:has-text("Start crypto swarm")');
-  await page.waitForSelector('.cs-live-dot', { timeout: 20_000 });
-  await page.waitForTimeout(2500);
-  const csText = await page.locator('.cs').innerText();
-  expect(/Paper account/.test(csText) && /\$30\.00/.test(csText) && /Scalper/.test(csText) && /Auctioneer/.test(csText) && /Trend/.test(csText), 'the crypto swarm runs on paper with its agents and $30 account');
-  await page.screenshot({ path: `${OUT}desktop-cswarm.png` });
-  await page.click('.cs button:text-is("Stop")');
-  await page.waitForSelector('.cs button:has-text("Start crypto swarm")', { timeout: 15_000 });
-  expect(true, 'the crypto swarm stops');
+  expect(true, 'Settings opens the classic order-flow layout');
 
   step('window fills the screen');
   const win = await app.evaluate(({ BrowserWindow, screen }) => {
