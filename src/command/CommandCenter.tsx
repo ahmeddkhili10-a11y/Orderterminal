@@ -453,17 +453,21 @@ interface Fill {
 function numbers(st: CSwarmState | null) {
   const open = st?.open ?? [];
   const closed = st?.closed ?? [];
-  const realised = closed.reduce((a, p) => a + (p.pnl ?? 0), 0);
+  // the state carries the last 40 closed trades; the totals are all-time
+  const recentPnl = closed.reduce((a, p) => a + (p.pnl ?? 0), 0);
+  const realised = st ? st.totals.pnl : recentPnl;
   const unreal = open.reduce((a, p) => a + (p.upnl ?? 0), 0);
   const eqStart = st?.book.start ?? st?.cfg.paperStartUsd ?? 0;
   const curve: { t: number; v: number }[] = [];
-  let acc = 0;
+  // start the recent curve from what was banked before those trades, so it ends at the true total
+  let acc = realised - recentPnl;
   for (const p of [...closed].sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0))) {
     acc += p.pnl ?? 0;
     curve.push({ t: p.closedAt ?? p.openedAt, v: acc });
   }
   if (curve.length) curve.push({ t: Date.now(), v: acc + unreal });
-  const wins = closed.filter((p) => (p.pnl ?? 0) > 0).length;
+  const trades = st?.totals.trades ?? closed.length;
+  const wins = st ? st.totals.wins : closed.filter((p) => (p.pnl ?? 0) > 0).length;
   const bestR = closed.reduce((m, p) => Math.max(m, p.r ?? -Infinity), -Infinity);
   const fills: Fill[] = [];
   for (const p of [...open, ...closed]) {
@@ -476,7 +480,7 @@ function numbers(st: CSwarmState | null) {
   const lostToday = st && st.equity !== null && dayStart > 0 ? Math.max(0, dayStart - st.equity) : 0;
   const lossCap = st ? (dayStart * st.cfg.risk.dailyLossPct) / 100 : 0;
   const atRisk = open.reduce((a, p) => a + p.riskUsd, 0);
-  return { open, closed, realised, unreal, total: realised + unreal, eqStart, curve, winRate: closed.length ? wins / closed.length : null, bestR: Number.isFinite(bestR) ? bestR : null, fills: fills.slice(0, 40), lostToday, lossCap, atRisk };
+  return { open, closed, realised, unreal, total: realised + unreal, eqStart, curve, winRate: trades ? wins / trades : null, bestR: Number.isFinite(bestR) ? bestR : null, fills: fills.slice(0, 40), lostToday, lossCap, atRisk };
 }
 
 const rOf = (p: CSwarmPosition) => (p.riskUsd > 0 && p.upnl !== undefined ? p.upnl / p.riskUsd : NaN);

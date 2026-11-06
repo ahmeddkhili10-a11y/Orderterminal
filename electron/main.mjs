@@ -122,7 +122,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // the meme swarm trades from this window: keep its timers at full speed when minimised or covered
+      // the crypto swarm's Telegram cards and alerts are drawn and sent from this window: keep its timers at full speed when minimised or covered
       backgroundThrottling: false,
     },
   });

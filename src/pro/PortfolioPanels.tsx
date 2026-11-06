@@ -409,7 +409,7 @@ export function KellyPanel({ config: c, setConfig }: PanelProps<KellyConfig>) {
                   <div className="pro-section">KELLY ON THE CRYPTO SWARM'S OWN TRADES</div>
                   {rs.length >= 5 ? (
                     <div className="lab-kv mono">
-                      <span>{rs.length} trades</span>
+                      <span>last {rs.length} trades</span>
                       <span>win rate {pct(pW, 0)}</span>
                       <span>avg win {num(avgW)}R · avg loss {num(avgL)}R</span>
                       <span className={swarmKelly > 0 ? 'up' : 'down'}>Kelly risk a trade {pct(swarmKelly, 1)}</span>
