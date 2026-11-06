@@ -5801,6 +5801,146 @@ table.grid.meme-tape td {
   font-size: 11px;
   padding: 2px 0;
 }
+/* GV: GARCH forecast volatility as a heat calendar */
+.gv-cal {
+  display: grid;
+  gap: 2px;
+  padding: 4px 8px 2px;
+  align-items: center;
+}
+.gv-hh {
+  font: 9px var(--mono, monospace);
+  color: var(--muted);
+  text-align: left;
+  white-space: nowrap;
+  overflow: visible;
+  height: 12px;
+}
+.gv-coin {
+  all: unset;
+  cursor: pointer;
+  font: 600 11px var(--mono, monospace);
+  color: var(--muted);
+  padding: 0 4px;
+  height: 16px;
+  line-height: 16px;
+}
+.gv-coin:hover,
+.gv-coin.on {
+  color: var(--pro-head, var(--warn));
+}
+.gv-cell {
+  display: inline-block;
+  height: 16px;
+  min-width: 9px;
+  background: #050505;
+}
+.gv-legend .gv-cell {
+  width: 12px;
+  height: 10px;
+  min-width: 0;
+  vertical-align: middle;
+  margin: 0 2px 0 8px;
+}
+.gv-cell.h-0 {
+  background: #1239a6;
+}
+.gv-cell.h-1 {
+  background: #4f8ff0;
+}
+.gv-cell.h-2 {
+  background: #5f6f86;
+}
+.gv-cell.h-3 {
+  background: #ff8a1f;
+}
+.gv-cell.h-4 {
+  background: #e3262f;
+}
+.gv-cell.h-5 {
+  background: #ffe23a;
+}
+.gv-cell.h-none {
+  background: #000;
+}
+.gv-legend {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 2px 8px 8px;
+}
+.pro-table tr.sel td {
+  background: color-mix(in srgb, var(--pro-head, var(--warn)) 12%, transparent);
+}
+/* FCST: next-candle forecast */
+.fc-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 10px;
+  padding: 4px 8px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .fc-head {
+    grid-template-columns: 1fr;
+  }
+}
+.fc-numbers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fc-odds {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fc-odds small {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.fc-odds b {
+  font-size: 28px;
+  line-height: 1.1;
+}
+.fc-odds.up b {
+  color: var(--buy);
+}
+.fc-odds.down b {
+  color: var(--sell);
+}
+.fc-candle line {
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.fc-candle.up line,
+.fc-candle.up rect {
+  stroke: var(--buy);
+  fill: var(--buy);
+}
+.fc-candle.down line,
+.fc-candle.down rect {
+  stroke: var(--sell);
+  fill: var(--sell);
+}
+.fc-candle.ghost rect {
+  fill-opacity: 0.18;
+  stroke-dasharray: 3 2;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.fc-candle.ghost line {
+  stroke-dasharray: 3 2;
+}
+.fc-band {
+  fill: color-mix(in srgb, var(--pro-head, var(--warn)) 10%, transparent);
+  stroke: var(--pro-head, var(--warn));
+  stroke-opacity: 0.5;
+  stroke-dasharray: 2 3;
+  vector-effect: non-scaling-stroke;
+}
 .pro-bars {
   padding: 2px 8px;
 }
@@ -5931,6 +6071,18 @@ table.grid.meme-tape td {
 }
 .lab-summary .btn {
   margin-left: auto;
+}
+.lab-summary .lab-tabs {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.lab-summary .lab-tabs .btn {
+  margin-left: 0;
+}
+.lab-tabs .btn.on {
+  color: var(--pro-head, var(--warn));
+  border-color: var(--pro-head, var(--warn));
 }
 .lab-verdict {
   display: inline-block;

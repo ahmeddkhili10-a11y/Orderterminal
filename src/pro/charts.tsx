@@ -1,6 +1,23 @@
 // Small, crisp SVG charts for the professional terminal: line charts with a
 // second series and a marker, a Monte Carlo fan, horizontal bars.
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+
+/** the chart's width in pixels, so wide panels get a wider drawing rather than a taller one */
+export function useChartWidth(fallback = 600) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => {
+      const x = Math.round(e.contentRect.width);
+      if (x > 50) setW(x);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w] as const;
+}
 
 const path = (pts: [number, number][]) => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
 
@@ -83,6 +100,58 @@ export function Bars({ rows, max, format = (v) => v.toFixed(2) }: { rows: { labe
           <span className="pro-bar-val mono">{format(r.value)}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** an area chart in the terminal's style: orange at the top fading to blue, an optional dashed forecast continuation and a level line */
+export function AreaChart({ values, forecast = [], level, height = 170, format = (v) => v.toFixed(2) }: { values: number[]; forecast?: number[]; level?: number; height?: number; format?: (v: number) => string }) {
+  const [ref, W] = useChartWidth();
+  const H = height;
+  const all = [...values, ...forecast, ...(level !== undefined ? [level] : [])].filter(Number.isFinite);
+  if (values.length < 2 || !all.length) return <div className="pro-empty">No data</div>;
+  const lo = 0;
+  const hi = Math.max(...all) * 1.08;
+  const n = values.length + forecast.length;
+  const x = (i: number) => (i / Math.max(1, n - 1)) * (W - 52);
+  const y = (v: number) => H - 12 - ((v - lo) / (hi - lo || 1)) * (H - 20);
+  const line = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  const area = `${line}L${x(values.length - 1).toFixed(1)},${H - 12}L0,${H - 12}Z`;
+  const fc = forecast.length ? [values[values.length - 1], ...forecast].map((v, k) => `${k ? 'L' : 'M'}${x(values.length - 1 + k).toFixed(1)},${y(v).toFixed(1)}`).join('') : '';
+  const id = `ag${Math.round(Math.random() * 1e9)}`;
+  const nearLevel = (v: number) => level !== undefined && Number.isFinite(level) && Math.abs(y(v) - y(level)) < 11;
+  return (
+    <div className="pro-chart" ref={ref}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" style={{ height: H }}>
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ff7a1a" stopOpacity="0.95" />
+            <stop offset="55%" stopColor="#c0508a" stopOpacity="0.55" />
+            <stop offset="100%" stopColor="#1e6bff" stopOpacity="0.35" />
+          </linearGradient>
+        </defs>
+        {[0.25, 0.5, 0.75].map((f) => (
+          <g key={f}>
+            <line x1={0} x2={W - 52} y1={y(hi * f)} y2={y(hi * f)} className="pro-grid" />
+            {!nearLevel(hi * f) && (
+              <text x={W - 48} y={y(hi * f) + 3} className="pro-tick">
+                {format(hi * f)}
+              </text>
+            )}
+          </g>
+        ))}
+        <path d={area} fill={`url(#${id})`} />
+        <path d={line} fill="none" stroke="#ff9a3a" strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+        {fc && <path d={fc} fill="none" stroke="var(--pro-head, #ffd200)" strokeWidth={1.6} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
+        {level !== undefined && Number.isFinite(level) && (
+          <>
+            <line x1={0} x2={W - 52} y1={y(level)} y2={y(level)} className="pro-split" />
+            <text x={W - 48} y={y(level) + 3} className="pro-tick">
+              {format(level)}
+            </text>
+          </>
+        )}
+      </svg>
     </div>
   );
 }

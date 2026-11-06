@@ -305,9 +305,14 @@ export const simulator: VenueAdapter = {
     const rnd = mulberry32(Math.floor(first / iv) ^ symbol.length);
     let p = m.history[0]?.price ?? m.price;
     const pre: Kline[] = [];
+    // volatility clusters as in real markets (a GARCH(1,1)-like variance with mean 1)
+    let h = 1;
+    let z = 0;
     for (let t = Math.floor(histStart / iv) * iv - iv; t >= first; t -= iv) {
+      h = 0.06 + 0.1 * z * z + 0.84 * h;
+      z = Math.sqrt(-2 * Math.log(Math.max(1e-12, rnd()))) * Math.cos(2 * Math.PI * rnd());
       const close = p;
-      const open = close * (1 + (rnd() - 0.5) * 0.004 * Math.sqrt(iv / 60_000));
+      const open = close * (1 + z * Math.sqrt(h) * 0.00115 * Math.sqrt(iv / 60_000));
       const high = Math.max(open, close) * (1 + rnd() * 0.0015 * Math.sqrt(iv / 60_000));
       const low = Math.min(open, close) * (1 - rnd() * 0.0015 * Math.sqrt(iv / 60_000));
       pre.push({ time: t, open, high, low, close, volume: (2e6 + rnd() * 6e6) * (iv / 60_000) / close });

@@ -29,6 +29,8 @@ the top bar; **▤ Pro terminal** brings this back).
 | `LHM` | Liquidity heat map | | `SWRM` | Crypto swarm |
 | `CORR` | Correlation matrix, beta | | `AMT` | AMT bots |
 | `HVOL` | Volatility monitor | | `TKT` | Order ticket |
+| `GV` | GARCH volatility: heat calendar of the hours ahead, model, VaR | | | |
+| `FCST` | Candle forecast: next high, low, P(up), track record | | | |
 | `DES` | Description / summary | | `PORT` | Portfolio |
 | `BOOK` | Order book | | `ALRT` | Alerts |
 | `DOM` | Depth ladder | | `MEME` | Meme swarm |

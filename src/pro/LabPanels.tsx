@@ -10,7 +10,7 @@ import { desktop } from '../desktop/bridge';
 import type { StrategySpec } from '../lab/backtest';
 import { EXIT_DEFAULT, FILTER_MAP, FILTERS, SIGNAL_MAP, SIGNALS, type ExitSpec } from '../lab/library';
 import { PAPERS, type Paper } from '../lab/papers';
-import { nameOf, rulesOf, type Ranked } from '../lab/research';
+import { nameOf, rulesOf, type ForecastReport, type Ranked } from '../lab/research';
 import { startLabLink, useLab, type LabConfig, type LabTest } from '../lab/store';
 import { Check, NumberInput, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { Bars, Fan, LineChart } from './charts';
@@ -229,6 +229,15 @@ function Detail({ r, tfH, onDeploy }: { r: Ranked; tfH: number; onDeploy: (targe
               <span>DD p95 {pct(r.mc.dd95)}</span>
             </div>
           )}
+          <div className="pro-section">GARCH WORLDS — SAME VOLATILITY, NO EDGE</div>
+          {r.garchNull ? (
+            <div className="lab-line">
+              In {r.garchNull.sims} simulated continuations of each coin (its own GARCH model driven by its own shocks: volatility clusters and fat tails, but no edge), the strategy's median Sharpe was {num(r.garchNull.median)} against {num(r.oos.sharpe)} on the real data —{' '}
+              <span className={r.garchNull.p <= 0.1 ? 'up' : 'down'}>p = {num(r.garchNull.p)}</span>. {r.garchNull.p <= 0.1 ? 'Volatility alone does not explain it.' : 'Volatility clustering alone could produce a result like this.'}
+            </div>
+          ) : (
+            <div className="lab-line muted">Run only for the leading eight strategies.</div>
+          )}
         </div>
       </div>
       <div className="lab-grid2">
@@ -296,10 +305,142 @@ function Detail({ r, tfH, onDeploy }: { r: Ranked; tfH: number; onDeploy: (targe
   );
 }
 
+const HEAT = (x: number) => (x < 0.75 ? 'h-0' : x < 0.95 ? 'h-1' : x < 1.15 ? 'h-2' : x < 1.4 ? 'h-3' : x < 1.8 ? 'h-4' : 'h-5');
+
+/** each coin's GARCH model and candle forecasts: fitted in sample, scored on the years they never saw */
+function Forecasting({ reports, tfH }: { reports: ForecastReport[]; tfH: number }) {
+  if (!reports.length) return <div className="pro-empty">This research ran before forecasting was added: run it again.</div>;
+  return (
+    <>
+      <div className="lab-line muted">
+        Volatility is forecastable, direction mostly is not. GARCH (Bollerslev 1986; GJR 1993 for the extra response to falls) is fitted on the in-sample years and scored on the out-of-sample ones against an exponentially weighted average and a rolling one (QLIKE loss, Patton 2011). The candle model forecasts the next candle's high, low and direction from its shape, GARCH and momentum, and is scored the same way. Both feed the Lab: GARCH σ is an input to every learned rule and the meta-labeller, sets GARCH stops, gates the GARCH regime filter, scales volatility-adjusted momentum, and drives the simulated worlds every leader must beat.
+      </div>
+      <table className="pro-table">
+        <thead>
+          <tr>
+            <th className="l">COIN</th>
+            <th className="l">MODEL</th>
+            <th>α</th>
+            <th>β</th>
+            <th>γ</th>
+            <th title="α + β + γ/2">PERSIST</th>
+            <th>HALF-LIFE</th>
+            <th>LONG RUN</th>
+            <th>NEXT DAY</th>
+            <th>NEXT WEEK</th>
+            <th title="1 day, 99 %">VaR 99</th>
+            <th title="Mean QLIKE loss out of sample: GARCH / EWMA / rolling (lower is better)">QLIKE G / E / R</th>
+            <th title="Diebold–Mariano t, GARCH vs the better simple forecast (negative: GARCH better)">DM t</th>
+            <th className="l">BEST</th>
+          </tr>
+        </thead>
+        <tbody>
+          {reports.map((f) => (
+            <tr key={f.coin}>
+              <td className="l b">{f.coin}</td>
+              <td className="l muted">{f.garch ? `${f.garch.kind}, ${f.garch.dist}` : 'no fit'}</td>
+              <td className="mono">{f.garch ? f.garch.alpha.toFixed(3) : '—'}</td>
+              <td className="mono">{f.garch ? f.garch.beta.toFixed(3) : '—'}</td>
+              <td className="mono">{f.garch && f.garch.gamma ? f.garch.gamma.toFixed(3) : '—'}</td>
+              <td className="mono">{f.garch ? f.garch.persistence.toFixed(3) : '—'}</td>
+              <td className="mono">{f.garch && Number.isFinite(f.garch.halfLifeH) ? `${f.garch.halfLifeH.toFixed(0)}h` : '—'}</td>
+              <td className="mono muted">{f.garch ? pct(f.garch.longRunAnn) : '—'}</td>
+              <td className={`mono ${f.garch && f.garch.nextDayAnn > f.garch.longRunAnn * 1.15 ? 'down' : f.garch && f.garch.nextDayAnn < f.garch.longRunAnn * 0.85 ? 'up' : ''}`}>{f.garch ? pct(f.garch.nextDayAnn) : '—'}</td>
+              <td className="mono">{f.garch ? pct(f.garch.nextWeekAnn) : '—'}</td>
+              <td className="mono down">{f.garch ? pct(f.garch.var99Day, 1) : '—'}</td>
+              <td className="mono">{f.test ? `${num(f.test.qlike.garch, 3)} / ${num(f.test.qlike.ewma, 3)} / ${num(f.test.qlike.rolling, 3)}` : '—'}</td>
+              <td className={`mono ${f.test && f.test.dm < -2 ? 'up' : ''}`}>{f.test ? num(f.test.dm) : '—'}</td>
+              <td className={`l ${f.test?.winner === 'GARCH' ? 'up' : 'muted'}`}>{f.test?.winner ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {tfH < 24 && reports.some((f) => f.garch?.hours.length) && (
+        <>
+          <div className="pro-section">HOUR OF DAY (UTC) — VOLATILITY AGAINST THE DAY'S AVERAGE</div>
+          <div className="gv-cal" style={{ gridTemplateColumns: '64px repeat(24, minmax(9px, 1fr))' }}>
+            <span />
+            {Array.from({ length: 24 }, (_, h) => (
+              <span key={h} className="gv-hh">
+                {h % 3 === 0 ? String(h).padStart(2, '0') : ''}
+              </span>
+            ))}
+            {reports.map((f) => (
+              <div key={f.coin} style={{ display: 'contents' }}>
+                <span className="gv-coin">{f.coin}</span>
+                {(f.garch?.hours.length ? f.garch.hours : Array<number>(24).fill(NaN)).map((x, h) => (
+                  <i key={h} className={`gv-cell ${Number.isFinite(x) ? HEAT(x) : 'h-none'}`} title={`${f.coin} ${String(h).padStart(2, '0')}:00 UTC — ${Number.isFinite(x) ? `${x.toFixed(2)}× the average hour` : 'no data'}`} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="pro-section">CANDLE FORECASTING — OUT OF SAMPLE</div>
+      <table className="pro-table">
+        <thead>
+          <tr>
+            <th className="l">COIN</th>
+            <th>CANDLES</th>
+            <th title="Share of next-candle directions called right">HIT</th>
+            <th title="Always calling the commoner side">BASE</th>
+            <th title="1 − Brier / Brier of the base rate: above 0 means the odds carry information">BRIER SKILL</th>
+            <th title="Mean absolute error of the next candle's high-to-low range (log)">RANGE ERROR MODEL</th>
+            <th>GARCH</th>
+            <th title="The last candle's range">NAIVE</th>
+            <th className="l">TOP DRIVERS (RANGE)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {reports.map((f) => {
+            const e = f.candles?.eval;
+            return (
+              <tr key={f.coin}>
+                <td className="l b">{f.coin}</td>
+                <td className="mono">{e ? e.n : '—'}</td>
+                <td className={`mono ${e && e.hit > e.base + 0.01 ? 'up' : ''}`}>{e ? pct(e.hit, 1) : '—'}</td>
+                <td className="mono muted">{e ? pct(e.base, 1) : '—'}</td>
+                <td className={`mono ${e && e.skill > 0 ? 'up' : 'down'}`}>{e ? pct(e.skill, 1) : '—'}</td>
+                <td className={`mono ${e && e.rangeMae.model < Math.min(e.rangeMae.garch, e.rangeMae.naive) ? 'up' : ''}`}>{e ? pct(e.rangeMae.model, 3) : '—'}</td>
+                <td className="mono muted">{e ? pct(e.rangeMae.garch, 3) : '—'}</td>
+                <td className="mono muted">{e ? pct(e.rangeMae.naive, 3) : '—'}</td>
+                <td className="l muted">
+                  {e
+                    ? [...e.importance]
+                        .sort((a, b) => b.range - a.range)
+                        .slice(0, 3)
+                        .map((x) => x.feature)
+                        .join(' · ')
+                    : '—'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {reports[0]?.candles?.eval && (
+        <div className="lab-grid2">
+          <div>
+            <div className="pro-section">{reports[0].coin} — WHAT DRIVES THE DIRECTION CALL</div>
+            <Bars rows={[...reports[0].candles.eval.importance].sort((a, b) => b.dir - a.dir).slice(0, 10).map((x) => ({ label: x.feature, value: x.dir, tone: 'up' as const }))} format={(v) => v.toExponential(1)} />
+          </div>
+          <div>
+            <div className="pro-section">{reports[0].coin} — WHAT DRIVES THE RANGE</div>
+            <Bars rows={[...reports[0].candles.eval.importance].sort((a, b) => b.range - a.range).slice(0, 10).map((x) => ({ label: x.feature, value: x.range, tone: 'up' as const }))} format={(v) => `${(v * 1e4).toFixed(2)}bp`} />
+          </div>
+        </div>
+      )}
+      <div className="lab-line muted">
+        Read the range columns first: a candle's size is forecastable (volatility clusters), its colour rarely is. A Brier skill near zero means the direction odds are close to a coin toss — the Lab then leans on the range forecast for stops and sizing, not on the direction call. The candle rule (“Next-candle forest”) and every learned rule are tested like any other strategy.
+      </div>
+    </>
+  );
+}
+
 export function LabResearch() {
   const { status, result } = useLabLink();
   const [sel, setSel] = useState(1);
-  const [showLib, setShowLib] = useState(false);
+  const [view, setView] = useState<'top' | 'lib' | 'fcst'>('top');
   const [msg, setMsg] = useState('');
   if (!desktop?.lab) return <NeedsDesktop />;
   if (!status) return <div className="pro-empty">Connecting to the Lab…</div>;
@@ -342,16 +483,28 @@ export function LabResearch() {
                 {new Date(result.at).toLocaleString()} · {result.markets.map((m) => `${m.coin} ${m.bars}`).join(' · ')} bars · {result.trials} strategies tried
               </span>
               <span title="Probability of backtest overfitting (Bailey et al. 2017): how often the in-sample best lands in the bottom half out of sample">PBO {result.pbo !== null ? pct(result.pbo) : '—'}</span>
-              <button className="btn ghost" onClick={() => setShowLib(!showLib)}>
-                {showLib ? 'Top five' : 'Library comparison'}
-              </button>
+              <span className="lab-tabs">
+                {(
+                  [
+                    ['top', 'Top five'],
+                    ['lib', 'Library comparison'],
+                    ['fcst', 'Forecasting'],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button key={v} className={`btn ghost${view === v ? ' on' : ''}`} onClick={() => setView(v)}>
+                    {label}
+                  </button>
+                ))}
+              </span>
             </div>
             {result.notes.map((n) => (
               <div key={n} className="lab-note">
                 {n}
               </div>
             ))}
-            {showLib ? (
+            {view === 'fcst' ? (
+              <Forecasting reports={result.forecasting ?? []} tfH={result.tfH} />
+            ) : view === 'lib' ? (
               <>
               <div className="lab-line muted">Each rule at its best published parameters, chosen in sample, then run on the out-of-sample years it never saw. * learned rules are fitted on the in-sample data, so only their out-of-sample numbers are a test.</div>
               <table className="pro-table">
@@ -518,6 +671,10 @@ export function LabBuilder({ config: c, setConfig }: PanelProps<BuilderConfig>) 
           <label>
             STOP (ATR)
             <NumberInput value={s.exit.stopAtr} step={0.5} min={0.5} onChange={(stopAtr) => exitSet({ stopAtr })} />
+          </label>
+          <label title="Stop in GARCH forecast volatility instead of ATR: the stop widens before volatility arrives, not after. 0 uses the ATR stop.">
+            GARCH STOP (σ, 0 = ATR)
+            <NumberInput value={s.exit.stopVol ?? 0} step={0.5} min={0} onChange={(stopVol) => exitSet({ stopVol })} />
           </label>
           <label>
             TARGET (R, 0 none)

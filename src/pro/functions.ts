@@ -29,6 +29,8 @@ export const FUNCTIONS: Fn[] = [
   { code: 'LHM', name: 'Liquidity heat map', panel: 'heatmap', ws: 'markets', desc: 'Resting liquidity over time with trades' },
   { code: 'CORR', name: 'Correlation', panel: 'correl', ws: 'markets', desc: 'Correlation matrix, beta to bitcoin, volatility' },
   { code: 'HVOL', name: 'Volatility', panel: 'volmon', ws: 'markets', desc: 'Realised volatility: day, week, month, term, rank' },
+  { code: 'GV', name: 'GARCH volatility', panel: 'garch', ws: 'markets', desc: 'GARCH forecast volatility: heat calendar, long run, VaR' },
+  { code: 'FCST', name: 'Candle forecast', panel: 'fcst', ws: 'markets', desc: 'Next candle: expected range, P(up), out-of-sample record' },
   { code: 'DES', name: 'Description', panel: 'summary', ws: 'markets', desc: 'Price, 24h stats, funding, OI, long/short, basis' },
   { code: 'BOOK', name: 'Order book', panel: 'orderbook', ws: 'markets', desc: 'Composite order book across venues' },
   { code: 'DOM', name: 'Depth ladder', panel: 'dom', ws: 'markets', desc: 'Price ladder with traded volume and delta' },
@@ -74,8 +76,8 @@ export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
 
 /** the function keys shown for each workspace */
 export const KEYS: Record<Workspace, string[]> = {
-  markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'FUND', 'OI', 'LIQ', 'TOP'],
-  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'SWRM', 'CORR', 'HVOL'],
+  markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
+  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'SWRM', 'GV', 'FCST', 'CORR', 'HVOL'],
   swarm: ['SWRM', 'DEPL', 'TKT', 'PORT', 'AMT', 'GP', 'ALRT', 'CALC'],
   meme: ['MEME', 'SCAN', 'MTOK', 'WALL', 'TG'],
 };

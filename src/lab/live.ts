@@ -2,7 +2,7 @@
 // and manage its open trade by its own exit rules — the same code paths the
 // backtest used, so what was tested is what trades.
 import { signalOf, type StrategySpec } from './backtest';
-import { atr14, ctxOf, features, type Market } from './library';
+import { atr14, ctxOf, features, garchOf, garchSigma, type Market } from './library';
 import { predictForest } from './ml';
 import { rulesOf } from './research';
 
@@ -50,13 +50,17 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
   let odds: number | null = null;
   if (spec.meta?.model) {
     const row = [...features(c)[i], d];
-    if (row.every(Number.isFinite)) {
+    // a meta-labeller trained on a different set of inputs (an older version) is skipped, not misread
+    if (row.every(Number.isFinite) && (spec.meta.nf === undefined ? row.length === 14 : row.length === spec.meta.nf)) {
       odds = predictForest(spec.meta.model, row);
       if (odds < spec.meta.threshold) return null;
     }
   }
   const px = m.bars[i].close;
-  const risk = spec.exit.stopAtr * a;
+  const gs = garchSigma(c)[i];
+  const risk = spec.exit.stopVol && Number.isFinite(gs) ? spec.exit.stopVol * gs * px : spec.exit.stopAtr * a;
+  const g = garchOf(c);
+  const volNote = g ? ` · GARCH σ next bar ${(gs * 100).toFixed(2)}% (long-run ${(Math.sqrt(g.longRun) * 100).toFixed(2)}%)` : '';
   // no target in the rules: the trade is managed by trail, time and flip; the
   // swarm still needs a level for its reward-to-risk, so 4R stands in
   const tR = spec.exit.targetR > 0 ? spec.exit.targetR : 4;
@@ -70,7 +74,7 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
     bar: m.bars[i].time,
     odds,
     setup: spec.name,
-    why: `${rule}${odds !== null ? ` — the forest gives it ${(odds * 100).toFixed(0)}%` : ''}`,
+    why: `${rule}${odds !== null ? ` — the forest gives it ${(odds * 100).toFixed(0)}%` : ''}${volNote}`,
   };
 }
 

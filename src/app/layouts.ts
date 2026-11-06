@@ -177,11 +177,11 @@ export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'swarm' | 'meme', () => IJs
       row(
         100,
         row(23, ts(62, tab('monitor'), tab('watchlist'), tab('screener')), ts(38, tab('heatgrid'))),
-        row(51, ts(64, tab('historical'), tab('footprint'), tab('heatmap')), ts(36, tab('correl'), tab('volmon'), tab('cvd'), tab('flowpulse'))),
+        row(51, ts(64, tab('historical'), tab('footprint'), tab('heatmap')), ts(36, tab('garch'), tab('fcst'), tab('correl'), tab('volmon'), tab('cvd'), tab('flowpulse'))),
         row(26, ts(52, tab('orderbook'), tab('dom'), tab('tape'), tab('depth')), ts(48, tab('news'), tab('funding'), tab('oi'), tab('liquidations'), tab('summary'))),
       ),
     ),
-  lab: () => model(row(100, ts(30, tab('lablib'), tab('prohelp')), row(70, ts(68, tab('labresearch'), tab('labbuilder')), ts(32, tab('labdeployed'), tab('correl'))))),
+  lab: () => model(row(100, ts(30, tab('lablib'), tab('prohelp')), row(70, ts(68, tab('labresearch'), tab('labbuilder')), ts(32, tab('labdeployed'), tab('fcst'), tab('garch'), tab('correl'))))),
   swarm: () => model(row(100, ts(44, tab('cswarm')), row(32, ts(60, tab('historical'), tab('footprint')), ts(40, tab('labdeployed'), tab('alerts'))), row(24, ts(55, tab('ticket'), tab('amt')), ts(45, tab('accounts'), tab('calculator'))))),
   meme: () => model(row(100, ts(42, tab('memeswarm')), row(34, ts(55, tab('memescan')), ts(45, tab('memetoken'))), row(24, ts(55, tab('wallet')), ts(45, tab('telegram'), tab('journal'))))),
 };

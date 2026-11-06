@@ -7,7 +7,7 @@
 // (in R, the multiple of the risk taken) and a return for every bar, marked
 // to market at the close, for the statistics.
 import type { ForestModel } from './ml';
-import { atr14, EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Ctx, type ExitSpec, type Params } from './library';
+import { atr14, garchSigma, EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Ctx, type ExitSpec, type Params } from './library';
 
 export interface RuleRef {
   id: string;
@@ -20,8 +20,8 @@ export interface StrategySpec {
   filters: RuleRef[];
   exit: ExitSpec;
   sides: 'both' | 'long' | 'short';
-  /** a meta-labeller: a forest that decides which signals to take */
-  meta?: { model: ForestModel; threshold: number };
+  /** a meta-labeller: a forest that decides which signals to take (nf: how many inputs it was trained on) */
+  meta?: { model: ForestModel; threshold: number; nf?: number };
 }
 export interface Trade {
   side: 1 | -1;
@@ -53,6 +53,8 @@ export interface BTResult {
   exposure: number;
 }
 
+const ex0 = (s: StrategySpec): ExitSpec => ({ ...EXIT_DEFAULT, ...s.exit });
+
 export function signalOf(c: Ctx, s: StrategySpec): Int8Array {
   const sig = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
   const fs = s.filters.map((f) => FILTER_MAP[f.id].compute(c, f.p));
@@ -75,6 +77,7 @@ export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, cost
   const sig = sigIn ?? signalOf(c, s);
   const raw = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
   const A = atr14(c);
+  const G = ex0(s).stopVol ? garchSigma(c) : null;
   const f = c.m.funding;
   const ex: ExitSpec = { ...EXIT_DEFAULT, ...s.exit };
   const cost = (costs.feeBps + costs.slipBps) / 1e4;
@@ -103,7 +106,8 @@ export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, cost
       if (onset && Number.isFinite(a) && a > 0 && (!gate || gate(i - 1, d as 1 | -1))) {
         const side = d as 1 | -1;
         const entry = bar.open * (1 + side * (costs.slipBps / 1e4));
-        const risk = ex.stopAtr * a;
+        // the stop: ATRs, or GARCH standard deviations of the next bar's return
+        const risk = G && ex.stopVol ? ex.stopVol * G[i - 1] * entry : ex.stopAtr * a;
         pos = { side, sig: i - 1, entryI: i, entry, stop: entry - side * risk, stop0: entry - side * risk, target: ex.targetR > 0 ? entry + side * ex.targetR * risk : NaN, risk, trailed: false, fund: 0 };
         rets[k] -= cost;
       }

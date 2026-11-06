@@ -11,7 +11,9 @@
 //
 // Lookbacks are written in hours and converted to bars of the timeframe, so
 // one rule runs on 1-hour, 4-hour or daily candles.
-import { fitForest, fitRidge, predictForest, predictRidge, type ForestModel } from './ml';
+import { fitBest, garchVar, type GarchFit } from './garch';
+import { fitForest, fitRidge, predictForest, predictRidge, type ForestModel, type Ridge } from './ml';
+import { CANDLE_FEATURES, candleShape } from './shape';
 import { adx, atr, ema, hiPrev, loPrev, logRets, pctRank, retN, rsi, rstd, rvol, sma, volZ, type Bar } from './series';
 
 export interface Market {
@@ -36,8 +38,10 @@ export interface ExitSpec {
   maxBars: number;
   /** an opposite signal closes the trade */
   onFlip: boolean;
+  /** stop distance in GARCH volatility units instead of ATR (σ of the next bar's return); 0 = use the ATR stop */
+  stopVol?: number;
 }
-export const EXIT_DEFAULT: ExitSpec = { stopAtr: 2, targetR: 0, trailAtr: 0, maxBars: 240, onFlip: true };
+export const EXIT_DEFAULT: ExitSpec = { stopAtr: 2, targetR: 0, trailAtr: 0, maxBars: 240, onFlip: true, stopVol: 0 };
 
 export interface Ctx {
   m: Market;
@@ -68,6 +72,44 @@ const fundAnn = (c: Ctx, h: number) =>
     const k = barsPerYear(c.m.tfH);
     return m.map((x) => x * k);
   });
+
+// ---------- GARCH volatility, fitted on the training bars only ----------
+
+/** the coin's GARCH model (the best of GARCH/GJR × normal/t by BIC), fitted on the bars before trainEnd */
+export function garchOf(c: Ctx): GarchFit | null {
+  return cached(c, 'garch', () => {
+    const lr = logRets(close(c));
+    const end = Math.min(c.trainEnd, lr.length);
+    return end - 1 >= 300 ? trainedOnce(c, 'garch', () => fitBest(lr.slice(Math.max(1, end - 6000), end))) : null;
+  });
+}
+
+/**
+ * GARCH volatility (σ of the log return) of the bar AFTER each bar — known at
+ * that bar's close, so value i never uses bar i + 1. Exponentially weighted
+ * (RiskMetrics) when the history is too short to fit GARCH.
+ */
+export function garchSigma(c: Ctx): Float64Array {
+  return cached(c, 'gsig', () => {
+    const lr = logRets(close(c));
+    const n = lr.length;
+    const fit = garchOf(c);
+    const out = new Float64Array(n);
+    if (fit) {
+      // shifted: element k is the return of bar k + 1, so h[k] is known at bar k's close
+      const shifted = Float64Array.from({ length: n }, (_, k) => (k + 1 < n ? lr[k + 1] : 0));
+      const h = garchVar(fit, shifted);
+      for (let k = 0; k < n; k++) out[k] = Math.sqrt(h[k]);
+      return out;
+    }
+    let v = NaN;
+    for (let k = 0; k < n; k++) {
+      v = Number.isFinite(v) ? 0.94 * v + 0.06 * lr[k] * lr[k] : lr[k] * lr[k] || 1e-6;
+      out[k] = Math.sqrt(v);
+    }
+    return out;
+  });
+}
 
 const state = (n: number) => new Int8Array(n);
 const sgn = (x: number) => (x > 0 ? 1 : x < 0 ? -1 : 0);
@@ -104,7 +146,7 @@ const hrs = (h: number) => (h >= 24 && h % 24 === 0 ? `${h / 24}-day` : `${h}-ho
 
 // ---------- features for the learned rules and the meta-labeller ----------
 
-export const FEATURES = ['ret 1h', 'ret 4h', 'ret 1d', 'ret 1w', 'price / 1w MA', 'RSI 14', 'ADX 14', 'vol 1d / vol 30d', 'volume z', 'hour (sin)', 'hour (cos)', 'weekday', 'funding (a year)'];
+export const FEATURES = ['ret 1h', 'ret 4h', 'ret 1d', 'ret 1w', 'price / 1w MA', 'RSI 14', 'ADX 14', 'vol 1d / vol 30d', 'volume z', 'hour (sin)', 'hour (cos)', 'weekday', 'funding (a year)', 'GARCH σ next bar', 'GARCH σ / long run', ...CANDLE_FEATURES];
 
 export function features(c: Ctx): Float64Array[] {
   return cached(c, 'features', () => {
@@ -118,16 +160,40 @@ export function features(c: Ctx): Float64Array[] {
     const ad = adx(c.m.bars, 14);
     const v1 = rvol(cl, H(c, 24));
     const v30 = rvol(cl, H(c, 720));
+    // until 30 days of bars exist (a short download), compare with the last week instead
+    const v7 = rvol(cl, H(c, 168));
     const vz = volZ(c.m.bars, H(c, 168));
     const fa = fundAnn(c, 24);
+    const gs = garchSigma(c);
+    const g = garchOf(c);
+    const lrun = g ? Math.sqrt(g.longRun) : NaN;
+    const shape = candleShape(c.m.bars, atr14(c));
     return c.m.bars.map((b, i) => {
       const d = new Date(b.time);
       const h = d.getUTCHours();
-      return Float64Array.from([r1[i], r4[i], r24[i], r168[i], cl[i] / ma[i] - 1, rs[i] / 100, ad[i] / 100, v30[i] > 0 ? v1[i] / v30[i] : NaN, vz[i], Math.sin((h / 24) * 2 * Math.PI), Math.cos((h / 24) * 2 * Math.PI), d.getUTCDay() / 6, fa ? fa[i] : 0]);
+      return Float64Array.from([r1[i], r4[i], r24[i], r168[i], cl[i] / ma[i] - 1, rs[i] / 100, ad[i] / 100, v30[i] > 0 ? v1[i] / v30[i] : v7[i] > 0 ? v1[i] / v7[i] : NaN, vz[i], Math.sin((h / 24) * 2 * Math.PI), Math.cos((h / 24) * 2 * Math.PI), d.getUTCDay() / 6, fa ? fa[i] : 0, gs[i] * 100, Number.isFinite(lrun) && lrun > 0 ? gs[i] / lrun : 1, ...shape[i]]);
     });
   });
 }
 const finiteRow = (r: Float64Array) => r.every(Number.isFinite);
+
+/**
+ * Models fitted on the same training bars are the same model: kept here so a
+ * strategy re-run on a simulated continuation of the same history (the
+ * GARCH worlds) predicts with its model instead of fitting it again.
+ */
+const trained = new Map<string, unknown>();
+function trainedOnce<T>(c: Ctx, what: string, fit: () => T): T {
+  const b = c.m.bars;
+  const e = Math.min(c.trainEnd, b.length) - 1;
+  if (e < 1) return fit();
+  const key = `${what}|${c.m.coin}|${c.m.tfH}|${c.seed}|${c.trainEnd}|${b[0].time}|${b[e].time}|${b[e].close}|${b.length > c.trainEnd ? 'cut' : 'all'}`;
+  if (!trained.has(key)) {
+    if (trained.size > 200) trained.delete(trained.keys().next().value as string);
+    trained.set(key, fit());
+  }
+  return trained.get(key) as T;
+}
 
 /** learned rules: fit on bars before trainEnd whose label is known by then */
 function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf'): Int8Array {
@@ -136,19 +202,27 @@ function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf'): Int8Array {
   const h = H(c, p.horizon);
   const X = features(c);
   const cl = close(c);
-  const rows: number[][] = [];
-  const ys: number[] = [];
-  const step = Math.max(1, Math.floor(c.trainEnd / 4000));
-  for (let i = 0; i + h < c.trainEnd; i += step) {
-    if (!finiteRow(X[i])) continue;
-    rows.push(Array.from(X[i]));
-    ys.push(cl[i + h] / cl[i] - 1);
-  }
-  if (rows.length < 200) return out;
-  if (kind === 'ols') {
-    const m = fitRidge(rows, ys, 0.01);
-    const fit = rows.map((r) => predictRidge(m, r));
-    const sd = Math.sqrt(fit.reduce((a, b) => a + b * b, 0) / fit.length) || 1e-9;
+  const model = trainedOnce<{ ols: Ridge; sd: number } | { rf: ForestModel } | null>(c, `${kind}:${h}`, () => {
+    const rows: number[][] = [];
+    const ys: number[] = [];
+    const step = Math.max(1, Math.floor(c.trainEnd / 4000));
+    for (let i = 0; i + h < c.trainEnd; i += step) {
+      if (!finiteRow(X[i])) continue;
+      rows.push(Array.from(X[i]));
+      ys.push(cl[i + h] / cl[i] - 1);
+    }
+    if (rows.length < 200) return null;
+    if (kind === 'ols') {
+      const m = fitRidge(rows, ys, 0.01);
+      const fit = rows.map((r) => predictRidge(m, r));
+      return { ols: m, sd: Math.sqrt(fit.reduce((a, b) => a + b * b, 0) / fit.length) || 1e-9 };
+    }
+    return { rf: fitForest(rows, ys.map((y) => (y > 0 ? 1 : 0)), { trees: 40, maxDepth: 5, minLeaf: 20, seed: c.seed }) };
+  });
+  if (!model) return out;
+  if (kind === 'ols' && 'ols' in model) {
+    const m = model.ols;
+    const sd = model.sd;
     for (let i = 0; i < n; i++) {
       if (!finiteRow(X[i])) continue;
       const f = predictRidge(m, Array.from(X[i]));
@@ -156,11 +230,8 @@ function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf'): Int8Array {
     }
     return out;
   }
-  const m: ForestModel = fitForest(
-    rows,
-    ys.map((y) => (y > 0 ? 1 : 0)),
-    { trees: 40, maxDepth: 5, minLeaf: 20, seed: c.seed },
-  );
+  if (!('rf' in model)) return out;
+  const m = model.rf;
   for (let i = 0; i < n; i++) {
     if (!finiteRow(X[i])) continue;
     const pr = predictForest(m, Array.from(X[i]));
@@ -457,6 +528,39 @@ export const SIGNALS: SignalDef[] = [
     describe: (p) => `trade the ${hrs(p.n)} move when volume is ${p.k} standard deviations above normal`,
   },
   {
+    id: 'vsmom',
+    name: 'Volatility-scaled momentum (GARCH)',
+    family: 'momentum',
+    papers: ['mop12', 'boll86', 'lt21'],
+    rationale: 'A move only says something when it is large against the volatility expected for it: scaling the trend by GARCH volatility trades significant moves and ignores noise in a storm.',
+    grid: { lookback: [24, 72, 168], k: [0.5, 1, 1.5] },
+    exit: { stopAtr: 3, maxBars: 240, onFlip: true },
+    compute: (c, p) => {
+      const n = H(c, p.lookback);
+      const cl = close(c);
+      const gs = garchSigma(c);
+      const out = state(cl.length);
+      for (let i = n; i < cl.length; i++) {
+        // the GARCH volatility expected over those n bars, as of their start
+        const z = Math.log(cl[i] / cl[i - n]) / (gs[i - n] * Math.sqrt(n));
+        out[i] = Number.isFinite(z) ? (z > p.k ? 1 : z < -p.k ? -1 : 0) : 0;
+      }
+      return out;
+    },
+    describe: (p) => `long when the ${hrs(p.lookback)} return is more than ${p.k} GARCH standard deviations up, short when as far down`,
+  },
+  {
+    id: 'candle',
+    name: 'Next-candle forecast',
+    family: 'ml',
+    papers: ['nis91', 'myr06', 'lsl12', 'bre01'],
+    rationale: 'Candle shapes (bodies, wicks, where the close sat in the range, engulfing and hammer patterns) with GARCH volatility and momentum feed a forest that forecasts the next candle; it trades only when its odds are clear.',
+    grid: { edge: [0.03, 0.06] },
+    exit: { stopAtr: 1.5, targetR: 1.5, maxBars: 6, onFlip: true },
+    compute: (c, p) => cached(c, `candle${p.edge}:${c.trainEnd}`, () => learnedSignal(c, { horizon: c.m.tfH, edge: p.edge }, 'rf')),
+    describe: (p) => `a random forest on candle shapes, GARCH volatility and momentum forecasts the next candle; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
+  },
+  {
     id: 'ols',
     name: 'Linear forecast (ridge regression)',
     family: 'ml',
@@ -465,7 +569,7 @@ export const SIGNALS: SignalDef[] = [
     grid: { horizon: [4, 24], q: [0.5, 1] },
     exit: { stopAtr: 2, maxBars: 48, onFlip: true },
     compute: (c, p) => cached(c, `ols${p.horizon}:${p.q}:${c.trainEnd}`, () => learnedSignal(c, p, 'ols')),
-    describe: (p) => `ridge regression of the next ${hrs(p.horizon)} return on 13 features; trade forecasts beyond ${p.q} standard deviations`,
+    describe: (p) => `ridge regression of the next ${hrs(p.horizon)} return on ${FEATURES.length} features (momentum, volatility, GARCH, candle shapes, seasonality, funding); trade forecasts beyond ${p.q} standard deviations`,
   },
   {
     id: 'rf',
@@ -476,7 +580,7 @@ export const SIGNALS: SignalDef[] = [
     grid: { horizon: [4, 24], edge: [0.03, 0.06] },
     exit: { stopAtr: 2, maxBars: 48, onFlip: true },
     compute: (c, p) => cached(c, `rf${p.horizon}:${p.edge}:${c.trainEnd}`, () => learnedSignal(c, p, 'rf')),
-    describe: (p) => `random forest (40 trees) on 13 features forecasting the ${hrs(p.horizon)} direction; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
+    describe: (p) => `random forest (40 trees) on ${FEATURES.length} features forecasting the ${hrs(p.horizon)} direction; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
   },
 ];
 
@@ -520,6 +624,26 @@ export const FILTERS: FilterDef[] = [
       return a;
     },
     describe: (p) => (p.mode === 0 ? `only when 1-day volatility is in the calmest ${p.pct * 100}% of the month` : `only when 1-day volatility is in the busiest ${p.pct * 100}% of the month`),
+  },
+  {
+    id: 'garch',
+    name: 'GARCH volatility regime',
+    papers: ['boll86', 'mm17', 'hl05'],
+    rationale: 'GARCH volatility above its long-run level marks a storm that tends to persist (and mean-revert slowly); trend rules suffer in it, breakouts need it.',
+    grid: { mode: [0, 1], ratio: [0.8, 1, 1.25] },
+    compute: (c, p) => {
+      const gs = garchSigma(c);
+      const g = garchOf(c);
+      const lr = g ? Math.sqrt(g.longRun) : NaN;
+      const a = allow(gs.length);
+      gs.forEach((x, i) => {
+        const r = Number.isFinite(lr) && lr > 0 ? x / lr : NaN;
+        const ok = Number.isFinite(r) && (p.mode === 0 ? r < p.ratio : r > p.ratio);
+        a.long[i] = a.short[i] = ok ? 1 : 0;
+      });
+      return a;
+    },
+    describe: (p) => (p.mode === 0 ? `only when GARCH volatility is under ${p.ratio}× its long-run level (calm)` : `only when GARCH volatility is over ${p.ratio}× its long-run level (a storm)`),
   },
   {
     id: 'adx',

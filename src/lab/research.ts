@@ -20,7 +20,9 @@
 // Every strategy runs on all coins with the same rules: a rule that only works
 // on one coin is more likely luck.
 import { backtest, COSTS, type BTResult, type Costs, type StrategySpec, type Trade } from './backtest';
-import { barsPerYear, ctxOf, EXIT_DEFAULT, features, FEATURES, FILTER_MAP, FILTERS, gridOf, SIGNAL_MAP, SIGNALS, type Ctx, type ExitSpec, type Market, type Params, type SignalDef } from './library';
+import { candleForecast, type CandleReport } from './candles';
+import { forecastTest, garchVar, horizonVol, hourProfile, simulate, valueAtRisk, type ForecastTest } from './garch';
+import { barsPerYear, ctxOf, EXIT_DEFAULT, features, FEATURES, FILTER_MAP, FILTERS, garchOf, gridOf, logRet, SIGNAL_MAP, SIGNALS, type Ctx, type ExitSpec, type Market, type Params, type SignalDef } from './library';
 import { fitForest, predictForest, regress, rngOf, type ForestModel } from './ml';
 import { deflatedSharpe, monteCarlo, pbo, perf, randomEntryTest, type MonteCarlo, type Perf } from './stats';
 
@@ -72,6 +74,8 @@ export interface Ranked {
   mc: MonteCarlo | null;
   nullTest: { p: number; actual: number; nullMean: number } | null;
   meta: MetaInfo | null;
+  /** the strategy in simulated GARCH worlds with no edge: the share that did as well (p), out of how many */
+  garchNull: { p: number; sims: number; median: number } | null;
   /** equity of the strategy and of buy-and-hold (equal weight across coins), with the split marked */
   curve: { t: number; eq: number; bh: number }[];
   split: number;
@@ -92,6 +96,32 @@ export interface LibraryRow {
   skipped?: string;
 }
 
+/** each coin's volatility model and candle forecasts, fitted in sample and scored out of sample */
+export interface ForecastReport {
+  coin: string;
+  garch: {
+    kind: string;
+    dist: string;
+    omega: number;
+    alpha: number;
+    beta: number;
+    gamma: number;
+    nu: number;
+    persistence: number;
+    halfLifeH: number;
+    /** annualised volatility: long-run, and the forecast for the next day and week */
+    longRunAnn: number;
+    nextDayAnn: number;
+    nextWeekAnn: number;
+    /** value at risk over a day, 99 % */
+    var99Day: number;
+    /** how volatile each UTC hour is relative to the average */
+    hours: number[];
+  } | null;
+  test: ForecastTest | null;
+  candles: CandleReport | null;
+}
+
 export interface ResearchResult {
   at: number;
   tfH: number;
@@ -100,6 +130,7 @@ export interface ResearchResult {
   library: LibraryRow[];
   top: Ranked[];
   pbo: number | null;
+  forecasting: ForecastReport[];
   notes: string[];
   cfg: ResearchCfg;
 }
@@ -150,7 +181,7 @@ function runAll(ctxs: Ctx[], spec: StrategySpec, part: 'is' | 'oos' | 'all', cos
 const keyOf = (s: StrategySpec) => JSON.stringify([s.signal, s.filters, s.exit, s.sides]);
 
 function describeExit(e: ExitSpec, tfH: number): string {
-  const parts = [`stop ${e.stopAtr} ATR`];
+  const parts = [e.stopVol ? `stop ${e.stopVol} GARCH σ` : `stop ${e.stopAtr} ATR`];
   if (e.targetR > 0) parts.push(`target ${e.targetR}R`);
   if (e.trailAtr > 0) parts.push(`trail ${e.trailAtr} ATR from +1R`);
   const h = e.maxBars * tfH;
@@ -266,6 +297,8 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
       trailAtr: trails[Math.floor(rnd() * trails.length)],
       maxBars: holds[Math.floor(rnd() * holds.length)],
       onFlip: rnd() < 0.5,
+      // a third of the mixes stop in GARCH volatility instead of ATR
+      stopVol: rnd() < 0.33 ? [2, 3, 4][Math.floor(rnd() * 3)] : 0,
     });
     const spec: StrategySpec = { name: '', signal: s.spec.signal, filters: fs, exit, sides: cfg.sides };
     spec.name = nameOf(spec);
@@ -386,13 +419,14 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
       { name: 'Positive alpha over buy-and-hold', pass: rg.alpha > 0 && rg.tAlpha > 1.5, value: `t = ${rg.tAlpha.toFixed(2)}` },
     ];
     const passes = checks.filter((c) => c.pass).length;
-    const verdict: Verdict = passes >= 6 && checks[0].pass && checks[2].pass ? 'edge' : oos.sharpe > 0.5 && oos.t > 1.5 && dsr > 0.5 ? 'promising' : 'no edge';
+    const verdict: Verdict = verdictOf(checks, oos, dsr);
     const sig = SIGNAL_MAP[spec.signal.id];
     const papers = [...new Set([...sig.papers, ...spec.filters.flatMap((f) => FILTER_MAP[f.id].papers)])];
     const curve = equityCurve(fullRun, bhAll);
     ranked.push({
       rank: 0,
-      spec: meta?.used && meta.model ? { ...spec, meta: { model: meta.model, threshold: meta.threshold } } : spec,
+      spec: meta?.used && meta.model ? { ...spec, meta: { model: meta.model, threshold: meta.threshold, nf: FEATURES.length + 1 } } : spec,
+      garchNull: null,
       rules: rulesOf(spec, tfH),
       papers,
       rationale: [sig.rationale, ...spec.filters.map((f) => FILTER_MAP[f.id].rationale)],
@@ -413,8 +447,30 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
     });
   }
   const order: Record<Verdict, number> = { edge: 0, promising: 1, 'no edge': 2 };
-  const top = ranked.sort((a, b) => order[a.verdict] - order[b.verdict] || b.score - a.score).slice(0, cfg.top);
+  const rank = () => ranked.sort((a, b) => order[a.verdict] - order[b.verdict] || b.score - a.score);
+  // the leaders face one more test: worlds simulated from each coin's own GARCH model, with no edge in them
+  const lead = rank().slice(0, Math.min(8, ranked.length));
+  let gi = 0;
+  for (const r of ranked) {
+    if (!lead.includes(r)) {
+      r.checks.push({ name: 'Beats GARCH worlds with no edge (p ≤ 10 %)', pass: false, value: 'not run (outside the leading eight)' });
+      continue;
+    }
+    await tick({ stage: 'Simulating GARCH worlds for the leaders', done: ++gi, total: lead.length });
+    const g = garchWorldTest(ctxs, r.spec, r.oos.sharpe, cfg, 19);
+    r.garchNull = g;
+    r.checks.push({ name: 'Beats GARCH worlds with no edge (p ≤ 10 %)', pass: !!g && g.p <= 0.1, value: g ? `p = ${g.p.toFixed(2)} of ${g.sims}` : 'no GARCH fit' });
+    r.verdict = verdictOf(r.checks, r.oos, r.dsr);
+    r.score += g && g.p <= 0.1 ? 0.05 : 0;
+  }
+  const top = rank().slice(0, cfg.top);
   top.forEach((r, i) => (r.rank = i + 1));
+  // forecasting: each coin's GARCH model and candle forecasts, fitted in sample, scored out of sample
+  const forecasting: ForecastReport[] = [];
+  for (const c of ctxs) {
+    await tick({ stage: `Forecasting volatility and candles: ${c.m.coin}`, done: forecasting.length + 1, total: ctxs.length });
+    forecasting.push(forecastReport(c));
+  }
   if (!top.some((r) => r.verdict === 'edge')) notes.push('No strategy passed every test out of sample. The top five are the best found, but none has a proven edge yet — more history, other coins or another timeframe may change that.');
   return {
     at: Date.now(),
@@ -424,9 +480,101 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
     library,
     top,
     pbo: pbo(blocks),
+    forecasting,
     notes,
     cfg,
   };
+}
+
+/** EDGE needs the out-of-sample Sharpe and the deflated Sharpe and all but one test; PROMISING a clear but unproven result */
+function verdictOf(checks: { pass: boolean }[], oos: Perf, dsr: number): Verdict {
+  const passes = checks.filter((c) => c.pass).length;
+  return checks[0].pass && checks[2].pass && passes >= checks.length - 1 ? 'edge' : oos.sharpe > 0.5 && oos.t > 1.5 && dsr > 0.5 ? 'promising' : 'no edge';
+}
+
+/**
+ * A GARCH world: the coin's real history up to the split, then a simulated
+ * continuation — the fitted GARCH volatility driven by the coin's own
+ * standardised shocks (filtered historical simulation), candle shapes and
+ * volume borrowed from the bars those shocks came from. Volatility clusters
+ * and fat tails are real; any edge is not.
+ */
+export function garchWorld(c: Ctx, seed: number): Market | null {
+  const fit = garchOf(c);
+  if (!fit) return null;
+  const b = c.m.bars;
+  const n = b.length;
+  const s = c.trainEnd;
+  const lr = logRet(Float64Array.from(b, (x) => x.close));
+  const tr = Array.from(lr.slice(1, s));
+  const h = garchVar(fit, tr);
+  const z = tr.map((x, i) => (x - fit.mu) / Math.sqrt(h[i]));
+  const sim = simulate(fit, z, n - s, seed);
+  const bars = b.slice(0, s);
+  let p = b[s - 1].close;
+  for (let t = 0; t < n - s; t++) {
+    const src = b[sim.from[t] + 1];
+    const o = p;
+    p = o * Math.exp(sim.r[t]);
+    const up = src.high / Math.max(src.open, src.close);
+    const dn = Math.min(src.open, src.close) / src.low;
+    bars.push({ time: b[s + t].time, open: o, high: Math.max(o, p) * (Number.isFinite(up) ? up : 1), low: Math.min(o, p) / (Number.isFinite(dn) && dn > 0 ? dn : 1), close: p, volume: src.volume });
+  }
+  return { coin: c.m.coin, tfH: c.m.tfH, bars, funding: c.m.funding };
+}
+
+/** run the strategy, unchanged, in `sims` GARCH worlds per coin: how often did luck do as well out of sample? */
+function garchWorldTest(ctxs: Ctx[], spec: StrategySpec, actual: number, cfg: ResearchCfg, sims: number) {
+  const bpy = barsPerYear(ctxs[0].m.tfH);
+  const out: number[] = [];
+  for (let k = 0; k < sims; k++) {
+    const worlds = ctxs.map((c, j) => {
+      const w = garchWorld(c, cfg.seed * 1000 + k * 17 + j);
+      return w ? ctxOf(w, c.trainEnd, c.seed) : null;
+    });
+    if (worlds.some((w) => !w)) return null;
+    const run = runAll(worlds as Ctx[], spec, 'oos', cfg.costs);
+    out.push(perf(run.rets, run.trades, bpy, run.exposure).sharpe);
+  }
+  out.sort((a, b) => a - b);
+  return { p: (out.filter((x) => x >= actual).length + 1) / (sims + 1), sims, median: out[Math.floor(out.length / 2)] };
+}
+
+function forecastReport(c: Ctx): ForecastReport {
+  const fit = garchOf(c);
+  const lr = logRet(Float64Array.from(c.m.bars, (x) => x.close));
+  const tfH = c.m.tfH;
+  const bpy = barsPerYear(tfH);
+  let garch: ForecastReport['garch'] = null;
+  if (fit) {
+    const h = garchVar(fit, Array.from(lr.slice(1)));
+    const last = lr[lr.length - 1] - fit.mu;
+    const h1 = fit.omega + (fit.alpha + (last < 0 ? fit.gamma : 0)) * last * last + fit.beta * h[h.length - 1];
+    const day = Math.max(1, Math.round(24 / tfH));
+    garch = {
+      kind: fit.kind === 'gjr' ? 'GJR-GARCH(1,1)' : 'GARCH(1,1)',
+      dist: fit.dist === 't' && fit.nu < 100 ? `Student-t (ν = ${fit.nu.toFixed(1)})` : 'normal',
+      omega: fit.omega,
+      alpha: fit.alpha,
+      beta: fit.beta,
+      gamma: fit.gamma,
+      nu: fit.nu,
+      persistence: fit.persistence,
+      halfLifeH: fit.halfLife * tfH,
+      longRunAnn: Math.sqrt(fit.longRun * bpy),
+      nextDayAnn: (horizonVol(fit, h1, day) * Math.sqrt(bpy)) / Math.sqrt(day),
+      nextWeekAnn: (horizonVol(fit, h1, 7 * day) * Math.sqrt(bpy)) / Math.sqrt(7 * day),
+      var99Day: valueAtRisk(fit, h1, day, 0.99),
+      hours: tfH < 24 ? hourProfile(Float64Array.from(c.m.bars, (x) => x.time), lr) : [],
+    };
+  }
+  let candles: CandleReport | null = null;
+  try {
+    candles = candleForecast(c.m, c.trainEnd, c.seed);
+  } catch {
+    candles = null;
+  }
+  return { coin: c.m.coin, garch, test: forecastTest(lr, c.trainEnd), candles };
 }
 
 function bhReturns(c: Ctx, from: number, to: number): BTResult {
