@@ -36,6 +36,7 @@ import { Correl, CORR_DEFAULTS, HEAT_DEFAULTS, HeatGrid, Monitor, MONITOR_DEFAUL
 import { CandleForecastPanel, FCST_DEFAULTS, GarchPanel, GARCH_DEFAULTS } from '../pro/VolPanels';
 import { DeltaHedgePanel, DELTA_DEFAULTS, MomentumPanel, MOM_DEFAULTS, RegimePanel, REGM_DEFAULTS, VarPanel, VAR_DEFAULTS, VolTargetPanel, VTGT_DEFAULTS } from '../pro/QuantPanels';
 import { LunoLane } from './LunoLane';
+import { BotBuilder, BOT_DEFAULTS } from '../pro/BotBuilder';
 import { CapmPanel, CAPM_DEFAULTS, EF_DEFAULTS, FrontierPanel, KellyPanel, KELLY_DEFAULTS } from '../pro/PortfolioPanels';
 
 import { BUILDER_DEFAULTS, LabBuilder, LabDeployed, LabLibrary, LabResearch, LIB_DEFAULTS, RESEARCH_PANEL_DEFAULTS } from '../pro/LabPanels';
@@ -71,6 +72,7 @@ export const PANELS: PanelDef[] = [
   { id: 'qkelly', title: 'KELLY · Kelly criterion', category: 'Quant', component: KellyPanel, defaults: { ...KELLY_DEFAULTS }, description: 'Growth-optimal leverage coin by coin and its growth curve, the growth-optimal portfolio, and a strategy’s Kelly bet from its win rate and payoff.' },
   { id: 'luno', title: 'LUNO · Luno lane', category: 'Account', component: LunoLane, defaults: {}, description: 'Optional: crypto against rands on Luno — daily trend bots beside the swarm.' },
   { id: 'lablib', title: 'LIB · Strategy Library', category: 'Strategy Lab', component: LabLibrary, defaults: { ...LIB_DEFAULTS }, description: 'Every rule and filter in the Strategy Lab with the papers behind it and why it should work.' },
+  { id: 'labflow', title: 'BOT · Bot builder', category: 'Strategy Lab', component: BotBuilder, defaults: { ...BOT_DEFAULTS }, description: 'Build a crypto bot in plain English, block by block like n8n: trading style → strategy → market model → forecast → risk → rules → backtest → deploy.' },
   { id: 'labresearch', title: 'RSCH · Research', category: 'Strategy Lab', component: LabResearch, defaults: { ...RESEARCH_PANEL_DEFAULTS }, description: 'Search published rules and their combinations on years of history; rank the top five with out-of-sample tests, Monte Carlo and a deflated Sharpe ratio; deploy them.' },
   { id: 'labbuilder', title: 'BT · Backtest Builder', category: 'Strategy Lab', component: LabBuilder, defaults: { ...BUILDER_DEFAULTS }, description: 'Build a strategy from the library by hand — entry, filters, exits — and backtest it in and out of sample.' },
   { id: 'labdeployed', title: 'DEPL · Deployed', category: 'Strategy Lab', component: LabDeployed, defaults: {}, description: 'The strategies trading in the swarms, on/off, and what the Lab agent has said.' },

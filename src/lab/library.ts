@@ -856,6 +856,30 @@ export const FILTERS: FilterDef[] = [
     describe: (p) => (p.mode === 0 ? `only while moves persist: the ${hrs(p.window)} variance ratio of daily to hourly returns is above 1.05 (trending)` : `only while moves reverse: the ${hrs(p.window)} variance ratio is below 0.95 (mean-reverting)`),
   },
   {
+    id: 'agree',
+    name: 'Forecast agrees',
+    papers: ['kal60', 'bre01', 'gkx20', 'nis91'],
+    rationale: 'A second opinion: trade only in the direction a forecasting model also expects — the Kalman trend, or a model trained on the in-sample years (next-candle forest, ridge regression, random forest).',
+    grid: { model: [0, 1, 2, 3] },
+    compute: (c, p) => {
+      const n = c.m.bars.length;
+      const a = allow(n);
+      let dir: Int8Array;
+      if (p.model === 3) {
+        const kf = kalmanOf(c, 1);
+        dir = Int8Array.from(kf.slope, (s) => sgn(s));
+      } else if (p.model === 0) dir = SIGNAL_MAP.candle.compute(c, { edge: 0 });
+      else if (p.model === 1) dir = SIGNAL_MAP.ols.compute(c, { horizon: 24, q: 0 });
+      else dir = SIGNAL_MAP.rf.compute(c, { horizon: 24, edge: 0 });
+      for (let i = 0; i < n; i++) {
+        a.long[i] = dir[i] > 0 ? 1 : 0;
+        a.short[i] = dir[i] < 0 ? 1 : 0;
+      }
+      return a;
+    },
+    describe: (p) => `only when ${['the next-candle forest', 'the ridge-regression forecast', 'the random-forest forecast', 'the Kalman trend'][p.model]} points the same way`,
+  },
+  {
     id: 'hmm',
     name: 'Hidden-Markov regime',
     papers: ['ham89', 'at12'],

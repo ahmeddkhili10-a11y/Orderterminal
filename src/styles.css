@@ -6390,3 +6390,71 @@ table.grid.meme-tape td {
 .cc-drawer-head { flex-wrap: wrap; }
 .view-switch .view-tab { white-space: nowrap; }
 .cc-tools-open { white-space: nowrap; }
+
+/* BOT — the bot builder: blocks wired left to right, like n8n */
+.bb-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.bb-title { font-size: 13px; letter-spacing: 0.04em; color: var(--pro-head, var(--warn)); }
+.bb-canvas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  row-gap: 18px;
+  padding: 18px 14px 20px;
+  background-color: color-mix(in srgb, var(--bg) 92%, #000);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 14%, transparent) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.bb-node {
+  --t: var(--accent);
+  position: relative;
+  width: 228px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 0 10px;
+  background: color-mix(in srgb, var(--panel, #111) 96%, var(--t));
+  border: 1px solid color-mix(in srgb, var(--t) 45%, var(--border));
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.bb-node.t-a { --t: #ffd200; }
+.bb-node.t-b { --t: #ff7a1a; }
+.bb-node.t-c { --t: #2cf0b0; }
+.bb-node.t-d { --t: #b58cff; }
+.bb-node.t-e { --t: #ff4d6d; }
+.bb-node.t-f { --t: #38e1ff; }
+.bb-node.t-g { --t: #4f8ff0; }
+.bb-node.t-h { --t: #a0d468; }
+.bb-node-head { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--t) 30%, var(--border)); border-radius: 10px 10px 0 0; background: color-mix(in srgb, var(--t) 14%, transparent); font-size: 11px; letter-spacing: 0.08em; }
+.bb-icon { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; background: var(--t); color: #000; font-size: 12px; font-weight: 800; }
+.bb-step { font: 700 10px var(--mono, monospace); color: var(--muted); }
+.bb-node-body { display: flex; flex-direction: column; gap: 6px; padding: 0 10px; }
+.bb-node-body label { font-size: 11px; }
+.bb-select { width: 100%; padding: 5px 6px; font-size: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.bb-select.small { font-size: 11px; padding: 4px 6px; }
+.bb-select:focus { outline: 1px solid var(--t); }
+.bb-plain { padding: 0 10px; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.bb-port { position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--bg); border: 2px solid var(--t); }
+.bb-port.in { left: -6px; }
+.bb-port.out { right: -6px; }
+.bb-node.done .bb-port { background: var(--t); }
+.bb-wire { position: relative; width: 26px; align-self: center; height: 2px; background: color-mix(in srgb, var(--text) 25%, transparent); overflow: hidden; }
+.bb-wire i { position: absolute; top: 0; left: -40%; width: 40%; height: 100%; background: linear-gradient(90deg, transparent, var(--pro-head, var(--accent)), transparent); animation: bb-flow 1.6s linear infinite; }
+.bb-wire.live { background: color-mix(in srgb, var(--buy) 55%, transparent); }
+.bb-wire.live i { background: linear-gradient(90deg, transparent, var(--buy), transparent); }
+@keyframes bb-flow { to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .bb-wire i { animation: none; } }
+.bb-coins { width: 100%; }
+.bb-run, .bb-deploy { width: 100%; justify-content: center; }
+.bb-deploy.t-good { background: var(--buy); color: #000; border-color: var(--buy); }
+.bb-deploy.t-bad { opacity: 0.8; }
+.bb-status { font-size: 11px; }
+.bb-verdict { margin: 10px 8px 4px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; }
+.bb-verdict.t-good { border-color: var(--buy); background: color-mix(in srgb, var(--buy) 12%, transparent); }
+.bb-verdict.t-ok { border-color: var(--pro-head, var(--warn)); background: color-mix(in srgb, var(--pro-head, var(--warn)) 10%, transparent); }
+.bb-verdict.t-bad { border-color: var(--sell); background: color-mix(in srgb, var(--sell) 10%, transparent); }
+.bb-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; padding: 6px 8px; }
+.bb-tile { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 11px; }
+.bb-tile b { font-size: 18px; }
+.bb-tile small { font-size: 10px; line-height: 1.35; }

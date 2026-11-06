@@ -33,6 +33,8 @@ export interface StrategySpec {
   sizing?: Sizing;
   /** delta-hedge the market exposure: short β × the position in bitcoin (β re-estimated on 30 days of returns) */
   hedge?: 'btc';
+  /** the bot builder's "AI trade filter": train a meta-labeller in sample when the strategy is tested (becomes `meta` if it helps) */
+  autoMeta?: boolean;
 }
 export interface Sizing {
   mode: 'unit' | 'vol' | 'var';

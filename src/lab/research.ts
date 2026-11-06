@@ -718,20 +718,66 @@ export function withBench(ms: Market[]): Market[] {
   return ms.map((m) => (m === btc ? m : { ...m, bench: Float64Array.from(m.bars, (b) => at.get(b.time) ?? NaN) }));
 }
 
-/** one strategy's full test, on demand (the Backtest screen) */
-export function evaluate(markets: Market[], spec: StrategySpec, isShare = 0.7, costs: Costs = COSTS) {
+/** one strategy's full test, on demand (the Backtest screen and the bot builder) */
+export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, costs: Costs = COSTS) {
   const ctxs = withBench(markets).map((m, k) => ctxOf(m, Math.floor(m.bars.length * isShare), 42 + k));
   const bpy = barsPerYear(markets[0].tfH);
-  const is = runAll(ctxs, spec, 'is', costs);
-  const oos = runAll(ctxs, spec, 'oos', costs);
-  const full = runAll(ctxs, spec, 'all', costs);
+  const { autoMeta, ...rest } = spec0;
+  let spec: StrategySpec = rest;
+  // the "AI trade filter": a forest learns, in sample, which of the strategy's signals tend to fail,
+  // and is kept only if it lifts the out-of-sample Sharpe (as in the research run)
+  let gate: ((c: Ctx, i: number, side: 1 | -1) => boolean) | undefined;
+  let meta: { used: boolean; before: number; after: number; trainedOn: number } | null = null;
+  if (autoMeta) {
+    const isRun = runAll(ctxs, spec, 'is', costs);
+    const X: number[][] = [];
+    const y: number[] = [];
+    for (const { c, bt } of isRun.per) {
+      const F = features(c);
+      for (const tr of bt.trades) {
+        const row = [...F[tr.sig], tr.side];
+        if (!row.every(Number.isFinite)) continue;
+        X.push(row);
+        y.push(tr.r > 0 ? 1 : 0);
+      }
+    }
+    if (X.length >= 40) {
+      const model = fitForest(X, y, { trees: 60, maxDepth: 4, minLeaf: Math.max(5, Math.floor(X.length / 40)), seed: 42 });
+      const g = (c: Ctx, i: number, side: 1 | -1) => {
+        const row = [...features(c)[i], side];
+        return !row.every(Number.isFinite) || predictForest(model, row) >= 0.5;
+      };
+      const plain = runAll(ctxs, spec, 'oos', costs);
+      const gated = runAll(ctxs, spec, 'oos', costs, g);
+      const before = perf(plain.rets, plain.trades, bpy, plain.exposure);
+      const after = perf(gated.rets, gated.trades, bpy, gated.exposure);
+      const used = after.sharpe > before.sharpe + 0.1 && after.trades >= Math.max(10, before.trades * 0.3);
+      meta = { used, before: before.sharpe, after: after.sharpe, trainedOn: X.length };
+      if (used) {
+        gate = g;
+        spec = { ...spec, meta: { model, threshold: 0.5, nf: FEATURES.length + 1 } };
+      }
+    } else meta = { used: false, before: NaN, after: NaN, trainedOn: X.length };
+  }
+  const is = runAll(ctxs, spec, 'is', costs, gate);
+  const oos = runAll(ctxs, spec, 'oos', costs, gate);
+  const full = runAll(ctxs, spec, 'all', costs, gate);
   const bhAll = pool(ctxs.map((c) => ({ bt: bhReturns(c, 50, c.m.bars.length) })));
+  const bhOos = pool(ctxs.map((c) => ({ bt: bhReturns(c, c.trainEnd, c.m.bars.length) })));
   return {
     is: perf(is.rets, is.trades, bpy, is.exposure),
     oos: perf(oos.rets, oos.trades, bpy, oos.exposure),
     curve: equityCurve(full, bhAll),
     trades: oos.trades.length,
     mc: monteCarlo(oos.trades.map((t) => t.r)),
+    /** buy-and-hold over the same unseen period, for comparison */
+    bh: perf(bhOos.rets, [], bpy, 1),
+    perCoin: oos.per.map((x) => ({ coin: x.m.coin, oos: perf(x.bt.rets, x.bt.trades, bpy, x.bt.exposure) })),
+    /** the spec as tested — with the AI trade filter's model when it was kept (deploy this) */
+    spec,
+    meta,
+    split: Math.min(...ctxs.map((c) => c.m.bars[c.trainEnd]?.time ?? Infinity)),
+    years: (markets[0].bars[markets[0].bars.length - 1].time - markets[0].bars[0].time) / (365 * 86_400_000),
   };
 }
 

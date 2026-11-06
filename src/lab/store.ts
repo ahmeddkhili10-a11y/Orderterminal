@@ -47,6 +47,15 @@ export interface LabTest {
   curve: { t: number; eq: number; bh: number }[];
   trades: number;
   mc: MonteCarlo | null;
+  /** buy-and-hold over the unseen period */
+  bh?: Perf;
+  perCoin?: { coin: string; oos: Perf }[];
+  /** the spec as tested (with the AI trade filter's model when it was kept) */
+  spec?: StrategySpec;
+  meta?: { used: boolean; before: number; after: number; trainedOn: number } | null;
+  /** when the unseen (out-of-sample) period starts, and the years of history tested */
+  split?: number;
+  years?: number;
 }
 
 interface LabStore {

@@ -19,6 +19,42 @@ says plainly when it finds none.
 | `GV` | GARCH volatility | Each coin's fitted GARCH model: the hours ahead as a heat calendar, long run, value at risk |
 | `FCST` | Candle forecast | The next candle's expected high, low and odds of closing up, with its out-of-sample record |
 
+## The bot builder (BOT) — the easy way
+
+**BOT** opens a chain of blocks, wired left to right like n8n. Pick one option
+in each, all in plain English (tick **Explain every choice** to see what each
+one does):
+
+1. **Trading style** — scalping (hours), intraday, swing (a few days), one-week
+   trades, position (weeks to months) or a long-term hold (up to a year). The
+   style sets everything else's pace: the candles (1 h, 4 h or 1 day), the
+   look-backs, the holding time, the stop width and the years of history.
+2. **Strategy** — every entry rule in the library, grouped (trend following,
+   breakouts, buy the dip / sell the rip, timing, funding, AI); the ones that
+   suit the style are marked ✓ and listed first.
+3. **Market model** — when the strategy may trade: with the big trend, only
+   when trending or ranging (ADX), the variance-ratio and hidden-Markov regimes,
+   GARCH volatility, quieter days, volume, trading hours, crowded funding. A
+   second one can be added.
+4. **Forecast** — none; the **AI trade filter** (a forest that learns which of
+   the strategy's signals fail, kept only if it helps on unseen data); or a
+   second opinion that must agree (Kalman trend, next-candle forest, linear
+   forecast, random forest).
+5. **Risk management** — fixed size, steady risk (volatility targeting), a cap
+   on the daily loss (value at risk), stops that widen before storms (GARCH),
+   both, or market-neutral (hedged with bitcoin); and the stop width.
+6. **Rules of engagement** — long and short, long only or short only; let
+   winners run or take profit at 1.5, 2 or 3 times the risk; shorter, usual or
+   longer holds; exit on an opposite signal or not.
+7. **Backtest** — on the coins you list: built on the first 70 % of the history
+   and judged on the last 30 % it never saw, with fees and slippage. The
+   results come in words: a verdict (Looks good / Maybe / Not yet), the return
+   a year against buy-and-hold, the worst drop, the win rate, the trades, the
+   Sharpe ratio, the chance it is luck and the chance of a losing run, the
+   equity curve and each coin.
+8. **Deploy** — only after the backtest. The bot goes to the crypto swarm,
+   where it proposes and the council, forest and risk manager decide.
+
 ## The library
 
 Twenty-one entry rules and nine filters, each written from its paper:

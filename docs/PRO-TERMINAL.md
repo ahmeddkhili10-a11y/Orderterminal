@@ -27,7 +27,8 @@ square, every number on screen backed by live data. The classic swarm views
 
 | Code | Screen | | Code | Screen |
 |---|---|---|---|---|
-| `MON` | Monitor — the quote board | | `LIB` | Strategy library |
+| `MON` | Monitor — the quote board | | `BOT` | Bot builder |
+| | | | `LIB` | Strategy library |
 | `HMAP` | Heat map | | `RSCH` | Research |
 | `GP` | Price graph | | `BT` | Backtest builder |
 | `GIP` | Footprint | | `DEPL` | Deployed strategies |

@@ -81,6 +81,18 @@ try {
   await page.waitForSelector('button:has-text("Run research")', { timeout: 15_000 });
   expect(true, 'RSCH on the command line opens the Strategy Lab research screen');
   expect((await page.locator('.lab-rule').count()) >= 23, 'the library lists every rule and filter with its papers');
+  // the bot builder: eight blocks, plain-English choices, the style sets the rest
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('BOT');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.bb-canvas', { timeout: 10_000 });
+  expect((await page.locator('.bb-node').count()) === 8, 'the bot builder: style, strategy, market model, forecast, risk, rules, backtest, deploy');
+  expect(await page.locator('.bb-deploy').isDisabled(), 'deploy waits for a backtest');
+  await page.locator('.bb-node.t-a select').selectOption('scalp');
+  await page.locator('.bb-node.t-b select').selectOption('rsi2');
+  await page.locator('.bb-node.t-d select').selectOption('meta');
+  expect(/1h candles/.test(await page.locator('.bb').innerText()) && (await page.locator('text=crashed').count()) === 0, 'choosing a style re-plans the bot (scalping: 1-hour candles)');
+  await page.screenshot({ path: `${OUT}desktop-bot-builder.png` });
   const ls = await page.evaluate(() => window.novus.lab.state());
   expect(!!ls && ls.cfg.coins.length > 0 && Array.isArray(ls.deployed), 'the Lab answers from the desktop process');
   const runErr = await page.evaluate(() => window.novus.lab.run({ coins: ['BTC'], source: 'binance', years: 0.1, funding: false }).then(() => 'ran', (e) => e.message));

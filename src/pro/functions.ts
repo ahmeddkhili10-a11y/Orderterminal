@@ -51,6 +51,7 @@ export const FUNCTIONS: Fn[] = [
   { code: 'TOP', name: 'Top news', panel: 'news', ws: 'markets', desc: 'Real-time headlines by coin' },
   { code: 'WEI', name: 'World markets', panel: 'yahoo', ws: 'markets', desc: 'Stocks, indices, FX, futures (Yahoo Finance)' },
   // strategy lab
+  { code: 'BOT', name: 'Bot builder', panel: 'labflow', ws: 'lab', desc: 'Build a bot block by block in plain English, backtest it, deploy it' },
   { code: 'LIB', name: 'Strategy library', panel: 'lablib', ws: 'lab', desc: 'Every rule, its papers and rationale' },
   { code: 'RSCH', name: 'Research', panel: 'labresearch', ws: 'lab', desc: 'Search, test and rank strategies; deploy the best' },
   { code: 'BT', name: 'Backtest builder', panel: 'labbuilder', ws: 'lab', desc: 'Build a strategy by hand and test it' },
@@ -86,7 +87,7 @@ export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
 /** the function keys shown for each workspace */
 export const KEYS: Record<Workspace, string[]> = {
   markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
-  lab: ['LIB', 'RSCH', 'BT', 'DEPL', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
+  lab: ['BOT', 'LIB', 'RSCH', 'BT', 'DEPL', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
   quant: ['VAR', 'CAPM', 'EF', 'KELLY', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV', 'FCST'],
 };
 
