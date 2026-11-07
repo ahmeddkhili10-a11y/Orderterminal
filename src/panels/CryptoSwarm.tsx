@@ -15,7 +15,6 @@ export interface CryptoSwarmConfig {
 export const CRYPTO_SWARM_DEFAULTS: CryptoSwarmConfig = { tab: 'live' };
 
 const AGENTS: { id: string; name: string; role: string }[] = [
-  { id: 'scalper', name: 'Scalper', role: 'order-flow scalps on the 1-minute tape' },
   { id: 'auction', name: 'Auctioneer', role: 'intraday value area, IB breakouts, the 80% rule' },
   { id: 'trend', name: 'Trend', role: 'daily momentum, hourly breakouts' },
   { id: 'tape', name: 'Tape', role: 'aggressive flow and the book' },
@@ -146,7 +145,7 @@ function Tile({ label, value, sub, tone = '' }: { label: string; value: string; 
 function agentStatus(st: CSwarmState, id: string): string {
   const c = st.coins;
   if (!st.running) return 'off';
-  if (id === 'scalper' || id === 'auction') {
+  if (id === 'auction') {
     if (!st.cfg.agents[id]) return 'off';
     const warm = c.filter((x) => x.engines[id]?.warm).length;
     return warm === c.length ? 'reading the tape' : `warming up (${warm}/${c.length})`;
@@ -166,7 +165,7 @@ function Live({ st, lines }: { st: CSwarmState; lines: CSwarmLine[] }) {
       <div className="cs-agents">
         {AGENTS.map((a) => {
           const s = agentStatus(st, a.id);
-          const stat = st.byAgent[a.id as 'scalper'];
+          const stat = st.byAgent[a.id as 'auction'];
           return (
             <div key={a.id} className={`cs-agent${s === 'off' ? ' off' : ''}`} title={a.role}>
               <b>{a.name}</b>
@@ -185,7 +184,6 @@ function Live({ st, lines }: { st: CSwarmState; lines: CSwarmLine[] }) {
               <th>Price</th>
               <th>Daily trend</th>
               <th>Funding / yr</th>
-              <th>Scalper</th>
               <th>Auctioneer</th>
             </tr>
           </thead>
@@ -198,7 +196,7 @@ function Live({ st, lines }: { st: CSwarmState; lines: CSwarmLine[] }) {
                 <td className="mono">{px(c.price)}</td>
                 <td className={c.daily ? (c.daily.dir > 0 ? 'up' : 'down') : 'muted'}>{c.daily ? (c.daily.dir > 0 ? `up ${c.daily.up}/3` : `down ${3 - c.daily.up}/3`) : '…'}</td>
                 <td className="mono">{c.funding !== null ? `${(c.funding * 24 * 365 * 100).toFixed(1)}%` : '—'}</td>
-                {(['scalper', 'auction'] as const).map((a) => (
+                {(['auction'] as const).map((a) => (
                   <td key={a} className="muted" title={c.engines[a]?.lastSkip ? `${c.engines[a].lastSkip!.event}: ${c.engines[a].lastSkip!.reason}` : ''}>
                     {c.engines[a] ? c.engines[a].state : 'off'}
                   </td>
@@ -288,7 +286,7 @@ function Rules({ st, busy, run }: { st: CSwarmState; busy: string; run: (w: stri
       <div className="section-title">Markets — Hyperliquid perpetuals</div>
       {row('Coins', <input className="ctl mono" value={coins} onChange={(e) => setCoins(e.target.value)} onBlur={() => save({ coins: coins.split(/[\s,]+/).filter(Boolean) })} style={{ width: 180 }} />, 'traded against USDC; one position per coin. BTC, ETH and SOL have the deepest books')}
       <div className="section-title">Agents that propose trades</div>
-      {(['scalper', 'auction', 'trend'] as const).map((a) => row(NAME[a], <input type="checkbox" checked={c.agents[a]} onChange={(e) => save({ agents: { [a]: e.target.checked } })} />, AGENTS.find((x) => x.id === a)!.role))}
+      {(['auction', 'trend'] as const).map((a) => row(NAME[a], <input type="checkbox" checked={c.agents[a]} onChange={(e) => save({ agents: { [a]: e.target.checked } })} />, AGENTS.find((x) => x.id === a)!.role))}
       <div className="section-title">Risk — compounding, and keeping the account alive</div>
       {row('Risk per trade', <NumberInput value={r.riskPct} onChange={(riskPct) => save({ risk: { riskPct } })} min={0.1} step={0.25} suffix="%" />, 'of what the account is worth now: trades grow with profits and shrink after losses')}
       {row('Most per trade', <NumberInput value={r.maxRiskPct} onChange={(maxRiskPct) => save({ risk: { maxRiskPct } })} min={0.25} step={0.25} suffix="%" />, 'after the edge, drawdown and odds adjustments')}

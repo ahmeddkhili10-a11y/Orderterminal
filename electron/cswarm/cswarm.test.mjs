@@ -60,7 +60,7 @@ describe('crypto swarm', () => {
     const ex = fakeExchange(now);
     const events = [];
     sw = new CryptoSwarm({ ccxt: ex.ccxt, db: memDb(), emit: (ch, p) => ch === 'event' && events.push(p), now: () => now });
-    sw.setConfig({ coins: ['BTC'], agents: { scalper: false, auction: false, trend: true } });
+    sw.setConfig({ coins: ['BTC'], agents: { auction: false, trend: true } });
     await sw.start();
     ex.feed('BTC/USDC:USDC', 303.9, now);
     await sw.slow();
@@ -96,7 +96,7 @@ describe('crypto swarm', () => {
     let now = Date.UTC(2026, 10, 5, 12);
     const ex = fakeExchange(now);
     sw = new CryptoSwarm({ ccxt: ex.ccxt, db: memDb(), now: () => now });
-    sw.setConfig({ coins: ['BTC'], agents: { scalper: false, auction: false, trend: true } });
+    sw.setConfig({ coins: ['BTC'], agents: { auction: false, trend: true } });
     await sw.start();
     sw.paper.cash = 28; // down 2 of 30 → under the 5% daily limit? 6.7%: over it
     ex.feed('BTC/USDC:USDC', 303.9, now);
@@ -111,7 +111,7 @@ describe('crypto swarm', () => {
     let now = Date.UTC(2026, 10, 5, 12);
     const ex = fakeExchange(now, { live: true });
     sw = new CryptoSwarm({ ccxt: ex.ccxt, db: memDb(), now: () => now });
-    sw.setConfig({ coins: ['BTC'], agents: { scalper: false, auction: false, trend: true } });
+    sw.setConfig({ coins: ['BTC'], agents: { auction: false, trend: true } });
     sw.setMode('live', 'key1');
     await sw.start();
     expect(ex.ccxt.prepareMargin).toHaveBeenCalledWith('key1', 'BTC/USDC:USDC', 3);
@@ -133,16 +133,16 @@ describe('crypto swarm', () => {
     let now = Date.UTC(2026, 10, 5, 12);
     const ex = fakeExchange(now);
     sw = new CryptoSwarm({ ccxt: ex.ccxt, db: memDb(), now: () => now });
-    sw.setConfig({ coins: ['ETH'], agents: { scalper: true, auction: false, trend: false } });
+    sw.setConfig({ coins: ['ETH'], agents: { auction: true, trend: false } });
     await sw.start();
-    const e = sw.coins.get('ETH').engines.scalper;
+    const e = sw.coins.get('ETH').engines.auction;
     ex.feed('ETH/USDC:USDC', 3000, now);
     // the engine signals a long, as it does in its own step
     e.pending = { kind: 'entry', side: 'buy', stop: 2985, target: 3030, setup: 'absorption', why: 'sellers absorbed at the low', t: now };
-    sw.handle('ETH', 'scalper', [{ type: 'enter', side: 'buy', qty: 1, price: 3000, stop: 2985, target: 3030, setup: 'absorption', reason: 'sellers absorbed at the low' }]);
+    sw.handle('ETH', 'auction', [{ type: 'enter', side: 'buy', qty: 1, price: 3000, stop: 2985, target: 3030, setup: 'absorption', reason: 'sellers absorbed at the low' }]);
     await vi.waitFor(() => expect(sw.open()).toHaveLength(1));
     expect(e.pos).toMatchObject({ side: 'buy', stop: 2985 });
-    expect(sw.open()[0]).toMatchObject({ owner: 'engine', agent: 'scalper' });
+    expect(sw.open()[0]).toMatchObject({ owner: 'engine', agent: 'auction' });
     // the engine's stop is hit: it exits, the swarm closes and records it
     now += 30_000;
     ex.feed('ETH/USDC:USDC', 2980, now);
@@ -150,5 +150,11 @@ describe('crypto swarm', () => {
     expect(sw.positions[0].reason).toBe('stop');
     expect(sw.positions[0].r).toBeLessThan(-0.9);
     expect(e.pos).toBeNull();
+  });
+
+  it('the Scalper agent is retired: a saved setting for it is dropped, and no coin starts a scalper engine', () => {
+    const c = mergeCfg({ agents: { scalper: true, auction: true, trend: true } });
+    expect(c.agents.scalper).toBeUndefined();
+    expect(Object.keys(c.agents)).toEqual(['auction', 'trend', 'lab']);
   });
 });

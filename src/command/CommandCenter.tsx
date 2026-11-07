@@ -591,7 +591,6 @@ export function CommandCenter() {
     caption: st?.running ? `${coins.length} coins in the core · ${proposals} proposals in the last hour · ${depOn.length} Lab strateg${depOn.length === 1 ? 'y' : 'ies'} deployed` : 'swarm off — start it to fill the core',
     inputs: [
       { label: 'Feeds live', value: `${feedsOk}/${coins.length}`, rate: coins.length ? feedsOk / coins.length : 0 },
-      { label: 'Scalper', value: `${warm('scalper')} warm`, rate: coins.length ? warm('scalper') / coins.length : 0 },
       { label: 'Auctioneer', value: `${warm('auction')} warm`, rate: coins.length ? warm('auction') / coins.length : 0 },
       { label: 'Trend', value: `${warm('trend')} warm`, rate: coins.length ? warm('trend') / coins.length : 0 },
       { label: 'Lab strategies', value: `${depOn.length} on`, rate: Math.min(1, depOn.length / 3) },
@@ -630,7 +629,7 @@ export function CommandCenter() {
   if (!st) return <div className="cc"><div className="cc-empty muted" style={{ gridColumn: '1 / -1', padding: 40 }}>{error || 'Connecting to the crypto swarm…'}</div></div>;
 
   const by = st.byAgent as Record<string, { trades: number; wins: number; pnl: number; avgR: number | null } | undefined>;
-  const agentGauge = (id: 'scalper' | 'auction' | 'trend', i: number) => {
+  const agentGauge = (id: 'auction' | 'trend', i: number) => {
     const b = by[id];
     const on = st.cfg.agents[id];
     const wr = b && b.trades ? b.wins / b.trades : null;
@@ -749,7 +748,7 @@ export function CommandCenter() {
       <section className="cc-core cc-card" aria-label="Swarm core">
         <CoreView key={theme} input={input} onSelect={setPick} />
         <div className="cc-core-agents">
-          {(['scalper', 'auction', 'trend', 'lab', 'tape', 'crowd', 'guardian', 'forest', 'risk'] as const).map((a) => (
+          {(['auction', 'trend', 'lab', 'tape', 'crowd', 'guardian', 'forest', 'risk'] as const).map((a) => (
             <span key={a} className={`cc-agent ${st.running && (a !== 'lab' || depOn.length) ? 'on' : ''}`}>
               <i /> {AGENT[a]}
             </span>
@@ -817,18 +816,18 @@ export function CommandCenter() {
       <div className="cc-bottom">
         <Card n="08" title="Swarm gauges" className="cc-gauges-card">
           <div className="cc-gauges">
-            {agentGauge('scalper', 0)}
+            <Gauge value={coins.length ? feedsOk / coins.length : null} text={`${feedsOk}/${coins.length}`} label="Guardian" sub={st.running ? 'feeds live · spreads and spikes watched' : 'watching when the swarm runs'} color={GC[0]} dim={!st.running} />
             {agentGauge('auction', 1)}
             {agentGauge('trend', 2)}
             <Gauge
               value={depOn.length ? Math.min(1, depOn.length / 3) : null}
               text={`${depOn.length} on`}
               label="Lab · deploy"
-              sub={depOn.length ? `${labOpen} open · proposes, never overrules` : 'click to deploy a strategy'}
+              sub={depOn.length ? `${labOpen} open · as tested or by the council` : 'click to deploy a strategy'}
               color={GC[3]}
               dim={!depOn.length}
               onClick={() => setDrawer('deploy')}
-              title="The deploy gate: Strategy Lab strategies plug in here. They propose; the council, the forest and the risk manager decide."
+              title="The deploy gate: Strategy Lab strategies plug in here. Each trades as tested or lets the council decide; Guardian and Risk always check every trade."
             />
             <Gauge value={councilRate} text={councilRate === null ? '—' : `${Math.round(councilRate * 100)}%`} label="Council" sub={`${trades} traded · ${passes} passed (1 h)`} color={GC[4]} dim={councilRate === null} />
             <Gauge value={ft ? ft.accuracy : st.forest.samples ? Math.min(1, st.forest.samples / 200) : null} text={ft?.accuracy != null ? `${Math.round(ft.accuracy * 100)}%` : `${st.forest.samples}`} label="Forest" sub={ft ? `accuracy · ${ft.n} trades learned` : `${st.forest.samples} samples · learning`} color={GC[5]} dim={!ft} />

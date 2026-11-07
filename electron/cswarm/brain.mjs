@@ -22,8 +22,10 @@
 //   Risk         the compounding risk manager (risk.mjs): a gate is a veto.
 import { Forest } from '../../src/cswarm/forest.ts';
 
-export const PROPOSERS = ['scalper', 'auction', 'trend', 'lab'];
-export const COUNCIL = ['scalper', 'auction', 'trend', 'tape', 'crowd', 'guardian', 'forest', 'risk'];
+export const PROPOSERS = ['auction', 'trend', 'lab'];
+/** each proposer's number as the forest reads it — fixed for good (the retired Scalper keeps 0), so what the forest learned keeps its meaning */
+export const AGENT_INDEX = { scalper: 0, auction: 1, trend: 2, lab: 3 };
+export const COUNCIL = ['auction', 'trend', 'tape', 'crowd', 'guardian', 'forest', 'risk'];
 export const AGENT_NAME = { scalper: 'Scalper', auction: 'Auctioneer', trend: 'Trend', lab: 'Lab', tape: 'Tape', crowd: 'Crowd', guardian: 'Guardian', forest: 'Forest', risk: 'Risk' };
 const COINS = ['BTC', 'ETH', 'SOL'];
 
@@ -43,7 +45,7 @@ export function features(c) {
   const x = c.ctx ?? {};
   const va = x.va && x.va.vah > x.va.val ? ((c.price - x.va.poc) / (x.va.vah - x.va.val)) * dir : 0;
   return [
-    PROPOSERS.indexOf(c.agent),
+    AGENT_INDEX[c.agent] ?? -1,
     dir,
     risk > 0 ? reward / risk : 0,
     c.price > 0 ? (risk / c.price) * 1e4 : 0,

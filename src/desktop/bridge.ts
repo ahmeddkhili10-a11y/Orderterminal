@@ -527,6 +527,7 @@ export interface CSwarmPosition {
   mode: 'paper' | 'live';
   coin: string;
   symbol: string;
+  /** scalper: trades from before the Scalper agent was retired */
   agent: 'scalper' | 'auction' | 'trend';
   agentName?: string;
   owner: 'engine' | 'swarm';
@@ -590,7 +591,7 @@ export interface CSwarmRisk {
 export interface CSwarmConfig {
   exchangeId: string;
   coins: string[];
-  agents: { scalper: boolean; auction: boolean; trend: boolean };
+  agents: { auction: boolean; trend: boolean };
   paperStartUsd: number;
   feeBps: number;
   slippageBps: number;
@@ -608,7 +609,7 @@ export interface CSwarmState {
   open: CSwarmPosition[];
   closed: CSwarmPosition[];
   totals: { trades: number; wins: number; pnl: number };
-  byAgent: Record<'scalper' | 'auction' | 'trend', { trades: number; wins: number; pnl: number; avgR: number | null }>;
+  byAgent: Record<'auction' | 'trend', { trades: number; wins: number; pnl: number; avgR: number | null }>;
   /** per deployed Lab strategy: what the council did with its signals, and what the blocked ones would have made (R) */
   labBook?: Record<string, LabBook>;
   coins: { coin: string; symbol: string; price: number; feed: string; feedError: string | null; funding: number | null; daily: { dir: number; up: number } | null; engines: Record<string, { state: string; warm: boolean; lastSkip: { t: number; event: string; reason: string } | null; lastSignal: { setup: string; side: string; t: number } | null }> }[];

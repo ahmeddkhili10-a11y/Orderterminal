@@ -18,7 +18,7 @@
 // Trades the council turned down are followed anyway (the shadow book), so the
 // forest learns from paper, live and refused trades alike.
 import { randomUUID } from 'node:crypto';
-import { ADAPTIVE_PRESET, AmtEngine, INTRADAY_PRESET } from '../amt/engine.mjs';
+import { AmtEngine, INTRADAY_PRESET } from '../amt/engine.mjs';
 import { AGENT_NAME, CCOUNCIL_DEFAULTS, councilR, dirOf, features, MARK, oddsR, PROPOSERS, rClass, trainForest } from './brain.mjs';
 import { newBook, recordClose, RISK_DEFAULTS, riskGate, shiftBook, sizeTrade, updateBook } from './risk.mjs';
 import { atrOf, dailyTrendOf, manageTrend, Shadow, TREND_AGENT_DEFAULTS, trendCandidate } from './agents.mjs';
@@ -30,7 +30,7 @@ const HOUR = 3_600_000;
 export const CSWARM_DEFAULTS = {
   exchangeId: 'hyperliquid',
   coins: ['BTC', 'ETH', 'SOL'],
-  agents: { scalper: true, auction: true, trend: true, lab: true },
+  agents: { auction: true, trend: true, lab: true },
   /** the paper account starts with this (USDC) */
   paperStartUsd: 30,
   /** taker fee and slippage per side, bps (Hyperliquid base tier: 4.5 bps taker) */
@@ -43,6 +43,8 @@ export const CSWARM_DEFAULTS = {
 export function mergeCfg(p = {}) {
   const c = { ...CSWARM_DEFAULTS, ...(p ?? {}) };
   c.agents = { ...CSWARM_DEFAULTS.agents, ...(p?.agents ?? {}) };
+  // the Scalper agent is retired: deployed Lab strategies do that job, under the council
+  delete c.agents.scalper;
   c.risk = { ...RISK_DEFAULTS, ...(p?.risk ?? {}) };
   c.council = { ...CCOUNCIL_DEFAULTS, ...(p?.council ?? {}) };
   c.coins = Array.isArray(p?.coins) && p.coins.length ? p.coins.map((x) => String(x).toUpperCase().trim()).filter(Boolean).slice(0, 8) : CSWARM_DEFAULTS.coins;
@@ -191,10 +193,9 @@ export class CryptoSwarm {
     const c = this.cfg;
     const cs = { coin, symbol: symbolFor(coin, c.exchangeId), sid: `cswarm-${coin}`, price: NaN, funding: null, daily: null, dailyAt: 0, hourly: [], hourlyAt: 0, lastBar: 0, lab: {}, labLast: {}, engines: {}, busy: false, feed: 'connecting', feedError: null };
     const eq = this.equity() > 0 ? this.equity() : c.paperStartUsd;
-    for (const agent of ['scalper', 'auction']) {
+    for (const agent of ['auction']) {
       if (!c.agents[agent]) continue;
-      const base = agent === 'scalper' ? ADAPTIVE_PRESET : INTRADAY_PRESET;
-      const e = new AmtEngine({ ...base, orderMode: 'taker', sizing: 'balance', accountUsd: eq, feeBps: c.feeBps, slippageBps: c.slippageBps, minNotionalUsd: 0, maxLeverage: c.risk.perCoinLeverage, dailyLossPct: 100, maxDrawdownPct: 100, lossStreak: 0, trendFilter: true });
+      const e = new AmtEngine({ ...INTRADAY_PRESET, orderMode: 'taker', sizing: 'balance', accountUsd: eq, feeBps: c.feeBps, slippageBps: c.slippageBps, minNotionalUsd: 0, maxLeverage: c.risk.perCoinLeverage, dailyLossPct: 100, maxDrawdownPct: 100, lossStreak: 0, trendFilter: true });
       e.liveBalance = eq;
       cs.engines[agent] = e;
     }
@@ -420,7 +421,7 @@ export class CryptoSwarm {
   }
 
   ctxOf(cs, agent) {
-    const e = cs.engines[agent] ?? cs.engines.scalper ?? cs.engines.auction ?? null;
+    const e = cs.engines[agent] ?? cs.engines.auction ?? null;
     const flow = e ? e.flowStats() : null;
     const book = e ? e.bookStats() : null;
     const k = e?.candles?.slice(-16) ?? [];
@@ -703,7 +704,7 @@ export class CryptoSwarm {
   /** The three moments of a trade, with what the app needs to draw its chart. */
   notify(stage, pos) {
     const cs = this.coins.get(pos.coin);
-    const e = cs?.engines[pos.agent] ?? cs?.engines.scalper ?? cs?.engines.auction ?? null;
+    const e = cs?.engines[pos.agent] ?? cs?.engines.auction ?? null;
     const minute = (e?.candles ?? []).slice(-90).map(([t, o, h, l, c]) => [t, o, h, l, c]);
     const hourly = (cs?.hourly ?? []).slice(-60).map((r) => [r.time, r.open, r.high, r.low, r.close]);
     const candles = pos.agent === 'trend' || minute.length < 20 ? hourly : minute;

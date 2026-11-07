@@ -14,10 +14,9 @@ Three agents propose trades; five more vote on them.
 
 | Agent | Proposes / votes | What it does | Built on |
 |---|---|---|---|
-| **Scalper** | proposes | order-flow scalps on the 1-minute tape: absorption, sweeps, aggressive delta with the book behind it | order-flow imbalance drives short-horizon price changes (Cont, Kukanov & Stoikov 2014) |
 | **Auctioneer** | proposes | intraday auction market theory: the session's value area, initial-balance breakouts, the 80 % rule back into prior value | Steidlmayer's market profile, Dalton's *Mind Over Markets*; intraday momentum and reversal in crypto (Wen, Bouri, Xu & Zhao 2022) |
 | **Trend** | proposes | time-series momentum: the 20/60/120-day trends vote; entries on hourly 20-bar breakouts in their direction, 2-ATR stop, 4-ATR target, break-even at 1R, trailing from 2R | Moskowitz, Ooi & Pedersen 2012; in crypto, Liu & Tsyvinski 2021; a century of trend following (Hurst, Ooi & Pedersen 2017) |
-| **Tape** | votes | the last seconds of aggressive buying and selling and the book: for when flow is with the trade, against when it is against | as the Scalper |
+| **Tape** | votes | the last seconds of aggressive buying and selling and the book: for when flow is with the trade, against when it is against | order-flow imbalance drives short-horizon price changes (Cont, Kukanov & Stoikov 2014) |
 | **Crowd** | votes | funding: when the trade's side pays a lot to hold, it is crowded — a vote against; when the other side pays, a vote for | perpetual futures and funding (He, Manela, Ross & von Wachter 2022) |
 | **Guardian** | veto only | a spread over 8 bps or 1-minute moves over 80 bps: no trade | — |
 | **Forest** | votes, veto once trusted | the odds of a loss, scratch, win or big win and the expected result in R after costs, from a random forest (Breiman 2001) | learned from every paper, live and refused trade |
@@ -95,7 +94,7 @@ Switch it in the Telegram panel: **Crypto swarm trades on Telegram**.
 - The top bar's kill switch stops the crypto swarm too; positions keep their
   exchange stops. **Stop & close all** closes them at market.
 
-The order-flow agents (Scalper, Auctioneer) learn the session's value first:
+The order-flow agent (the Auctioneer) learns the session's value first:
 expect 20–60 minutes before their first proposals.
 
 ## References
@@ -128,7 +127,7 @@ shows none of it; the only link is the strategies the Strategy Lab deploys.
   feeds (each coin, its daily trend, price and funding); capital at risk (each
   open position in R).
 - **Centre — the swarm core**: what the agents read flows in from the left
-  (feeds, Scalper, Auctioneer, Trend, the Lab's strategies, funding), each coin
+  (feeds, Auctioneer, Trend, the Lab's strategies, funding), each coin
   is a sphere of particles — bigger as its signals heat up, cyan for the daily
   trend, magenta for signal heat — held coins sit at the far tip, and the
   results flow out to the right. 3D where the machine draws WebGL, flat
@@ -136,7 +135,7 @@ shows none of it; the only link is the strategies the Strategy Lab deploys.
 - **Right**: the account (equity, peak, drawdown, **Account · rules** opens the
   full swarm panel: paper or live, keys, agents, risk), the results and the
   execution tape.
-- **Bottom — the gauges**: Scalper, Auctioneer, Trend; **Lab · deploy** (the
+- **Bottom — the gauges**: Guardian (feeds live, spreads and spikes watched), Auctioneer, Trend; **Lab · deploy** (the
   deploy gate); the Council (how many proposals it lets through); the Forest
   (its accuracy, or samples while it learns); the Optimizer (risk a trade and
   the drawdown it is cutting for); Exposure; the daily Loss limit; the Floor.

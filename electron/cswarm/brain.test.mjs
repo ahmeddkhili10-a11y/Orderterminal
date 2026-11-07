@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CCOUNCIL_DEFAULTS, CFEATURES, councilR, features, oddsR, priorR, rClass, trainForest } from './brain.mjs';
+import { AGENT_INDEX, CCOUNCIL_DEFAULTS, CFEATURES, councilR, features, oddsR, PROPOSERS, priorR, rClass, trainForest } from './brain.mjs';
 import { kellyOf, newBook, recordClose, RISK_DEFAULTS, riskGate, shiftBook, sizeTrade, updateBook } from './risk.mjs';
 import { atrOf, dailyTrendOf, manageTrend, Shadow, trendCandidate } from './agents.mjs';
 
@@ -31,6 +31,13 @@ describe('crypto swarm brain', () => {
     expect(x[10]).toBeCloseTo(0.125); // longs pay 0.125 bps an hour
     expect(x[14]).toBe(0);
     expect(features(cand({ side: 'sell', stop: 100_400, target: 99_100 }))[4]).toBe(-1);
+  });
+
+  it('the forest reads each proposer by a fixed number (the retired Scalper keeps 0), so what it learned keeps its meaning', () => {
+    expect(PROPOSERS).toEqual(['auction', 'trend', 'lab']);
+    expect(AGENT_INDEX).toEqual({ scalper: 0, auction: 1, trend: 2, lab: 3 });
+    expect(features(cand({ agent: 'trend' }))[0]).toBe(2);
+    expect(features(cand({ agent: 'lab' }))[0]).toBe(3);
   });
 
   it('the prior favours trades with the trend and the tape, and charges costs in R', () => {
@@ -97,7 +104,7 @@ describe('crypto swarm brain', () => {
     let seed = 3;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     for (let i = 0; i < 1000; i++) {
-      const c = cand({ agent: ['scalper', 'auction', 'trend'][i % 3], stop: 100_000 - 50 - rnd() * 900, target: 100_000 + 100 + rnd() * 3000, ctx: { ...cand().ctx, flow: { deltaRatio: rnd() * 2 - 1 }, daily: { dir: rnd() > 0.5 ? 1 : -1, up: Math.floor(rnd() * 4) } } });
+      const c = cand({ agent: ['auction', 'trend', 'lab'][i % 3], stop: 100_000 - 50 - rnd() * 900, target: 100_000 + 100 + rnd() * 3000, ctx: { ...cand().ctx, flow: { deltaRatio: rnd() * 2 - 1 }, daily: { dir: rnd() > 0.5 ? 1 : -1, up: Math.floor(rnd() * 4) } } });
       const v = councilR({ cand: c, odds: oddsR(features(c), null, 11), riskGate: null, sizeNote: '' }, CCOUNCIL_DEFAULTS);
       expect(v.votes.find((x) => x.bot === 'forest').stance).not.toBe('veto');
     }
