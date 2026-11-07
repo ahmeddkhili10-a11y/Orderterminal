@@ -381,7 +381,10 @@ export class MarketHub {
       let trades;
       if (s.historySource === 'local') {
         if (!desktop) throw new DesktopOnlyError('The local database');
-        const local = await desktop.db.query(feed.inst.venue, feed.inst.symbol, from, to);
+        const c = await desktop.db.query(feed.inst.venue, feed.inst.symbol, from, to);
+        // typed columns from the database worker, turned into trades here, in one pass
+        const local: { time: number; price: number; qty: number; side: 'buy' | 'sell' }[] = new Array(c.t.length);
+        for (let i = 0; i < c.t.length; i++) local[i] = { time: c.t[i], price: c.p[i], qty: c.q[i], side: c.s[i] === 1 ? 'buy' : 'sell' };
         set({ progress: 0.5, message: `Loaded ${local.length.toLocaleString()} trades from the local database` });
         trades = local;
         // fill the gap between the last recorded trade and now from the exchange

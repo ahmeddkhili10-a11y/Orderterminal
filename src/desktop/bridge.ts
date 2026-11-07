@@ -738,7 +738,8 @@ export interface NovusApi {
   db: {
     info(): Promise<DbInfo>;
     record(venue: string, symbol: string, rows: { p: number; q: number; s: 'buy' | 'sell'; t: number }[]): Promise<number>;
-    query(venue: string, symbol: string, from: number, to: number): Promise<{ time: number; price: number; qty: number; side: 'buy' | 'sell' }[]>;
+    /** a market's recorded trades as typed columns (time, price, qty, side: 1 = buy), read off the main thread */
+    query(venue: string, symbol: string, from: number, to: number): Promise<TradeColumns>;
     stats(): Promise<{ venue: string; symbol: string; n: number; first: number; last: number }[]>;
     prune(days?: number): Promise<number>;
     deleteInstrument(venue: string, symbol: string): Promise<number>;
@@ -868,4 +869,12 @@ export interface LabBook {
   /** blocked signals followed to their exits anyway */
   shadowN: number;
   shadowR: number;
+}
+
+/** recorded trades as typed columns: compact to send between processes */
+export interface TradeColumns {
+  t: Float64Array;
+  p: Float64Array;
+  q: Float64Array;
+  s: Uint8Array;
 }

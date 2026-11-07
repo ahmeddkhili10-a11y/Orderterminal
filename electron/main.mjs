@@ -1,6 +1,7 @@
 // Novus Ordo desktop shell (Electron main process).
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, screen, shell } from 'electron';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BotManager } from './amt/bots.mjs';
@@ -28,6 +29,66 @@ const root = join(here, '..');
 // training worker: bundled next to main.mjs and kept outside the asar archive
 const trainWorkerPath = join(here, 'trainWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 const labWorkerPath = join(here, 'labWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
+const dbWorkerPath = join(here, 'dbWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
+
+// ---------- the database's heavy work, on a thread of its own ----------
+// Deleting old trades and reading a chart's history can touch millions of rows: done on the main
+// process they froze the whole app (and kept the database locked while it closed). They run on a
+// worker with its own connection; the main process only does the small, quick reads and writes.
+let dbw = null;
+let dbwSeq = 0;
+const dbwWaiting = new Map();
+function dbTask(msg, timeoutMs = 10 * 60_000) {
+  if (!dbw) {
+    dbw = new Worker(dbWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1024 } });
+    dbw.on('message', (m) => {
+      const w = dbwWaiting.get(m.id);
+      if (!w) return;
+      dbwWaiting.delete(m.id);
+      clearTimeout(w.timer);
+      if (m.error) w.reject(new Error(m.error));
+      else w.resolve(m);
+    });
+    const fail = (e) => {
+      for (const w of dbwWaiting.values()) w.reject(e instanceof Error ? e : new Error(`database worker stopped (${e})`));
+      dbwWaiting.clear();
+      dbw = null;
+    };
+    dbw.on('error', fail);
+    dbw.on('exit', (code) => code !== 0 && fail(code));
+  }
+  const id = ++dbwSeq;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      dbwWaiting.delete(id);
+      reject(new Error(`database task ${msg.type} timed out`));
+    }, timeoutMs);
+    dbwWaiting.set(id, { resolve, reject, timer });
+    dbw.postMessage({ ...msg, id, file: db.file });
+  });
+}
+/** a market's recorded trades as typed columns, read on the worker (on this thread, a page at a time, if the worker is unavailable) */
+async function tradeColumns(venue, symbol, from, to, limit) {
+  try {
+    return (await dbTask({ type: 'columns', venue, symbol, from, to, limit })).cols;
+  } catch (e) {
+    log('warn', 'database worker unavailable — reading history on the main thread', e);
+    return db.tradeColumns(venue, symbol, from, to, limit);
+  }
+}
+let pruning = null;
+/** delete trades older than the retention, in small chunks on the worker; one run at a time */
+function pruneOld(days) {
+  if (pruning) return pruning;
+  const t0 = Date.now();
+  pruning = dbTask({ type: 'prune', olderThan: Date.now() - days * DAY, skip: db.pendingMarkets() })
+    .then((m) => {
+      if (m.deleted) log('info', `pruned ${m.deleted} old trades in ${((Date.now() - t0) / 1000).toFixed(1)} s (on the database worker)`);
+      return m.deleted;
+    })
+    .finally(() => (pruning = null));
+  return pruning;
+}
 const DAY = 86_400_000;
 
 // NOVUS_USER_DATA relocates the database, vault and settings (tests, portable installs)
@@ -515,19 +576,32 @@ function registerIpc() {
 
   // database
   handle('db:info', () => ({ ...db.info(), retentionDays: retentionDays() }));
-  handle('db:record', (_e, venue, symbol, rows) => db.recordTrades(venue, symbol, rows));
-  handle('db:query', (_e, venue, symbol, from, to) => db.queryTrades(venue, symbol, from, to));
+  // live batches are small and quick here; a big one (a backfilled gap) is written on the database worker in chunks
+  handle('db:record', (_e, venue, symbol, rows) => {
+    if (!Array.isArray(rows) || rows.length <= 3000) return db.recordTrades(venue, symbol, rows ?? []);
+    return dbTask({ type: 'record', venue, symbol, rows }).then(
+      (m) => m.n,
+      (e) => {
+        log('warn', 'database worker unavailable — recording the batch here', e);
+        return db.recordTrades(venue, symbol, rows);
+      },
+    );
+  });
+  // a chart's history: typed columns read on the database worker (no millions of objects on this thread or in the message)
+  handle('db:query', (_e, venue, symbol, from, to) => tradeColumns(venue, symbol, from, to, 1_000_000));
   handle('db:stats', () => db.tradeStats());
-  handle('db:prune', (_e, days) => db.pruneTrades(Date.now() - (days ?? retentionDays()) * DAY));
+  handle('db:prune', (_e, days) => pruneOld(days ?? retentionDays()));
   handle('db:deleteInstrument', (_e, venue, symbol) => db.deleteInstrument(venue, symbol));
   handle('db:vacuum', () => db.vacuum());
   handle('db:setRetention', (_e, days) => db.set('retentionDays', Math.max(1, Math.min(365, Number(days) || 3))));
   handle('db:exportCsv', async (_e, venue, symbol) => {
     const r = await dialog.showSaveDialog(win, { defaultPath: `${venue}-${symbol.replace(/[^\w.-]+/g, '_')}-trades.csv`, filters: [{ name: 'CSV', extensions: ['csv'] }] });
     if (r.canceled || !r.filePath) return null;
-    const rows = db.queryTrades(venue, symbol, 0, Date.now());
-    writeFileSync(r.filePath, 'timestamp_ms,price,quantity,side\n' + rows.map((t) => `${t.time},${t.price},${t.qty},${t.side}`).join('\n'));
-    return { path: r.filePath, rows: rows.length };
+    const c = await tradeColumns(venue, symbol, 0, Date.now(), 20_000_000);
+    const lines = ['timestamp_ms,price,quantity,side'];
+    for (let i = 0; i < c.t.length; i++) lines.push(`${c.t[i]},${c.p[i]},${c.q[i]},${c.s[i] === 1 ? 'buy' : 'sell'}`);
+    await writeFile(r.filePath, lines.join('\n'));
+    return { path: r.filePath, rows: c.t.length };
   });
 
   // wallets
@@ -1057,15 +1131,19 @@ app.whenReady().then(async () => {
       throw e;
     });
   // housekeeping once the app is up
-  const prune = () => {
-    try {
-      const n = db.pruneTrades(Date.now() - retentionDays() * DAY);
-      if (n) log('info', `pruned ${n} old trades`);
-    } catch (e) {
-      log('warn', 'prune failed', e);
-    }
-  };
-  setTimeout(prune, 20_000);
+  // old trades go in small chunks on the database worker, well after start-up, never in one long freeze
+  const prune = () => void pruneOld(retentionDays()).catch((e) => log('warn', 'prune failed', e));
+  setTimeout(prune, 90_000);
+  // and the write-ahead log is folded back into the database regularly, so it never grows large
+  setInterval(() => void dbTask({ type: 'checkpoint' }).catch(() => undefined), 10 * 60_000);
+  // a freeze of the main process is logged with its length, so a slow start or a stutter shows in the log
+  let beat = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const late = now - beat - 1000;
+    if (late > 750) log('warn', `the main process was busy for ${late} ms`);
+    beat = now;
+  }, 1000);
   // a database from an older version: count its recorded trades in small slices
   const backlog = setInterval(() => {
     try {
@@ -1103,4 +1181,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', () => db?.close());
+app.on('will-quit', () => {
+  void dbw?.terminate();
+  db?.close();
+});

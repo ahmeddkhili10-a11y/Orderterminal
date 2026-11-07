@@ -16,7 +16,7 @@
     "e2e:smoke": "node e2e/smoke.mjs",
     "e2e:venues": "node e2e/venues.mjs",
     "e2e:follow": "node e2e/follow.mjs",
-    "build:main": "esbuild electron/main.mjs --bundle --platform=node --format=esm --target=node22 --outfile=dist-electron/main.mjs --external:electron --external:ccxt && esbuild electron/amt/trainWorker.mjs --bundle --platform=node --format=esm --target=node22 --outfile=dist-electron/trainWorker.mjs && esbuild electron/lab/labWorker.mjs --bundle --platform=node --format=esm --target=node22 --outfile=dist-electron/labWorker.mjs",
+    "build:main": "esbuild electron/main.mjs --bundle --platform=node --format=esm --target=node22 --outfile=dist-electron/main.mjs --external:electron --external:ccxt && esbuild electron/amt/trainWorker.mjs --bundle --platform=node --format=esm --target=node22 --outfile=dist-electron/trainWorker.mjs && esbuild electron/lab/labWorker.mjs --bundle --platform=node --format=esm --target=node22 --outfile=dist-electron/labWorker.mjs && esbuild electron/dbWorker.mjs --bundle --platform=node --format=esm --target=node22 --outfile=dist-electron/dbWorker.mjs",
     "desktop": "npm run build && npm run build:main && electron .",
     "desktop:dev": "npm run build:main && node scripts/dev-desktop.mjs",
     "icon": "python3 scripts/make-icons.py",
@@ -65,7 +65,8 @@
     },
     "asarUnpack": [
       "dist-electron/trainWorker.mjs",
-      "dist-electron/labWorker.mjs"
+      "dist-electron/labWorker.mjs",
+      "dist-electron/dbWorker.mjs"
     ],
     "files": [
       "dist/**",

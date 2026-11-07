@@ -125,9 +125,99 @@ export async function readColumns(sql, venue, symbol, from, to, limit = 3_000_00
   return cols;
 }
 
+/** the busy wait every connection uses: long enough to ride out another writer's short transaction, short enough never to freeze the app */
+export const BUSY_MS = 2000;
+
+/** Every recorded market, found by hopping along the (venue, symbol, t) index — no full scan. */
+function marketsOf(sql) {
+  const next = sql.prepare('SELECT venue, symbol FROM trades WHERE (venue, symbol) > (?, ?) ORDER BY venue, symbol LIMIT 1');
+  const out = [];
+  for (let r = next.get('', ''); r; r = next.get(r.venue, r.symbol)) out.push({ venue: r.venue, symbol: r.symbol });
+  return out;
+}
+
+/**
+ * Delete trades older than a time, a few thousand rows per short transaction,
+ * pausing between them — so the app's own writes (recording, settings) never
+ * wait more than a few milliseconds, however many millions of rows go. The
+ * kept counts (trade_stats) follow each chunk. Markets in `skip` (still being
+ * counted from an older database) are left for the next run. Takes a raw
+ * DatabaseSync so it can run on a worker's own connection.
+ */
+export async function pruneChunked(sql, olderThan, { chunk = 4000, pauseMs = 4, skip = [] } = {}) {
+  const del = sql.prepare('DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE venue = ? AND symbol = ? AND t < ? LIMIT ?)');
+  const sub = sql.prepare('UPDATE trade_stats SET n = MAX(0, n - ?) WHERE venue = ? AND symbol = ?');
+  const first = sql.prepare('UPDATE trade_stats SET first = (SELECT MIN(t) FROM trades WHERE venue = ? AND symbol = ?) WHERE venue = ? AND symbol = ?');
+  const skipped = new Set(skip);
+  let total = 0;
+  for (const { venue, symbol } of marketsOf(sql)) {
+    if (skipped.has(`${venue}\u0000${symbol}`)) continue;
+    let k;
+    let any = false;
+    do {
+      sql.exec('BEGIN IMMEDIATE');
+      try {
+        k = Number(del.run(venue, symbol, olderThan, chunk).changes);
+        if (k) sub.run(k, venue, symbol);
+        sql.exec('COMMIT');
+      } catch (e) {
+        sql.exec('ROLLBACK');
+        throw e;
+      }
+      total += k;
+      if (k) any = true;
+      await new Promise((r) => setTimeout(r, pauseMs));
+    } while (k === chunk);
+    if (any) first.run(venue, symbol, venue, symbol);
+  }
+  sql.prepare('DELETE FROM trade_stats WHERE first IS NULL').run();
+  return total;
+}
+
+/**
+ * Record a large batch of trades (a backfill) in short transactions with a
+ * pause between them, on a connection of this thread's own; the kept counts
+ * follow. Small live batches go through Db.recordTrades on the main connection.
+ */
+export async function recordChunked(sql, venue, symbol, rows, { chunk = 2000, pauseMs = 2 } = {}) {
+  const ins = sql.prepare('INSERT INTO trades (venue, symbol, t, price, qty, side) VALUES (?, ?, ?, ?, ?, ?)');
+  const bump = sql.prepare(
+    `INSERT INTO trade_stats (venue, symbol, n, first, last) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(venue, symbol) DO UPDATE SET n = n + excluded.n, first = MIN(COALESCE(first, excluded.first), excluded.first), last = MAX(COALESCE(last, excluded.last), excluded.last)`,
+  );
+  for (let i = 0; i < rows.length; i += chunk) {
+    const part = rows.slice(i, i + chunk);
+    let lo = Infinity;
+    let hi = -Infinity;
+    sql.exec('BEGIN IMMEDIATE');
+    try {
+      for (const r of part) {
+        const t = Math.round(r.t);
+        if (t < lo) lo = t;
+        if (t > hi) hi = t;
+        ins.run(venue, symbol, t, r.p, r.q, r.s === 'buy' ? 1 : 0);
+      }
+      bump.run(venue, symbol, part.length, lo, hi);
+      sql.exec('COMMIT');
+    } catch (e) {
+      sql.exec('ROLLBACK');
+      throw e;
+    }
+    await new Promise((r) => setTimeout(r, pauseMs));
+  }
+  return rows.length;
+}
+
+/** Open a connection of this thread's own, with the app's settings. */
+export function openConnection(file, readOnly = false) {
+  const sql = new DatabaseSync(file, readOnly ? { readOnly: true } : {});
+  sql.exec(`PRAGMA busy_timeout = ${BUSY_MS};`);
+  return sql;
+}
+
 /** Read trade columns from the database file on a read-only connection of this thread's own. */
 export async function readColumnsFromFile(file, venue, symbol, from, to, limit) {
-  const sql = new DatabaseSync(file, { readOnly: true });
+  const sql = openConnection(file, true);
   try {
     return await readColumns(sql, venue, symbol, from, to, limit, 100_000);
   } finally {
@@ -161,9 +251,10 @@ export class Db {
     this.file = file;
     this.db = new DatabaseSync(file);
     try {
-      // wait (up to 10 s) for a lock another program holds, instead of failing at once
-      this.db.exec('PRAGMA busy_timeout = 10000;');
-      this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+      // ride out another writer's short transaction instead of failing at once — but never freeze the app on it
+      this.db.exec(`PRAGMA busy_timeout = ${BUSY_MS};`);
+      // WAL, and keep its file small after each checkpoint, so start-up and shut-down never wade through gigabytes
+      this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA journal_size_limit = 67108864;');
     } catch (e) {
       this.db.close();
       throw e;
@@ -253,10 +344,11 @@ export class Db {
   }
   /** Every recorded market, found by hopping along the index (no full scan). */
   instruments() {
-    const next = this.db.prepare('SELECT venue, symbol FROM trades WHERE (venue, symbol) > (?, ?) ORDER BY venue, symbol LIMIT 1');
-    const out = [];
-    for (let r = next.get('', ''); r; r = next.get(r.venue, r.symbol)) out.push({ venue: r.venue, symbol: r.symbol });
-    return out;
+    return marketsOf(this.db);
+  }
+  /** markets still being counted from an older database: the chunked prune leaves them for later */
+  pendingMarkets() {
+    return [...new Set(this.backlog.map((w) => `${w.venue}\u0000${w.symbol}`))];
   }
   /**
    * First run on a database recorded before trade_stats existed: one row per

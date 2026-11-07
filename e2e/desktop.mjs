@@ -352,8 +352,13 @@ try {
     window.novus.db.record('binancef', 'BTCUSDT', Array.from({ length: 500 }, (_, i) => ({ p: 100000 + i, q: 0.01, s: i % 2 ? 'buy' : 'sell', t: Date.now() - (500 - i) * 1000 }))),
   );
   expect(n === 500, 'recorded 500 trades');
-  const q = await page.evaluate(() => window.novus.db.query('binancef', 'BTCUSDT', 0, Date.now()));
-  expect(q.length === 500 && q[0].price === 100000, 'queried them back');
+  const q = await page.evaluate(() => window.novus.db.query('binancef', 'BTCUSDT', 0, Date.now()).then((c) => ({ n: c.t.length, p0: c.p[0], typed: c.t instanceof Float64Array })));
+  expect(q.n === 500 && q.p0 === 100000 && q.typed, 'queried them back (typed columns, read on the database worker)');
+  // a big batch (a backfilled gap) is written on the database worker, in chunks
+  const big = await page.evaluate(() => window.novus.db.record('bybit', 'ETHUSDT', Array.from({ length: 12_000 }, (_, i) => ({ p: 3000, q: 0.1, s: 'buy', t: Date.now() - (12_000 - i) * 100 }))));
+  expect(big === 12_000, 'a 12,000-trade batch recorded on the database worker');
+  const pr = await page.evaluate(() => window.novus.db.prune(365));
+  expect(typeof pr === 'number', 'old-trade clean-up runs on the database worker');
   await page.click('.flexlayout__tab_button_content:text-is("Database")');
   await page.waitForTimeout(1500);
   const dbText = await page.locator('.flexlayout__tab:visible').filter({ hasText: 'Record trades' }).innerText();

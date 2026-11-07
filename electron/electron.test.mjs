@@ -257,3 +257,51 @@ describe('a real lock from another process', () => {
     rmSync(dir, { recursive: true, force: true });
   }, 20_000);
 });
+
+describe('deleting old trades in small chunks', () => {
+  it('deletes only what is older, keeps the counts and first times right, skips markets still being counted', async () => {
+    const { openConnection, pruneChunked } = await import('./db.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'novus-prune-'));
+    const file = join(dir, 'novus-ordo.sqlite');
+    const db = new Db(file);
+    const T = 1_000_000;
+    for (const [v, s] of [['binancef', 'BTCUSDT'], ['bybit', 'ETHUSDT'], ['okx', 'SOLUSDT']]) db.recordTrades(v, s, Array.from({ length: 30_000 }, (_, i) => ({ t: T + i, p: 100, q: 1, s: i % 2 ? 'buy' : 'sell' })));
+    const sql = openConnection(file);
+    // the event loop keeps turning while it works: no single long freeze
+    let last = Date.now();
+    let worst = 0;
+    const tick = setInterval(() => {
+      worst = Math.max(worst, Date.now() - last);
+      last = Date.now();
+    }, 5);
+    const n = await pruneChunked(sql, T + 20_000, { chunk: 2000, skip: ['okx\u0000SOLUSDT'] });
+    clearInterval(tick);
+    sql.close();
+    expect(n).toBe(40_000);
+    expect(worst).toBeLessThan(250);
+    const stats = Object.fromEntries(db.tradeStats().map((r) => [`${r.venue} ${r.symbol}`, r]));
+    expect(stats['binancef BTCUSDT']).toMatchObject({ n: 10_000, first: T + 20_000 });
+    expect(stats['bybit ETHUSDT']).toMatchObject({ n: 10_000, first: T + 20_000 });
+    // the skipped market is untouched
+    expect(stats['okx SOLUSDT']).toMatchObject({ n: 30_000, first: T });
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('recording a large batch in chunks', () => {
+  it('writes every trade and keeps the counts, in short transactions', async () => {
+    const { openConnection, recordChunked } = await import('./db.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'novus-rec-'));
+    const file = join(dir, 'novus-ordo.sqlite');
+    const db = new Db(file);
+    const sql = openConnection(file);
+    const rows = Array.from({ length: 9_500 }, (_, i) => ({ t: 5_000 + i, p: 1, q: 2, s: i % 2 ? 'buy' : 'sell' }));
+    expect(await recordChunked(sql, 'binancef', 'BTCUSDT', rows, { chunk: 2000 })).toBe(9_500);
+    sql.close();
+    expect(db.tradeStats()[0]).toMatchObject({ venue: 'binancef', symbol: 'BTCUSDT', n: 9_500, first: 5_000, last: 14_499 });
+    expect(db.tradeColumns('binancef', 'BTCUSDT', 0, 1e9).then ? (await db.tradeColumns('binancef', 'BTCUSDT', 0, 1e9)).t.length : 0).toBe(9_500);
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

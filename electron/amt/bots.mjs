@@ -867,9 +867,15 @@ export class BotManager {
 
   /** Replay trades recorded in the database through a fresh engine. */
   async backtest(params, venue, symbol, from = 0, to = this.now()) {
-    const rows = this.db.queryTrades(venue, symbol, from, to);
-    if (rows.length < 1000) throw new Error(`only ${rows.length} recorded trades for ${venue} ${symbol} — let the terminal record for a while first`);
-    const trades = rows.map((r) => ({ t: r.time, p: r.price, q: r.qty, s: r.side }));
+    // read off the main thread (a worker, or page by page), then turned into trades with a yield every 100k
+    const cols = await this.loadColumns(venue, symbol, from, to, 2_000_000);
+    const n = cols ? cols.t.length : 0;
+    if (n < 1000) throw new Error(`only ${n} recorded trades for ${venue} ${symbol} — let the terminal record for a while first`);
+    const trades = new Array(n);
+    for (let i = 0; i < n; i++) {
+      trades[i] = { t: cols.t[i], p: cols.p[i], q: cols.q[i], s: cols.s[i] === 1 ? 'buy' : 'sell' };
+      if (i % 100_000 === 99_999) await new Promise((r) => setImmediate(r));
+    }
     const e = new AmtEngine(params);
     // the same daily-trend filter as live (without the history, both sides trade)
     let daily = null;
