@@ -209,3 +209,51 @@ describe('Solana balances', () => {
     expect(calls).toEqual(['getBalance', 'getTokenAccountsByOwner', 'getTokenAccountsByOwner']);
   });
 });
+
+describe('opening the database when another program holds it', () => {
+  it('waits for a lock to clear (a session still closing, a scan), then opens', async () => {
+    const { isLocked, openWithRetry } = await import('./db.mjs');
+    let n = 0;
+    const waits = [];
+    const db = await openWithRetry(
+      () => {
+        if (++n < 3) throw new Error('database is locked');
+        return 'open';
+      },
+      { everyMs: 10, onWait: (a) => waits.push(a) },
+    );
+    expect(db).toBe('open');
+    expect(waits).toEqual([1, 2]);
+    expect(isLocked(new Error('database is locked'))).toBe(true);
+    expect(isLocked(new Error('SQLITE_BUSY: database is busy'))).toBe(true);
+  });
+
+  it('gives up on a lock that outlasts the wait, and never retries other errors', async () => {
+    const { openWithRetry } = await import('./db.mjs');
+    await expect(openWithRetry(() => { throw new Error('database is locked'); }, { waitMs: 50, everyMs: 10 })).rejects.toThrow(/locked/);
+    let n = 0;
+    await expect(openWithRetry(() => { n++; throw new Error('file is not a database'); }, { waitMs: 1000, everyMs: 10 })).rejects.toThrow(/not a database/);
+    expect(n).toBe(1);
+  });
+});
+
+describe('a real lock from another process', () => {
+  it('the database waits for another process holding it, instead of failing at once', async () => {
+    const { spawn } = await import('node:child_process');
+    const dir = mkdtempSync(join(tmpdir(), 'novus-lock-'));
+    const file = join(dir, 'novus-ordo.sqlite');
+    new Db(file).close();
+    // another process takes an exclusive lock for 1.5 s (as a closing session or a scan would)
+    const holder = spawn(process.execPath, ['-e', `const { DatabaseSync } = require('node:sqlite'); const d = new DatabaseSync(${JSON.stringify(file)}); d.exec('BEGIN IMMEDIATE'); d.exec("INSERT OR REPLACE INTO kv (k, v) VALUES ('holder', '1')"); console.log('held'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); d.exec('COMMIT'); d.close();`]);
+    await new Promise((r) => holder.stdout.once('data', r));
+    const db = new Db(file);
+    // a write while the other process holds the write lock waits for it (busy timeout), instead of "database is locked"
+    const t0 = Date.now();
+    db.set('mine', 2);
+    expect(Date.now() - t0).toBeGreaterThan(300);
+    expect(db.get('mine')).toBe(2);
+    db.close();
+    await new Promise((r) => holder.once('exit', r));
+    rmSync(dir, { recursive: true, force: true });
+  }, 20_000);
+});

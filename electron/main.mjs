@@ -7,7 +7,7 @@ import { BotManager } from './amt/bots.mjs';
 import { CryptoSwarm } from './cswarm/cswarm.mjs';
 import { LabService } from './lab/lab.mjs';
 import { Screens } from './windows.mjs';
-import { Db } from './db.mjs';
+import { Db, isLocked, openWithRetry } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
 import { DEFAULT_RPC, recentActivity, SOL_MINT, tokenInfo, walletBalances } from '../src/shared/solana.ts';
@@ -958,13 +958,32 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   log('info', 'electron ready');
   try {
-    db = new Db(join(userDataDir, 'novus-ordo.sqlite'));
+    // a previous session still closing (or a backup / antivirus scan) can hold the file for a moment: wait it out
+    db = await openWithRetry(() => new Db(join(userDataDir, 'novus-ordo.sqlite')), { onWait: (n) => n === 1 && log('warn', 'the database is busy — waiting for the previous session (or a scan) to let go of it') });
     vault = new Vault(db, safeStorage, join(userDataDir, 'vault.key'));
   } catch (e) {
     log('error', 'could not open the database', e);
+    if (isLocked(e)) {
+      // still locked after 30 s: another copy is running (or stuck); say what to do, and offer to try again
+      const pick = dialog.showMessageBoxSync({
+        type: 'warning',
+        title: 'Novus Ordo is already open',
+        message: 'Another copy of Novus Ordo is still running, or still closing.',
+        detail: `Your data is safe — nothing has been changed.\n\nTo fix it:\n1. Press Ctrl + Shift + Esc to open Task Manager.\n2. End every task called "Novus Ordo".\n3. Press Try again.\n\nIf that does not help, restart the computer.\n\nLog: ${logFile()}`,
+        buttons: ['Try again', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (pick === 0) {
+        const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+        app.relaunch(portable ? { execPath: portable, args: [] } : { args: process.argv.slice(1) });
+      }
+      app.exit(0);
+      return;
+    }
     dialog.showErrorBox('Novus Ordo could not start', `The database in ${userDataDir} could not be opened:\n\n${e?.message ?? e}\n\nLog: ${logFile()}`);
     app.exit(1);
     return;

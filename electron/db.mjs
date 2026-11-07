@@ -135,11 +135,39 @@ export async function readColumnsFromFile(file, venue, symbol, from, to, limit) 
   }
 }
 
+/** a lock held by another program (a copy of the app still closing, a backup or a virus scan): worth waiting for */
+export const isLocked = (e) => /database is locked|SQLITE_BUSY|database table is locked/i.test(String(e?.message ?? e));
+
+/**
+ * Open the database, waiting out a lock held by another program — typically the
+ * previous session still closing, or a backup or antivirus scan touching the file.
+ * Retries for up to `waitMs`; any other error, or a lock that outlasts it, is thrown.
+ */
+export async function openWithRetry(open, { waitMs = 30_000, everyMs = 1500, onWait = () => {} } = {}) {
+  const until = Date.now() + waitMs;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return open();
+    } catch (e) {
+      if (!isLocked(e) || Date.now() + everyMs > until) throw e;
+      onWait(attempt, e);
+      await new Promise((r) => setTimeout(r, everyMs));
+    }
+  }
+}
+
 export class Db {
   constructor(file) {
     this.file = file;
     this.db = new DatabaseSync(file);
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+    try {
+      // wait (up to 10 s) for a lock another program holds, instead of failing at once
+      this.db.exec('PRAGMA busy_timeout = 10000;');
+      this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+    } catch (e) {
+      this.db.close();
+      throw e;
+    }
     this.db.exec(SCHEMA);
     this.insertTrade = this.db.prepare('INSERT INTO trades (venue, symbol, t, price, qty, side) VALUES (?, ?, ?, ?, ?, ?)');
     this.bumpStats = this.db.prepare(
