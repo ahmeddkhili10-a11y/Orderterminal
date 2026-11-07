@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { desktop } from '../desktop/bridge';
 import type { StrategySpec } from './backtest';
-import type { ResearchResult } from './research';
+import type { DeciderTest, Parts, ResearchResult } from './research';
 import type { MonteCarlo, Perf } from './stats';
 
 export interface LabConfig {
@@ -30,7 +30,10 @@ export interface LabDeployed {
   stats: { sharpe: number; t: number; dsr: number; trades: number; verdict: string };
   deployedAt: number;
   on: boolean;
+  /** council: the swarm's council can block its signals · tested: only the safety bots (Guardian, Risk) can */
+  authority?: Authority;
 }
+export type Authority = 'council' | 'tested';
 
 export interface LabStatus {
   running: boolean;
@@ -52,7 +55,13 @@ export interface LabTest {
   perCoin?: { coin: string; oos: Perf }[];
   /** the spec as tested (with the AI trade filter's model when it was kept) */
   spec?: StrategySpec;
-  meta?: { used: boolean; before: number; after: number; trainedOn: number } | null;
+  meta?: { used: boolean; before: number; after: number; trainedOn: number; kind?: 'forest' | 'nn' | 'both' } | null;
+  /** each decision maker (forest, neural network, both) measured on the unseen data */
+  deciders?: DeciderTest[];
+  /** the parts of a combined strategy: each rule alone, how the rules relate, what each filter adds */
+  parts?: Parts | null;
+  /** Kelly sizing: the full Kelly fraction found in sample and the half used */
+  kelly?: { f: number; target: number; trades: number } | null;
   /** when the unseen (out-of-sample) period starts, and the years of history tested */
   split?: number;
   years?: number;

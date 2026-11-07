@@ -153,6 +153,15 @@ try {
   await page.waitForTimeout(8000);
   await page.screenshot({ path: `${OUT}quant-desk.png` });
   if ((await page.locator('text=crashed').count()) !== 0) errors.push('quant desk: a panel crashed');
+  // NNET: a neural network trains on the simulator's candles and is judged on the ones it never saw
+  await page.locator('.flexlayout__tab_button:has-text("NNET")').first().click();
+  await page.waitForSelector('.nn-train:not([disabled])', { timeout: 20_000 });
+  await page.click('.nn-train');
+  await page.waitForSelector('.nn-panel .pro-table', { timeout: 90_000 });
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}quant-nnet.png` });
+  if (!/Neural network/.test(await page.locator('.nn-panel .pro-table').first().innerText())) errors.push('NNET: no result table');
+  if ((await page.locator('text=crashed').count()) !== 0) errors.push('NNET: crashed');
   console.log('quant desk: ok');
 } catch (e) {
   failed = true;

@@ -7,7 +7,7 @@
 // (in R, the multiple of the risk taken) and a return for every bar, marked
 // to market at the close, for the statistics.
 import { errQuantile } from './garch';
-import type { ForestModel } from './ml';
+import type { MetaModel } from './ml';
 import { atr14, barsPerYear, benchBeta, garchOf, garchSigma, EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Ctx, type ExitSpec, type Params } from './library';
 import { volTargetWeight } from './quant';
 
@@ -19,11 +19,15 @@ export interface StrategySpec {
   /** a short name the Lab gives it */
   name: string;
   signal: RuleRef;
+  /** more entry rules, read with `signal` and joined by `combine` (the bot builder's stacked strategies) */
+  also?: RuleRef[];
+  /** all: every rule must point the same way · majority: more than half do, none against · any: one does and none disagrees */
+  combine?: Combine;
   filters: RuleRef[];
   exit: ExitSpec;
   sides: 'both' | 'long' | 'short';
-  /** a meta-labeller: a forest that decides which signals to take (nf: how many inputs it was trained on) */
-  meta?: { model: ForestModel; threshold: number; nf?: number };
+  /** a meta-labeller: a forest, a neural network or both decide which signals to take (nf: how many inputs it was trained on) */
+  meta?: MetaModel;
   /**
    * position size while in a trade: unit notional; a volatility target
    * (annual σ the position should run at, from the GARCH forecast); or a
@@ -31,13 +35,21 @@ export interface StrategySpec {
    * a fraction of capital). Capped at 3× notional.
    */
   sizing?: Sizing;
+  /** a second sizing rule: the position is the smaller of the two (e.g. steady volatility, capped by a VaR budget) */
+  sizing2?: Sizing;
   /** delta-hedge the market exposure: short β × the position in bitcoin (β re-estimated on 30 days of returns) */
   hedge?: 'btc';
-  /** the bot builder's "AI trade filter": train a meta-labeller in sample when the strategy is tested (becomes `meta` if it helps) */
-  autoMeta?: boolean;
+  /** the bot builder's "AI trade filter": train a meta-labeller in sample when the strategy is tested (becomes `meta` if it helps) — a forest (true), a neural network, or both averaged */
+  autoMeta?: boolean | 'forest' | 'nn' | 'both';
+  /** how the money is split across the coins: equally, by calm (inverse volatility), minimum variance, or the efficient frontier's best return for the risk (the last three fitted on the training years) */
+  weights?: 'equal' | 'invvol' | 'minvar' | 'tangency';
+  /** the split, once tested: coin → share of the money (sums to 1) */
+  coinWeights?: Record<string, number>;
 }
+export type Combine = 'all' | 'majority' | 'any';
 export interface Sizing {
-  mode: 'unit' | 'vol' | 'var';
+  /** kelly: risk the target fraction of capital per trade at the stop (the target is a half-Kelly fraction found in sample; 0 = find it when tested) */
+  mode: 'unit' | 'vol' | 'var' | 'kelly';
   target: number;
 }
 export interface Trade {
@@ -74,8 +86,23 @@ const ex0 = (s: StrategySpec): ExitSpec => ({ ...EXIT_DEFAULT, ...s.exit });
 
 /** the position weight each bar's close calls for (used from the next bar); null = unit notional */
 export function sizeWeights(c: Ctx, s: StrategySpec): Float64Array | null {
-  const z = s.sizing;
+  const a = weightsOf(c, s, s.sizing);
+  const b = weightsOf(c, s, s.sizing2);
+  if (!a || !b) return a ?? b;
+  return a.map((x, i) => Math.min(x, b[i]));
+}
+
+function weightsOf(c: Ctx, s: StrategySpec, z: Sizing | undefined): Float64Array | null {
   if (!z || z.mode === 'unit' || !(z.target > 0)) return null;
+  if (z.mode === 'kelly') {
+    // the fraction of capital lost at the stop is the target: weight = target / stop distance
+    const A = atr14(c);
+    const G = s.exit.stopVol ? garchSigma(c) : null;
+    return Float64Array.from(c.m.bars, (b, i) => {
+      const d = G && s.exit.stopVol ? s.exit.stopVol * G[i] : ((s.exit.stopAtr ?? EXIT_DEFAULT.stopAtr) * A[i]) / b.close;
+      return d > 0 && Number.isFinite(d) ? Math.min(3, z.target / d) : 0;
+    });
+  }
   const G = garchSigma(c);
   if (z.mode === 'vol') {
     const bpy = barsPerYear(c.m.tfH);
@@ -88,8 +115,34 @@ export function sizeWeights(c: Ctx, s: StrategySpec): Float64Array | null {
   return G.map((g) => (g > 0 ? Math.min(3, z.target / (q * g * day)) : 0));
 }
 
+/** the entry rules joined: one rule as it is, or several by the strategy's `combine` */
+export function rawSignal(c: Ctx, s: StrategySpec): Int8Array {
+  const first = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
+  if (!s.also?.length) return first;
+  const all = [first, ...s.also.map((r) => SIGNAL_MAP[r.id].compute(c, r.p))];
+  return combineSignals(all, s.combine ?? 'all');
+}
+
+export function combineSignals(all: Int8Array[], how: Combine): Int8Array {
+  const n = all[0].length;
+  const k = all.length;
+  const out = new Int8Array(n);
+  for (let i = 0; i < n; i++) {
+    let up = 0;
+    let dn = 0;
+    for (const a of all) {
+      if (a[i] > 0) up++;
+      else if (a[i] < 0) dn++;
+    }
+    if (how === 'all') out[i] = up === k ? 1 : dn === k ? -1 : 0;
+    else if (how === 'majority') out[i] = up > k / 2 && !dn ? 1 : dn > k / 2 && !up ? -1 : 0;
+    else out[i] = up && !dn ? 1 : dn && !up ? -1 : 0;
+  }
+  return out;
+}
+
 export function signalOf(c: Ctx, s: StrategySpec): Int8Array {
-  const sig = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
+  const sig = rawSignal(c, s);
   const fs = s.filters.map((f) => FILTER_MAP[f.id].compute(c, f.p));
   const out = new Int8Array(sig.length);
   for (let i = 0; i < sig.length; i++) {
@@ -108,7 +161,7 @@ export function signalOf(c: Ctx, s: StrategySpec): Int8Array {
 export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, costs: Costs = COSTS, gate?: (i: number, side: 1 | -1) => boolean, sigIn?: Int8Array): BTResult {
   const b = c.m.bars;
   const sig = sigIn ?? signalOf(c, s);
-  const raw = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
+  const raw = rawSignal(c, s);
   const A = atr14(c);
   const G = ex0(s).stopVol ? garchSigma(c) : null;
   const W = sizeWeights(c, s);

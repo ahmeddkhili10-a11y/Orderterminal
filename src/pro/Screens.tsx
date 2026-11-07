@@ -13,7 +13,8 @@ import { startCryptoSwarmLink } from '../cswarm/store';
 import { desktop, type ScreensState } from '../desktop/bridge';
 import { startLabLink } from '../lab/store';
 import { hub } from '../market/hub';
-import { PANEL_MAP } from '../panels/registry';
+import { PANELS, PANEL_MAP } from '../panels/registry';
+import { FUNCTIONS } from './functions';
 import { safeStorage } from '../store/settings';
 
 /** panels that must stay in the main window (their service runs there) */
@@ -69,6 +70,8 @@ export function ScreensMenu({ only }: { only?: number | null } = {}) {
   const s = useScreens();
   const [open, setOpen] = useState(false);
   const [self, setSelf] = useState<number | null>(null);
+  const [q, setQ] = useState('');
+  const [onScreen, setOnScreen] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => void desktop?.screens.self().then(setSelf).catch(() => undefined), []);
   useEffect(() => {
@@ -118,7 +121,31 @@ export function ScreensMenu({ only }: { only?: number | null } = {}) {
               </div>
             </div>
           ))}
-          <div className="popover-foot">Pop a panel out with ⧉ on its tab bar — then send it to any screen here. Popped-out panels come back where they were next time, and hide while the terminal is locked.</div>
+          <div className="pop-title scr-open-title">Open any tool in its own window</div>
+          <div className="scr-open-bar">
+            <input className="ctl" placeholder="Search: BOT, NNET, VAR, footprint…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search the tools" />
+            <select className="ctl" value={onScreen ?? ''} onChange={(e) => setOnScreen(e.target.value ? Number(e.target.value) : null)} title="Which screen it opens on">
+              <option value="">Beside this window</option>
+              {(s.displays ?? []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  on {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="scr-open-list">
+            {PANELS.filter((p) => canPopOut(p.id))
+              .map((p) => ({ p, code: FUNCTIONS.find((f) => f.panel === p.id)?.code }))
+              .filter(({ p, code }) => !q || `${code ?? ''} ${p.title} ${p.category} ${p.description}`.toLowerCase().includes(q.toLowerCase()))
+              .map(({ p, code }) => (
+                <button key={p.id} className="scr-open-row" data-panel={p.id} onClick={() => void desktop!.screens.popout(p.id, p.title, { ...(p.defaults as Record<string, unknown>) }, onScreen)} title={p.description}>
+                  {code && <b className="mono">{code}</b>}
+                  <span>{p.title.replace(/^[A-Z0-9]+ · /, '')}</span>
+                  <em>{p.category}</em>
+                </button>
+              ))}
+          </div>
+          <div className="popover-foot">Any tool — the Strategy Lab, the quant desk, the markets, the swarm's tools — opens in its own window and stays open whichever view the main window is on, so the crypto swarm can fill one screen while the quant desk or the bot builder fills another. ⧉ on a tab bar pops that tab out; ⇄ moves it to another workspace. Windows come back where they were next time and hide while the terminal is locked.</div>
         </div>
       )}
     </div>
@@ -167,6 +194,9 @@ export function PopoutPage({ panelId, storeKey, title, cfg }: { panelId: string;
         <b>{def.title}</b>
         <span className="grow" />
         <ScreensMenu only={self} />
+        <button className="chip" onClick={() => void desktop?.screens.dock(panelId, title, config)} title="Back to the terminal: close this window and open the panel where it lives">
+          ⇤ Back to the terminal
+        </button>
         <button className="chip" onClick={() => window.close()} title="Close this window">
           ×
         </button>

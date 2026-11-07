@@ -453,6 +453,17 @@ function registerIpc() {
   handle('screens:move', (_e, id, displayId, mode) => screens.move(Number(id), Number(displayId), mode === 'full' || mode === 'float' ? mode : 'fill'));
   handle('screens:focus', (_e, id) => screens.focus(Number(id)));
   handle('screens:close', (_e, id) => screens.close(Number(id)));
+  // a popped-out panel goes back to the terminal: its window closes and the main window opens the panel where it lives
+  handle('screens:dock', (e, panel, title, config) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('screens:dock', { panel: String(panel), title: String(title ?? panel), config: config ?? {} });
+      win.show();
+      win.focus();
+    }
+    if (w && w !== win) w.close();
+    return true;
+  });
   handle('screens:self', (e) => BrowserWindow.fromWebContents(e.sender)?.id ?? null);
   // the Strategy Lab: research runs, results, backtests and deployment
   handle('lab:state', () => lab.status());
@@ -464,6 +475,7 @@ function registerIpc() {
   handle('lab:deploy', (_e, args, targets, coins) => lab.deploy(args ?? {}, targets, coins));
   handle('lab:undeploy', (_e, id) => lab.undeploy(String(id)));
   handle('lab:toggle', (_e, id, on) => lab.toggle(String(id), Boolean(on)));
+  handle('lab:authority', (_e, id, a) => lab.setAuthority(String(id), a === 'tested' ? 'tested' : 'council'));
   handle('cswarm:state', () => cswarm.state());
   handle('cswarm:start', () => cswarm.start());
   handle('cswarm:stop', (_e, flatten) => cswarm.stop({ flatten: Boolean(flatten) }));

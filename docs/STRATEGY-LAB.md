@@ -21,43 +21,86 @@ says plainly when it finds none.
 
 ## The bot builder (BOT) — the easy way
 
-**BOT** opens a chain of blocks, wired left to right like n8n. Pick one option
-in each, all in plain English (tick **Explain every choice** to see what each
-one does):
+**BOT** is a workflow canvas, like n8n: eight blocks wired in order. Click a
+block and its options open in the inspector on the right, all in plain
+English (tick **Explain** to see what each one does). A block can hold
+**several picks**:
 
 1. **Trading style** — scalping (hours), intraday, swing (a few days), one-week
    trades, position (weeks to months) or a long-term hold (up to a year). The
    style sets everything else's pace: the candles (1 h, 4 h or 1 day), the
    look-backs, the holding time, the stop width and the years of history.
-2. **Strategy** — every entry rule in the library, grouped (trend following,
-   breakouts, buy the dip / sell the rip, timing, funding, AI); the ones that
-   suit the style are marked ✓ and listed first.
-3. **Market model** — when the strategy may trade: with the big trend, only
-   when trending or ranging (ADX), the variance-ratio and hidden-Markov regimes,
-   GARCH volatility, quieter days, volume, trading hours, crowded funding. A
-   second one can be added.
-4. **Forecast** — none; the **AI trade filter** (a forest that learns which of
-   the strategy's signals fail, kept only if it helps on unseen data); or a
-   second opinion that must agree (Kalman trend, next-candle forest, linear
-   forecast, random forest).
-5. **Risk management** — fixed size, steady risk (volatility targeting), a cap
-   on the daily loss (value at risk), stops that widen before storms (GARCH),
-   both, or market-neutral (hedged with bitcoin); and the stop width.
+2. **Strategies** — every entry rule in the library (trend following,
+   breakouts, buy the dip / sell the rip, timing, funding, AI — the neural
+   network included). Pick one or several; several are joined: **all must
+   agree**, **majority vote**, or **any one** (unless another disagrees).
+3. **Market models** — when it may trade: the big trend, ADX trend or range,
+   the variance-ratio, Hurst and hidden-Markov regimes, GARCH volatility, calm
+   or busy days, volume, trading hours, crowded funding. Every filter picked
+   must allow the trade.
+4. **Forecasts & AI** — second opinions that must agree (the Kalman trend, the
+   neural network, the random forest, the linear forecast, the next-candle
+   forecast), and an **AI decision maker** that learns from the bot's own past
+   trades which signals to skip: the decision forest, the neural network, or
+   **both paired** (their odds averaged). It is kept only if it helps on unseen
+   data.
+5. **Risk management** — steady risk (volatility targeting), a cap on the daily
+   loss (value at risk), **half Kelly** (found from the bot's training-years
+   trades), GARCH stops, a bitcoin hedge (CAPM beta); two sizing rules combine
+   (the smaller size wins). The stop width, and how the money is **split across
+   coins**: equally, more on calmer coins, minimum variance, or the efficient
+   frontier's best return for the risk (fitted on the training years).
 6. **Rules of engagement** — long and short, long only or short only; let
    winners run or take profit at 1.5, 2 or 3 times the risk; shorter, usual or
    longer holds; exit on an opposite signal or not.
-7. **Backtest** — on the coins you list: built on the first 70 % of the history
-   and judged on the last 30 % it never saw, with fees and slippage. The
-   results come in words: a verdict (Looks good / Maybe / Not yet), the return
-   a year against buy-and-hold, the worst drop, the win rate, the trades, the
-   Sharpe ratio, the chance it is luck and the chance of a losing run, the
-   equity curve and each coin.
-8. **Deploy** — only after the backtest. The bot goes to the crypto swarm,
-   where it proposes and the council, forest and risk manager decide.
+7. **Backtest** — built on the first 70 % of the history and judged on the last
+   30 % it never saw, with fees and slippage.
+8. **Deploy** — only after the backtest, with a choice of who decides its trades
+   in the swarm (below).
+
+**The compatibility check.** Every pick is read against the others as it is
+made: **✕ clash** (they work against each other — a trend rule only allowed in
+a range, a breakout only in calm, two opposite filters), **≈ overlap** (they say
+the same thing — two trend rules, three "calm" filters, a second opinion from
+the same model) or **+ pairs well** (a trend rule and a dip rule with "all must
+agree" = buy the dips in an uptrend; the neural network and the forest paired;
+steady risk capped by value at risk). Each option in the inspector is tagged
+with what adding it would do, and the blocks carry a badge.
+
+**Measured on the data.** The backtest then measures the parts on the unseen
+30 %: each strategy alone against them together, how two strategies relate
+(correlation, how often they agree when both are on), what each filter adds
+(Sharpe with and without it, and how often it lets the bot trade), each AI
+decision maker (forest, network, both — only your pick can be kept), the Kelly
+fraction found and the coin split. The results: a verdict (Looks good / Maybe /
+Not yet), the return a year against buy-and-hold, the worst drop, the win rate,
+the trades, the Sharpe ratio, the chance it is luck and of a losing run, the
+equity curve and each coin.
+
+## Deployed strategies and the crypto swarm
+
+A deployed strategy reads its rules on each coin's closed candles of its own
+timeframe inside the crypto swarm. When it signals, it puts the trade to the
+swarm. Each deployed strategy has a switch (in the bot builder's Deploy block,
+DEPL, and the swarm view's deploy gate):
+
+- **Council decides** — the council (trend, tape, crowd) votes and the forest
+  can veto; a no means no trade.
+- **Trade as tested** — the strategy's statistics were measured on years of
+  data the council was never part of, so the council's votes are kept as
+  advice on the record, never binding.
+
+Either way **Guardian** (wide spreads, volatility spikes) and **Risk** (the
+daily-loss and drawdown limits, the size of every trade) can stop any trade, a
+strategy can only ask for a smaller size, and the strategy's own exits manage
+the trade. Each strategy keeps a record: its signals, the trades taken and
+their R, the signals the council blocked — followed to their exits anyway, so
+it says whether the council saved or cost it money — and the signals missed
+because the swarm already held the coin.
 
 ## The library
 
-Twenty-one entry rules and nine filters, each written from its paper:
+Twenty-two entry rules and eleven filters, each written from its paper:
 
 | Rule | Family | Papers |
 |---|---|---|

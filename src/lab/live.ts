@@ -3,7 +3,7 @@
 // backtest used, so what was tested is what trades.
 import { signalOf, sizeWeights, type StrategySpec } from './backtest';
 import { atr14, ctxOf, features, garchOf, garchSigma, type Market } from './library';
-import { predictForest } from './ml';
+import { metaOdds } from './ml';
 import { rulesOf } from './research';
 
 export interface Deployed {
@@ -18,6 +18,7 @@ export interface Deployed {
   stats: { sharpe: number; t: number; dsr: number; trades: number; verdict: string };
   deployedAt: number;
   on: boolean;
+  authority?: 'council' | 'tested';
 }
 
 export interface LiveSignal {
@@ -54,11 +55,11 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
   const a = atr14(c)[i];
   if (!Number.isFinite(a) || a <= 0) return null;
   let odds: number | null = null;
-  if (spec.meta?.model) {
+  if (spec.meta?.model || spec.meta?.nn) {
     const row = [...features(c)[i], d];
     // a meta-labeller trained on a different set of inputs (an older version) is skipped, not misread
     if (row.every(Number.isFinite) && (spec.meta.nf === undefined ? row.length === 14 : row.length === spec.meta.nf)) {
-      odds = predictForest(spec.meta.model, row);
+      odds = metaOdds(spec.meta, row);
       if (odds < spec.meta.threshold) return null;
     }
   }
@@ -77,7 +78,15 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
   // both sizings scale as 1/σ: against the long-run σ, today's forecast sets the multiple
   if (sizeWeights(c, spec) && g && g.longRun > 0 && gs > 0) {
     sizeMult = Math.max(0.5, Math.min(1.5, Math.sqrt(g.longRun) / gs));
-    sizeNote = ` · ${spec.sizing?.mode === 'vol' ? 'volatility target' : 'VaR budget'}: ${sizeMult.toFixed(2)}× usual size`;
+    sizeNote = ` · ${spec.sizing?.mode === 'vol' ? 'volatility target' : spec.sizing?.mode === 'kelly' ? 'Kelly sizing' : 'VaR budget'}: ${sizeMult.toFixed(2)}× usual size`;
+  }
+  // the coin's share of the money, as tested (the split across coins): over-weight coins are only ever capped by the swarm
+  const cw = spec.coinWeights?.[m.coin];
+  const nCoins = spec.coinWeights ? Object.keys(spec.coinWeights).length : 0;
+  if (cw !== undefined && nCoins > 1) {
+    const k = Math.max(0.25, Math.min(1.5, cw * nCoins));
+    sizeMult *= k;
+    sizeNote += ` · ${(cw * 100).toFixed(0)}% of the money on ${m.coin} (${k.toFixed(2)}× an equal share)`;
   }
   const hedgeNote = spec.hedge === 'btc' ? ' · tested with a bitcoin delta hedge (short β × the position in BTC): the swarm does not place hedges — place it yourself with TKT if you want the tested result' : '';
   return {
@@ -89,7 +98,7 @@ export function liveSignal(spec: StrategySpec, m: Market): LiveSignal | null {
     bar: m.bars[i].time,
     odds,
     setup: spec.name,
-    why: `${rule}${odds !== null ? ` — the forest gives it ${(odds * 100).toFixed(0)}%` : ''}${volNote}${sizeNote}${hedgeNote}`,
+    why: `${rule}${odds !== null ? ` — ${spec.meta?.model && spec.meta?.nn ? 'the forest and the neural network give' : spec.meta?.nn ? 'the neural network gives' : 'the forest gives'} it ${(odds * 100).toFixed(0)}%` : ''}${volNote}${sizeNote}${hedgeNote}`,
     sizeMult,
   };
 }

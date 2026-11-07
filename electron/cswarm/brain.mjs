@@ -190,12 +190,24 @@ export function councilR(inp, cfg = CCOUNCIL_DEFAULTS) {
   votes.push(inp.riskGate ? { bot: 'risk', stance: 'veto', weight: 0, why: inp.riskGate } : { bot: 'risk', stance: 'for', weight: 1, why: inp.sizeNote });
 
   const score = votes.reduce((a, v) => a + (v.stance === 'for' ? v.weight : v.stance === 'against' ? -v.weight : 0), 0);
-  const veto = votes.find((v) => v.stance === 'veto');
-  const trade = !veto && score >= cfg.minScore - 1e-9;
   const fors = votes.filter((v) => v.stance === 'for').length;
   const against = votes.filter((v) => v.stance === 'against').length;
+  // a strategy deployed "as tested": its statistics were proven on years of data the opinion bots were not part of,
+  // so their votes are advice (recorded, never binding); only the safety bots — Guardian and Risk — can stop it
+  if (c.authority === 'tested') {
+    const hard = votes.find((v) => v.stance === 'veto' && SAFETY.includes(v.bot));
+    for (const v of votes) if (v.stance === 'veto' && !SAFETY.includes(v.bot)) v.stance = 'against';
+    const advice = votes.filter((v) => v.stance === 'against').length;
+    const summary = hard ? `vetoed by ${AGENT_NAME[hard.bot]} (safety)` : `TRADE — a tested strategy: only Guardian and Risk can stop it (the council advises ${fors} for, ${advice} against, score ${score.toFixed(1)})`;
+    return { trade: !hard, score, votes, summary, advisory: true };
+  }
+  const veto = votes.find((v) => v.stance === 'veto');
+  const trade = !veto && score >= cfg.minScore - 1e-9;
   const summary = veto ? `vetoed by ${AGENT_NAME[veto.bot]}` : trade ? `TRADE — ${fors} for, ${against} against (score ${score.toFixed(1)})` : `no — ${fors} for, ${against} against (score ${score.toFixed(1)}, needs ${cfg.minScore})`;
   return { trade, score, votes, summary };
 }
 
 export const MARK = { for: '✓', against: '✗', abstain: '–', veto: '⛔' };
+
+/** the bots that keep the account safe: they can stop any trade, a tested strategy's included */
+export const SAFETY = ['guardian', 'risk'];

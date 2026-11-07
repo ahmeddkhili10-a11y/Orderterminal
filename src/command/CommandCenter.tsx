@@ -13,6 +13,8 @@
 // only proposes — when its own rules fire — and the council, the forest and
 // the risk manager decide, size and can veto, exactly as for the swarm's own
 // agents. It can never overrule them.
+import { canPopOut, popOut } from '../pro/Screens';
+import { AuthoritySwitch, LabBookLine } from '../lab/Authority';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtNum, fmtPrice, fmtTime, fmtUsd } from '../core/format';
 import type { Kline } from '../core/types';
@@ -333,14 +335,14 @@ export function DeployGate() {
   return (
     <div className="cc-deploy">
       <div className="cc-gate">
-        {['Strategy’s own rules fire', 'Council votes', 'Forest odds', 'Risk manager sizes', 'Execute'].map((s, i) => (
+        {['Strategy’s own rules fire', 'Council votes (or advises)', 'Forest odds', 'Guardian + Risk: safety', 'Execute'].map((s, i) => (
           <span key={s} className="cc-gate-step">
             <b>{i + 1}</b> {s}
           </span>
         ))}
       </div>
       <div className="muted cc-gate-note">
-        A deployed strategy only <b>proposes</b>: when its tested entry rules fire on a closed candle, it puts the trade to the swarm like any agent. The council votes, the forest gives its odds and can veto, the guardian checks the market, and the risk manager decides the size and can veto — a strategy can only ask for a smaller size in a storm, never a bigger one. If any of them says no, the trade does not happen. Once open, the strategy's own exits (stop, target, trail, time, flip) manage it.
+        When a deployed strategy's tested entry rules fire on a closed candle, it puts the trade to the swarm. Each strategy has a switch: <b>Council decides</b> — the council votes, the forest can veto, and a no means no trade; or <b>Trade as tested</b> — its statistics were proven on years of data the council was never part of, so the council's votes are only advice on the record. Either way <b>Guardian</b> (spreads, volatility spikes) and <b>Risk</b> (daily loss, drawdown, the size of every trade) can always stop it, and a strategy can only ask for a smaller size, never a bigger one. Signals the council blocks are followed anyway, so each strategy shows whether the council saved or cost it money. Once open, the strategy's own exits (stop, target, trail, time, flip) manage it.
       </div>
       <div className="section-title">Deployed in the crypto swarm ({dep.filter((d) => d.on).length} on)</div>
       {dep.length ? (
@@ -356,8 +358,10 @@ export function DeployGate() {
                 <span className="mono muted">
                   {d.tfH}h · {d.coins.join(' ')} · tested Sharpe {d.stats.sharpe.toFixed(2)}, t {d.stats.t.toFixed(1)} · {d.stats.verdict}
                 </span>
+                <LabBookLine d={d} />
                 {last && <span className="muted cc-dep-last">{fmtTime(last.t)} — {last.text}</span>}
               </div>
+              <AuthoritySwitch d={d} compact />
               <button className="chip" onClick={() => confirm(`Remove “${d.spec.name}” from the swarm? Its open trade, if any, is still managed.`) && run('removed', () => L.undeploy(d.id))}>
                 Remove
               </button>
@@ -430,6 +434,11 @@ function Drawer({ tab, onTab, onClose }: { tab: string; onTab: (t: string) => vo
           </button>
         ))}
         <span style={{ flex: 1 }} />
+        {def && canPopOut(t.panel!) && (
+          <button className="chip" onClick={() => void popOut(t.panel!, def.title, { ...(def.defaults as Record<string, unknown>), ...(cfgs[t.id] ?? {}) })} title="Open this tool in its own window — send it to another screen with ⧉ Screens">
+            ⧉ Window
+          </button>
+        )}
         <button className="chip" onClick={onClose} title="Close (Esc)">
           ✕
         </button>

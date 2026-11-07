@@ -12,8 +12,8 @@
 // Lookbacks are written in hours and converted to bars of the timeframe, so
 // one rule runs on 1-hour, 4-hour or daily candles.
 import { fitBest, garchVar, type GarchFit } from './garch';
-import { fitForest, fitRidge, predictForest, predictRidge, type ForestModel, type Ridge } from './ml';
-import { fitHmm2, hmmFilter, kalmanTrend, ouRolling, varianceRatio, volEstimate, type Hmm2 } from './quant';
+import { fitForest, fitMLP, fitRidge, predictForest, predictMLP, predictRidge, type ForestModel, type MLP, type Ridge } from './ml';
+import { fitHmm2, hmmFilter, hurstRS, kalmanTrend, ouRolling, varianceRatio, volEstimate, type Hmm2 } from './quant';
 import { CANDLE_FEATURES, candleShape } from './shape';
 import { adx, atr, ema, hiPrev, loPrev, logRets, pctRank, retN, rsi, rstd, rvol, sma, volZ, type Bar } from './series';
 
@@ -144,6 +144,25 @@ export const kalmanOf = (c: Ctx, smooth: number) =>
 export const ouOf = (c: Ctx, windowH: number) => cached(c, `ou${H(c, windowH)}`, () => ouRolling(logp(c), H(c, windowH)));
 /** variance ratio of 1-day returns against 1-bar returns, over a rolling window (hours) */
 export const vrOf = (c: Ctx, windowH: number) => cached(c, `vr${H(c, windowH)}`, () => varianceRatio(lrets(c), Math.max(2, H(c, 24)), H(c, windowH)).vr);
+/** the rolling Hurst exponent (rescaled range) of 1-bar returns over ~500 bars, refreshed every day of bars, known at each bar's close */
+export const hurstOf = (c: Ctx) =>
+  cached(c, 'hurst', () => {
+    const lr = lrets(c);
+    const n = lr.length;
+    const w = Math.min(500, Math.max(200, H(c, 720)));
+    const every = Math.max(1, H(c, 24));
+    const out = new Float64Array(n).fill(NaN);
+    let last = NaN;
+    for (let i = 0; i < n; i++) {
+      if (i >= w && (i - w) % every === 0) {
+        const seg: number[] = [];
+        for (let k = i - w + 1; k <= i; k++) if (Number.isFinite(lr[k])) seg.push(lr[k]);
+        last = seg.length > 100 ? hurstRS(seg) : NaN;
+      }
+      out[i] = last;
+    }
+    return out;
+  });
 /** the two-state regime model (Hamilton), fitted on the training bars */
 export function hmmOf(c: Ctx): Hmm2 | null {
   return cached(c, 'hmm', () => {
@@ -289,13 +308,13 @@ function trainedOnce<T>(c: Ctx, what: string, fit: () => T): T {
 }
 
 /** learned rules: fit on bars before trainEnd whose label is known by then */
-function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf'): Int8Array {
+function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf' | 'nn'): Int8Array {
   const n = c.m.bars.length;
   const out = state(n);
   const h = H(c, p.horizon);
   const X = features(c);
   const cl = close(c);
-  const model = trainedOnce<{ ols: Ridge; sd: number } | { rf: ForestModel } | null>(c, `${kind}:${h}`, () => {
+  const model = trainedOnce<{ ols: Ridge; sd: number } | { rf: ForestModel } | { nn: MLP } | null>(c, `${kind}:${h}`, () => {
     const rows: number[][] = [];
     const ys: number[] = [];
     const step = Math.max(1, Math.floor(c.trainEnd / 4000));
@@ -310,9 +329,19 @@ function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf'): Int8Array {
       const fit = rows.map((r) => predictRidge(m, r));
       return { ols: m, sd: Math.sqrt(fit.reduce((a, b) => a + b * b, 0) / fit.length) || 1e-9 };
     }
+    if (kind === 'nn') return { nn: fitMLP(rows, ys.map((y) => (y > 0 ? 1 : 0)), { hidden: [16, 8], epochs: 40, seed: c.seed, patience: 6 }) };
     return { rf: fitForest(rows, ys.map((y) => (y > 0 ? 1 : 0)), { trees: 40, maxDepth: 5, minLeaf: 20, seed: c.seed }) };
   });
   if (!model) return out;
+  if ('nn' in model) {
+    const m = model.nn;
+    for (let i = 0; i < n; i++) {
+      if (!finiteRow(X[i])) continue;
+      const pr = predictMLP(m, X[i]);
+      out[i] = pr > 0.5 + p.edge ? 1 : pr < 0.5 - p.edge ? -1 : 0;
+    }
+    return out;
+  }
   if (kind === 'ols' && 'ols' in model) {
     const m = model.ols;
     const sd = model.sd;
@@ -707,6 +736,17 @@ export const SIGNALS: SignalDef[] = [
     compute: (c, p) => cached(c, `rf${p.horizon}:${p.edge}:${c.trainEnd}`, () => learnedSignal(c, p, 'rf')),
     describe: (p) => `random forest (40 trees) on ${FEATURES.length} features forecasting the ${hrs(p.horizon)} direction; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
   },
+  {
+    id: 'nn',
+    name: 'Neural-network direction',
+    family: 'ml',
+    papers: ['gkx20', 'ks151', 'kb15'],
+    rationale: 'A small neural network (two hidden layers) learns smooth nonlinear combinations of the same features — the model class Gu, Kelly and Xiu found best for return prediction; early stopping on the latest training data keeps it from memorising.',
+    grid: { horizon: [4, 24], edge: [0.03, 0.06] },
+    exit: { stopAtr: 2, maxBars: 48, onFlip: true },
+    compute: (c, p) => cached(c, `nn${p.horizon}:${p.edge}:${c.trainEnd}`, () => learnedSignal(c, p, 'nn')),
+    describe: (p) => `a neural network (${FEATURES.length} inputs, 16 and 8 hidden units) forecasting the ${hrs(p.horizon)} direction; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
+  },
 ];
 
 // ---------- the filters ----------
@@ -859,13 +899,14 @@ export const FILTERS: FilterDef[] = [
     id: 'agree',
     name: 'Forecast agrees',
     papers: ['kal60', 'bre01', 'gkx20', 'nis91'],
-    rationale: 'A second opinion: trade only in the direction a forecasting model also expects — the Kalman trend, or a model trained on the in-sample years (next-candle forest, ridge regression, random forest).',
-    grid: { model: [0, 1, 2, 3] },
+    rationale: 'A second opinion: trade only in the direction a forecasting model also expects — the Kalman trend, or a model trained on the in-sample years (next-candle forest, ridge regression, random forest, neural network).',
+    grid: { model: [0, 1, 2, 3, 4] },
     compute: (c, p) => {
       const n = c.m.bars.length;
       const a = allow(n);
       let dir: Int8Array;
-      if (p.model === 3) {
+      if (p.model === 4) dir = SIGNAL_MAP.nn.compute(c, { horizon: 24, edge: 0 });
+      else if (p.model === 3) {
         const kf = kalmanOf(c, 1);
         dir = Int8Array.from(kf.slope, (s) => sgn(s));
       } else if (p.model === 0) dir = SIGNAL_MAP.candle.compute(c, { edge: 0 });
@@ -877,7 +918,24 @@ export const FILTERS: FilterDef[] = [
       }
       return a;
     },
-    describe: (p) => `only when ${['the next-candle forest', 'the ridge-regression forecast', 'the random-forest forecast', 'the Kalman trend'][p.model]} points the same way`,
+    describe: (p) => `only when ${['the next-candle forest', 'the ridge-regression forecast', 'the random-forest forecast', 'the Kalman trend', 'the neural-network forecast'][p.model]} points the same way`,
+  },
+  {
+    id: 'hurst',
+    name: 'Hurst exponent regime',
+    papers: ['hur51', 'lo91'],
+    rationale: 'The Hurst exponent measures memory in returns: above 0.5 moves tend to continue (trend rules pay), below 0.5 they tend to reverse (fading pays). Rolling over the last month or two of bars.',
+    grid: { mode: [0, 1] },
+    compute: (c, p) => {
+      const hs = hurstOf(c);
+      const a = allow(hs.length);
+      hs.forEach((x, i) => {
+        const ok = Number.isFinite(x) && (p.mode === 0 ? x > 0.55 : x < 0.45);
+        a.long[i] = a.short[i] = ok ? 1 : 0;
+      });
+      return a;
+    },
+    describe: (p) => (p.mode === 0 ? 'only while returns have memory: the rolling Hurst exponent is above 0.55 (trending)' : 'only while returns reverse: the rolling Hurst exponent is below 0.45 (mean-reverting)'),
   },
   {
     id: 'hmm',

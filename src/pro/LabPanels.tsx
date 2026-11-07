@@ -4,6 +4,7 @@
 //   RSCH  Research — run the search, watch it, read the top five and their tests, deploy
 //   BT    Builder — put a strategy together by hand and backtest it
 //   DEPL  Deployed — the strategies trading in the swarms, and what they have said
+import { AuthoritySwitch, LabBookLine } from '../lab/Authority';
 import { useEffect, useMemo, useState } from 'react';
 import { useCSwarm } from '../cswarm/store';
 import { desktop } from '../desktop/bridge';
@@ -843,6 +844,7 @@ export function LabDeployed() {
               <th>SR</th>
               <th>t</th>
               <th className="l">VERDICT</th>
+              <th className="l" title="Who decides its trades: the swarm's council, or the strategy as tested (only Guardian and Risk can stop it)">WHO DECIDES</th>
               <th />
             </tr>
           </thead>
@@ -862,6 +864,12 @@ export function LabDeployed() {
                 <td className="mono">{num(d.stats.t)}</td>
                 <td className="l">
                   <span className={`lab-verdict ${verdictCls(d.stats.verdict)}`}>{d.stats.verdict}</span>
+                </td>
+                <td className="l">
+                  <AuthoritySwitch d={d} compact />
+                  <div>
+                    <LabBookLine d={d} />
+                  </div>
                 </td>
                 <td>
                   <button className="btn ghost" onClick={() => confirm(`Remove “${d.name}” from the swarm? An open trade it took stays open and is managed by the default rules.`) && void L.undeploy(d.id)}>

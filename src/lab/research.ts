@@ -19,11 +19,12 @@
 //
 // Every strategy runs on all coins with the same rules: a rule that only works
 // on one coin is more likely luck.
-import { backtest, COSTS, type BTResult, type Costs, type Sizing, type StrategySpec, type Trade } from './backtest';
+import { backtest, COSTS, rawSignal, type BTResult, type Costs, type Sizing, type StrategySpec, type Trade } from './backtest';
 import { candleForecast, type CandleReport } from './candles';
 import { forecastTest, garchVar, horizonVol, hourProfile, simulate, valueAtRisk, type ForecastTest } from './garch';
 import { barsPerYear, ctxOf, EXIT_DEFAULT, features, FEATURES, FILTER_MAP, FILTERS, garchOf, gridOf, logRet, SIGNAL_MAP, SIGNALS, type Ctx, type ExitSpec, type Market, type Params, type SignalDef } from './library';
-import { fitForest, predictForest, regress, rngOf, type ForestModel } from './ml';
+import { fitForest, fitMLP, metaOdds, predictForest, regress, rngOf, type ForestModel, type MetaModel } from './ml';
+import { efficientFrontier, meanCov } from './quant';
 import { deflatedSharpe, monteCarlo, pbo, perf, randomEntryTest, type MonteCarlo, type Perf } from './stats';
 
 export interface ResearchCfg {
@@ -171,18 +172,21 @@ interface Run {
   exposure: number;
 }
 
-/** average the coins' bar returns by time (an equal-weight portfolio of the strategy on each coin) */
-function pool(per: { bt: BTResult }[]): { rets: Float64Array; times: number[] } {
+/** average the coins' bar returns by time (an equal-weight portfolio of the strategy on each coin, or weighted by coin) */
+function pool(per: { bt: BTResult; m?: Market }[], weights?: Record<string, number>): { rets: Float64Array; times: number[] } {
   const acc = new Map<number, [number, number]>();
-  for (const { bt } of per)
+  for (const { bt, m } of per) {
+    const w = weights && m ? (weights[m.coin] ?? 0) : 1;
+    if (!(w > 0)) continue;
     for (let i = 0; i < bt.rets.length; i++) {
       const t = bt.times[i];
       if (!t) continue;
       const a = acc.get(t) ?? [0, 0];
-      a[0] += bt.rets[i];
-      a[1]++;
+      a[0] += w * bt.rets[i];
+      a[1] += w;
       acc.set(t, a);
     }
+  }
   const times = [...acc.keys()].sort((a, b) => a - b);
   return { rets: Float64Array.from(times, (t) => acc.get(t)![0] / acc.get(t)![1]), times };
 }
@@ -194,7 +198,7 @@ function runAll(ctxs: Ctx[], spec: StrategySpec, part: 'is' | 'oos' | 'all', cos
     const to = part === 'is' ? c.trainEnd : n;
     return { m: c.m, c, bt: backtest(c, spec, from, to, costs, gate ? (i, s) => gate(c, i, s) : undefined) };
   });
-  const p = pool(per);
+  const p = pool(per, spec.coinWeights);
   return { per, ...p, trades: per.flatMap((x) => x.bt.trades), exposure: per.reduce((a, x) => a + x.bt.exposure, 0) / (per.length || 1) };
 }
 
@@ -202,6 +206,7 @@ const keyOf = (s: StrategySpec) => JSON.stringify([s.signal, s.filters, s.exit, 
 
 export function describeSizing(z: Sizing | undefined): string | null {
   if (!z || z.mode === 'unit') return null;
+  if (z.mode === 'kelly') return `risk ${(z.target * 100).toFixed(2)} % of capital per trade at the stop — half the Kelly fraction found on the training years, at most 3× notional`;
   return z.mode === 'vol'
     ? `size the position to run at ${(z.target * 100).toFixed(0)} % annual volatility on the GARCH forecast (volatility targeting), at most 3× notional`
     : `size the position so a day's 99 % value at risk (GARCH, fitted tails) is ${(z.target * 100).toFixed(0)} % of capital, at most 3× notional`;
@@ -209,6 +214,7 @@ export function describeSizing(z: Sizing | undefined): string | null {
 const SIZING_WHY: Record<string, { papers: string[]; why: string }> = {
   vol: { papers: ['mm17', 'hhkrsv18', 'bsc15'], why: 'Volatility targeting: volatility is forecastable but does not predict returns, so taking less risk when the GARCH forecast is high and more when it is low raises the Sharpe ratio and shrinks the crashes.' },
   var: { papers: ['kup95', 'adeh99', 'boll86'], why: 'A value-at-risk budget: the position carries the same 1-day 99 % loss whatever the market, using the fitted GARCH volatility and its fat tails.' },
+  kelly: { papers: ['kel56'], why: 'The Kelly criterion: the fraction of capital to risk that grows it fastest for the measured odds and payoff; half of it keeps most of the growth with far smaller swings.' },
   btc: { papers: ['sha64', 'bs73'], why: 'Delta hedge against bitcoin: short β × the position in BTC so the result is the coin’s own move, not the market’s — what remains is alpha.' },
 };
 
@@ -224,11 +230,14 @@ function describeExit(e: ExitSpec, tfH: number): string {
 
 export function rulesOf(s: StrategySpec, tfH: number): string[] {
   const sig = SIGNAL_MAP[s.signal.id];
+  const joined = s.combine === 'any' ? 'or' : s.combine === 'majority' ? 'by majority with' : 'and';
   return [
-    `Entry: ${sig.describe(s.signal.p)}${s.sides === 'long' ? ' (longs only)' : s.sides === 'short' ? ' (shorts only)' : ''}`,
+    `Entry: ${sig.describe(s.signal.p)}${(s.also ?? []).map((r) => ` ${joined} ${SIGNAL_MAP[r.id].describe(r.p)}`).join('')}${s.sides === 'long' ? ' (longs only)' : s.sides === 'short' ? ' (shorts only)' : ''}`,
     ...s.filters.map((f) => `Filter: ${FILTER_MAP[f.id].describe(f.p)}`),
     `Exit: ${describeExit(s.exit, tfH)}`,
     ...(describeSizing(s.sizing) ? [`Sizing: ${describeSizing(s.sizing)}`] : []),
+    ...(describeSizing(s.sizing2) ? [`Sizing cap: ${describeSizing(s.sizing2)} — the smaller size wins`] : []),
+    ...(s.coinWeights && Object.keys(s.coinWeights).length > 1 ? [`Split: ${Object.entries(s.coinWeights).map(([k, v]) => `${k} ${(v * 100).toFixed(0)}%`).join(' · ')}`] : []),
     ...(s.hedge === 'btc' ? ['Hedge: delta-hedge the market — short β × the position in bitcoin, β re-estimated on 30 days of returns'] : []),
   ];
 }
@@ -718,17 +727,137 @@ export function withBench(ms: Market[]): Market[] {
   return ms.map((m) => (m === btc ? m : { ...m, bench: Float64Array.from(m.bars, (b) => at.get(b.time) ?? NaN) }));
 }
 
+/** how two entry rules relate, measured on the history: their correlation, how often they agree when both are on, and how often both are on */
+export interface PairFit {
+  a: number;
+  b: number;
+  corr: number;
+  agree: number;
+  overlap: number;
+  verdict: 'redundant' | 'clash' | 'complement';
+}
+/** the parts of a combined strategy, each measured on the unseen data */
+export interface Parts {
+  /** each entry rule alone, with the same filters, exits and risk */
+  rules: { id: string; name: string; oos: Perf }[];
+  pairs: PairFit[];
+  /** each filter: the share of bars it lets trade, and the strategy without it */
+  filters: { id: string; name: string; pass: number; without: Perf }[];
+}
+export interface DeciderTest {
+  kind: 'forest' | 'nn' | 'both';
+  before: number;
+  after: number;
+  trades: number;
+}
+
+function pairFit(xs: Int8Array[], ys: Int8Array[]): Omit<PairFit, 'a' | 'b' | 'verdict'> {
+  let n = 0;
+  let sx = 0;
+  let sy = 0;
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  let both = 0;
+  let same = 0;
+  for (let k = 0; k < xs.length; k++) {
+    const x = xs[k];
+    const y = ys[k];
+    for (let i = 0; i < x.length; i++) {
+      n++;
+      sx += x[i];
+      sy += y[i];
+      sxx += x[i] * x[i];
+      syy += y[i] * y[i];
+      sxy += x[i] * y[i];
+      if (x[i] && y[i]) {
+        both++;
+        if (x[i] === y[i]) same++;
+      }
+    }
+  }
+  const vx = sxx / n - (sx / n) ** 2;
+  const vy = syy / n - (sy / n) ** 2;
+  const corr = vx > 0 && vy > 0 ? (sxy / n - (sx / n) * (sy / n)) / Math.sqrt(vx * vy) : 0;
+  return { corr, agree: both ? same / both : NaN, overlap: n ? both / n : 0 };
+}
+
+/** the verdict on a pair of rules: they say the same thing, they fight, or they add to each other */
+export function pairVerdict(corr: number, agree: number, overlap: number): PairFit['verdict'] {
+  if (corr > 0.6) return 'redundant';
+  if (corr < -0.15 || (Number.isFinite(agree) && agree < 0.4 && overlap > 0.05)) return 'clash';
+  return 'complement';
+}
+
+/** the share of money on each coin, fitted on the strategy's in-sample returns (daily, aligned across coins) */
+function coinSplit(run: Run, how: NonNullable<StrategySpec['weights']>): Record<string, number> | null {
+  const coins = run.per.map((x) => x.m.coin);
+  if (coins.length < 2 || how === 'equal') return null;
+  // daily returns of the strategy on each coin, on the days every coin has
+  const days = run.per.map((x) => {
+    const d = new Map<number, number>();
+    for (let i = 0; i < x.bt.rets.length; i++) {
+      const t = x.bt.times[i];
+      if (!t) continue;
+      const k = Math.floor(t / 86_400_000);
+      d.set(k, (d.get(k) ?? 0) + x.bt.rets[i]);
+    }
+    return d;
+  });
+  const keys = [...days[0].keys()].filter((k) => days.every((d) => d.has(k))).sort((a, b) => a - b);
+  if (keys.length < 60) return null;
+  const R = days.map((d) => keys.map((k) => d.get(k) ?? 0));
+  const { mu, cov } = meanCov(R);
+  let w: number[];
+  if (how === 'invvol') {
+    const iv = cov.map((row, i) => (row[i] > 0 ? 1 / Math.sqrt(row[i]) : 0));
+    const tot = iv.reduce((a, b) => a + b, 0) || 1;
+    w = iv.map((x) => x / tot);
+  } else {
+    const ef = efficientFrontier(mu, cov, 0, 30);
+    w = (how === 'minvar' ? ef.minVar : ef.tangency).w;
+  }
+  if (!w.every(Number.isFinite) || w.reduce((a, b) => a + b, 0) <= 0) return null;
+  // no coin left out entirely: at least 5 %, then normalised
+  const floored = w.map((x) => Math.max(0.05, x));
+  const tot = floored.reduce((a, b) => a + b, 0);
+  return Object.fromEntries(coins.map((c, i) => [c, floored[i] / tot]));
+}
+
 /** one strategy's full test, on demand (the Backtest screen and the bot builder) */
 export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, costs: Costs = COSTS) {
   const ctxs = withBench(markets).map((m, k) => ctxOf(m, Math.floor(m.bars.length * isShare), 42 + k));
   const bpy = barsPerYear(markets[0].tfH);
   const { autoMeta, ...rest } = spec0;
   let spec: StrategySpec = rest;
-  // the "AI trade filter": a forest learns, in sample, which of the strategy's signals tend to fail,
-  // and is kept only if it lifts the out-of-sample Sharpe (as in the research run)
+  // Kelly sizing: half the Kelly fraction of the strategy's in-sample trades (risk per trade at the stop)
+  let kelly: { f: number; target: number; trades: number } | null = null;
+  const needKelly = (z: Sizing | undefined) => z?.mode === 'kelly' && !(z.target > 0);
+  if (needKelly(spec.sizing) || needKelly(spec.sizing2)) {
+    const unit = runAll(ctxs, { ...spec, sizing: undefined, sizing2: undefined }, 'is', costs);
+    const rs = unit.trades.map((t) => t.r);
+    const wins = rs.filter((r) => r > 0);
+    const losses = rs.filter((r) => r <= 0);
+    const p = rs.length ? wins.length / rs.length : 0;
+    const b = wins.length && losses.length ? wins.reduce((a, x) => a + x, 0) / wins.length / Math.max(1e-9, -losses.reduce((a, x) => a + x, 0) / losses.length) : 0;
+    const f = b > 0 ? p - (1 - p) / b : 0;
+    const target = Math.max(0.0025, Math.min(0.03, f / 2));
+    kelly = { f, target, trades: rs.length };
+    const fix = (z: Sizing | undefined) => (needKelly(z) ? { mode: 'kelly' as const, target } : z);
+    spec = { ...spec, sizing: fix(spec.sizing), sizing2: fix(spec.sizing2) };
+  }
+  // the split of money across coins, fitted on the training years
+  if (spec.weights && spec.weights !== 'equal' && !spec.coinWeights) {
+    const w = coinSplit(runAll(ctxs, spec, 'is', costs), spec.weights);
+    if (w) spec = { ...spec, coinWeights: w };
+  }
+  // the "AI trade filter": a forest, a neural network or both learn, in sample, which of the strategy's
+  // signals tend to fail; it is kept only if it lifts the out-of-sample Sharpe (as in the research run)
   let gate: ((c: Ctx, i: number, side: 1 | -1) => boolean) | undefined;
-  let meta: { used: boolean; before: number; after: number; trainedOn: number } | null = null;
+  let meta: { used: boolean; before: number; after: number; trainedOn: number; kind: 'forest' | 'nn' | 'both' } | null = null;
+  const deciders: DeciderTest[] = [];
   if (autoMeta) {
+    const kind: 'forest' | 'nn' | 'both' = autoMeta === true ? 'forest' : autoMeta;
     const isRun = runAll(ctxs, spec, 'is', costs);
     const X: number[][] = [];
     const y: number[] = [];
@@ -742,28 +871,66 @@ export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, 
       }
     }
     if (X.length >= 40) {
-      const model = fitForest(X, y, { trees: 60, maxDepth: 4, minLeaf: Math.max(5, Math.floor(X.length / 40)), seed: 42 });
-      const g = (c: Ctx, i: number, side: 1 | -1) => {
+      const forest = fitForest(X, y, { trees: 60, maxDepth: 4, minLeaf: Math.max(5, Math.floor(X.length / 40)), seed: 42 });
+      const nn = fitMLP(X, y, { hidden: [8, 4], epochs: 80, l2: 1e-3, seed: 42, patience: 10 });
+      const models: Record<'forest' | 'nn' | 'both', MetaModel> = {
+        forest: { model: forest, threshold: 0.5, nf: FEATURES.length + 1 },
+        nn: { nn, threshold: 0.5, nf: FEATURES.length + 1 },
+        both: { model: forest, nn, threshold: 0.5, nf: FEATURES.length + 1 },
+      };
+      const gateOf = (mm: MetaModel) => (c: Ctx, i: number, side: 1 | -1) => {
         const row = [...features(c)[i], side];
-        return !row.every(Number.isFinite) || predictForest(model, row) >= 0.5;
+        return !row.every(Number.isFinite) || metaOdds(mm, row) >= mm.threshold;
       };
       const plain = runAll(ctxs, spec, 'oos', costs);
-      const gated = runAll(ctxs, spec, 'oos', costs, g);
       const before = perf(plain.rets, plain.trades, bpy, plain.exposure);
-      const after = perf(gated.rets, gated.trades, bpy, gated.exposure);
-      const used = after.sharpe > before.sharpe + 0.1 && after.trades >= Math.max(10, before.trades * 0.3);
-      meta = { used, before: before.sharpe, after: after.sharpe, trainedOn: X.length };
-      if (used) {
-        gate = g;
-        spec = { ...spec, meta: { model, threshold: 0.5, nf: FEATURES.length + 1 } };
+      // every decision maker is measured (for the read-out); only the one chosen can be kept
+      for (const k of ['forest', 'nn', 'both'] as const) {
+        const g = runAll(ctxs, spec, 'oos', costs, gateOf(models[k]));
+        const a = perf(g.rets, g.trades, bpy, g.exposure);
+        deciders.push({ kind: k, before: before.sharpe, after: a.sharpe, trades: a.trades });
       }
-    } else meta = { used: false, before: NaN, after: NaN, trainedOn: X.length };
+      const mine = deciders.find((d) => d.kind === kind)!;
+      const used = mine.after > before.sharpe + 0.1 && mine.trades >= Math.max(10, before.trades * 0.3);
+      meta = { used, before: before.sharpe, after: mine.after, trainedOn: X.length, kind };
+      if (used) {
+        gate = gateOf(models[kind]);
+        spec = { ...spec, meta: models[kind] };
+      }
+    } else meta = { used: false, before: NaN, after: NaN, trainedOn: X.length, kind };
   }
   const is = runAll(ctxs, spec, 'is', costs, gate);
   const oos = runAll(ctxs, spec, 'oos', costs, gate);
   const full = runAll(ctxs, spec, 'all', costs, gate);
   const bhAll = pool(ctxs.map((c) => ({ bt: bhReturns(c, 50, c.m.bars.length) })));
   const bhOos = pool(ctxs.map((c) => ({ bt: bhReturns(c, c.trainEnd, c.m.bars.length) })));
+  // the parts: each entry rule alone, how the rules relate, and what each filter adds
+  let parts: Parts | null = null;
+  const rules = [spec.signal, ...(spec.also ?? [])];
+  if (rules.length > 1 || spec.filters.length) {
+    const alone = rules.length > 1 ? rules.map((r) => ({ id: r.id, name: SIGNAL_MAP[r.id].name, oos: (() => { const x = runAll(ctxs, { ...spec, signal: r, also: undefined }, 'oos', costs, gate); return perf(x.rets, x.trades, bpy, x.exposure); })() })) : [];
+    const sigs = rules.map((r) => ctxs.map((c) => rawSignal(c, { ...spec, signal: r, also: undefined })));
+    const pairs: PairFit[] = [];
+    for (let a = 0; a < rules.length; a++)
+      for (let b = a + 1; b < rules.length; b++) {
+        const f = pairFit(sigs[a], sigs[b]);
+        pairs.push({ a, b, ...f, verdict: pairVerdict(f.corr, f.agree, f.overlap) });
+      }
+    const filters = spec.filters.map((f, k) => {
+      let on = 0;
+      let all = 0;
+      for (const c of ctxs) {
+        const v = FILTER_MAP[f.id].compute(c, f.p);
+        for (let i = c.trainEnd; i < v.long.length; i++) {
+          all++;
+          if (v.long[i] || v.short[i]) on++;
+        }
+      }
+      const x = runAll(ctxs, { ...spec, filters: spec.filters.filter((_, j) => j !== k) }, 'oos', costs, gate);
+      return { id: f.id, name: FILTER_MAP[f.id].name, pass: all ? on / all : NaN, without: perf(x.rets, x.trades, bpy, x.exposure) };
+    });
+    parts = { rules: alone, pairs, filters };
+  }
   return {
     is: perf(is.rets, is.trades, bpy, is.exposure),
     oos: perf(oos.rets, oos.trades, bpy, oos.exposure),
@@ -773,11 +940,13 @@ export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, 
     /** buy-and-hold over the same unseen period, for comparison */
     bh: perf(bhOos.rets, [], bpy, 1),
     perCoin: oos.per.map((x) => ({ coin: x.m.coin, oos: perf(x.bt.rets, x.bt.trades, bpy, x.bt.exposure) })),
-    /** the spec as tested — with the AI trade filter's model when it was kept (deploy this) */
+    /** the spec as tested — with the AI trade filter's model when it was kept, the Kelly fraction and the coin split (deploy this) */
     spec,
     meta,
+    deciders,
+    parts,
+    kelly,
     split: Math.min(...ctxs.map((c) => c.m.bars[c.trainEnd]?.time ?? Infinity)),
     years: (markets[0].bars[markets[0].bars.length - 1].time - markets[0].bars[0].time) / (365 * 86_400_000),
   };
 }
-

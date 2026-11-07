@@ -1,5 +1,5 @@
 import type { XPost } from '../shared/xapi';
-import type { LabConfig, LabDeployed, LabStatus, LabTest } from '../lab/store';
+import type { Authority, LabConfig, LabDeployed, LabStatus, LabTest } from '../lab/store';
 import type { ResearchResult } from '../lab/research';
 import type { StrategySpec } from '../lab/backtest';
 import type { Kline } from '../core/types';
@@ -609,6 +609,8 @@ export interface CSwarmState {
   closed: CSwarmPosition[];
   totals: { trades: number; wins: number; pnl: number };
   byAgent: Record<'scalper' | 'auction' | 'trend', { trades: number; wins: number; pnl: number; avgR: number | null }>;
+  /** per deployed Lab strategy: what the council did with its signals, and what the blocked ones would have made (R) */
+  labBook?: Record<string, LabBook>;
   coins: { coin: string; symbol: string; price: number; feed: string; feedError: string | null; funding: number | null; daily: { dir: number; up: number } | null; engines: Record<string, { state: string; warm: boolean; lastSkip: { t: number; event: string; reason: string } | null; lastSignal: { setup: string; side: string; t: number } | null }> }[];
   lines: CSwarmLine[];
   forest: { samples: number; trained: { n: number; accuracy: number | null; baseline: number | null; trainedAt: number } | null; shadowOpen: number };
@@ -753,6 +755,10 @@ export interface NovusApi {
     /** this window's id */
     self(): Promise<number | null>;
     onChanged(fn: (s: ScreensState) => void): () => void;
+    /** from a popped-out window: close it and open the panel back in the terminal */
+    dock(panel: string, title: string, config: Record<string, unknown>): Promise<boolean>;
+    /** the main window: a popped-out panel is coming back */
+    onDock?(fn: (d: { panel: string; title: string; config: Record<string, unknown> }) => void): () => void;
   };
   lab: {
     state(): Promise<LabStatus>;
@@ -761,9 +767,11 @@ export interface NovusApi {
     run(patch?: Partial<LabConfig>): Promise<LabStatus['last']>;
     cancel(): Promise<void>;
     test(spec: StrategySpec, patch?: Partial<LabConfig>): Promise<LabTest>;
-    deploy(args: { rank?: number; spec?: StrategySpec; tfH?: number; stats?: LabDeployed['stats'] }, targets?: { crypto: boolean; meme: boolean }, coins?: string[]): Promise<string>;
+    deploy(args: { rank?: number; spec?: StrategySpec; tfH?: number; stats?: LabDeployed['stats']; authority?: Authority }, targets?: { crypto: boolean; meme: boolean }, coins?: string[]): Promise<string>;
     undeploy(id: string): Promise<void>;
     toggle(id: string, on: boolean): Promise<void>;
+    /** who decides its trades: the council, or the strategy as tested (only Guardian and Risk can stop it) */
+    authority(id: string, a: Authority): Promise<void>;
     onState(fn: (s: LabStatus) => void): () => void;
     onEvent(fn: (e: { kind: string; at?: number; id?: string; name?: string }) => void): () => void;
   };
@@ -845,4 +853,18 @@ export class DesktopOnlyError extends Error {
   constructor(feature: string) {
     super(`${feature} runs in the Novus Ordo desktop app (browsers block exchange APIs and local databases).`);
   }
+}
+
+export interface LabBook {
+  signals: number;
+  blocked: number;
+  /** who blocked: a bot's veto, or "score" (not enough votes for) */
+  blockedBy: Record<string, number>;
+  /** refused because the swarm already held the coin */
+  refused: number;
+  taken: number;
+  takenR: number;
+  /** blocked signals followed to their exits anyway */
+  shadowN: number;
+  shadowR: number;
 }

@@ -24,6 +24,8 @@ const cswarmListeners = { state: new Set(), event: new Set() };
 const labListeners = { state: new Set(), event: new Set() };
 const screenListeners = new Set();
 ipcRenderer.on('screens:changed', (_e, msg) => screenListeners.forEach((fn) => fn(msg)));
+const dockListeners = new Set();
+ipcRenderer.on('screens:dock', (_e, msg) => dockListeners.forEach((fn) => fn(msg)));
 for (const ch of ['state', 'event']) ipcRenderer.on(`lab:${ch}`, (_e, msg) => labListeners[ch].forEach((fn) => fn(msg)));
 for (const ch of ['state', 'event']) ipcRenderer.on(`cswarm:${ch}`, (_e, msg) => cswarmListeners[ch].forEach((fn) => fn(msg)));
 ipcRenderer.on('swarm:verified', (_e, msg) => verifiedListeners.forEach((fn) => fn(msg)));
@@ -48,7 +50,9 @@ contextBridge.exposeInMainWorld('novus', {
     focus: (id) => call('screens:focus', id),
     close: (id) => call('screens:close', id),
     self: () => call('screens:self'),
+    dock: (panel, title, config) => call('screens:dock', panel, title, config),
     onChanged: (fn) => listen(screenListeners, fn),
+    onDock: (fn) => listen(dockListeners, fn),
   },
   lab: {
     state: () => call('lab:state'),
@@ -60,6 +64,7 @@ contextBridge.exposeInMainWorld('novus', {
     deploy: (args, targets, coins) => call('lab:deploy', args, targets, coins),
     undeploy: (id) => call('lab:undeploy', id),
     toggle: (id, on) => call('lab:toggle', id, on),
+    authority: (id, a) => call('lab:authority', id, a),
     onState: (fn) => listen(labListeners.state, fn),
     onEvent: (fn) => listen(labListeners.event, fn),
   },

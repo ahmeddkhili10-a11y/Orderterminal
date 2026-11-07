@@ -72,6 +72,7 @@ export const FUNCTIONS: Fn[] = [
   { code: 'CAPM', name: 'CAPM', panel: 'qcapm', ws: 'quant', desc: 'Beta, alpha, R², security market line' },
   { code: 'EF', name: 'Efficient frontier', panel: 'qef', ws: 'quant', desc: 'Markowitz frontier, max Sharpe, min variance, Kelly portfolio' },
   { code: 'KELLY', name: 'Kelly criterion', panel: 'qkelly', ws: 'quant', desc: 'Growth-optimal leverage, growth curve, a strategy’s Kelly bet' },
+  { code: 'NNET', name: 'Neural network', panel: 'qnn', ws: 'quant', desc: 'Train a neural network on a coin, judged on unseen data against a forest' },
   // accounts and messages
   { code: 'WALL', name: 'Wallet', panel: 'wallet', ws: 'swarm', desc: 'Phantom balances (and the retired meme swarm wallet)' },
   { code: 'TG', name: 'Telegram', panel: 'telegram', ws: 'swarm', desc: 'Your Telegram bot' },
@@ -88,7 +89,7 @@ export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
 export const KEYS: Record<Workspace, string[]> = {
   markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
   lab: ['BOT', 'LIB', 'RSCH', 'BT', 'DEPL', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
-  quant: ['VAR', 'CAPM', 'EF', 'KELLY', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV', 'FCST'],
+  quant: ['VAR', 'CAPM', 'EF', 'KELLY', 'NNET', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV'],
 };
 
 export interface Parsed {

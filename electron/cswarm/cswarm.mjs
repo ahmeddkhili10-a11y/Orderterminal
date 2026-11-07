@@ -75,6 +75,8 @@ export class CryptoSwarm {
     this.liveBook = db.get('cswarm:liveBook') ?? null;
     this.positions = db.get('cswarm:positions') ?? [];
     this.samples = db.get('cswarm:samples') ?? [];
+    /** per deployed Lab strategy: signals, trades taken, signals blocked (and what they would have made), signals refused because the coin was taken */
+    this.labBook = db.get('cswarm:labBook') ?? {};
     this.lines = [];
     this.running = false;
     this.coins = new Map();
@@ -231,7 +233,14 @@ export class CryptoSwarm {
 
   /** Every price: the shadow book, the Trend agent's management, decisions on engine-managed trades. */
   onPrice(coin, p, t) {
-    for (const s of this.shadow.onPrice(coin, p, t)) this.learn(s.x, s.r, 'shadow', s.agent);
+    for (const s of this.shadow.onPrice(coin, p, t)) {
+      this.learn(s.x, s.r, 'shadow', s.agent);
+      if (s.labId)
+        this.labNote(s.labId, (b) => {
+          b.shadowN++;
+          b.shadowR += s.r;
+        });
+    }
     const pos = this.openOn(coin);
     if (!pos || pos.closing) return;
     const cs = this.coins.get(coin);
@@ -365,7 +374,7 @@ export class CryptoSwarm {
         const price = Number.isFinite(cs.price) ? cs.price : sig.price;
         const shift = price - sig.price;
         const stats = d.stats ? ` (tested: Sharpe ${d.stats.sharpe.toFixed(2)}, t ${d.stats.t.toFixed(1)}, ${d.stats.verdict})` : '';
-        this.propose(cs.coin, 'lab', { ...sig, price, stop: sig.stop + shift, target: sig.target + shift, setup: `Lab · ${sig.setup}`, why: `${sig.why}${stats}`, labId: d.id, labTfH: tfH, labHoldMs: d.spec.exit.maxBars * tfH * HOUR });
+        this.propose(cs.coin, 'lab', { ...sig, price, stop: sig.stop + shift, target: sig.target + shift, setup: `Lab · ${sig.setup}`, why: `${sig.why}${stats}`, labId: d.id, labTfH: tfH, labHoldMs: d.spec.exit.maxBars * tfH * HOUR, authority: d.authority === 'tested' ? 'tested' : 'council' });
       }
     }
   }
@@ -437,10 +446,11 @@ export class CryptoSwarm {
     const c = this.cfg;
     if (!cs || !this.running || cs.busy || this.openOn(coin)) {
       e?.failed(cs?.busy || this.openOn(coin) ? `the swarm already holds ${coin}` : 'stopped');
+      if (p.labId && this.running) this.labNote(p.labId, (b) => b.refused++);
       return;
     }
     const t = this.now();
-    const cand = { agent, coin, symbol: cs.symbol, side: p.side, price: p.price, stop: p.stop, target: p.target, setup: p.setup, why: p.why, t, ctx: this.ctxOf(cs, agent) };
+    const cand = { agent, coin, symbol: cs.symbol, side: p.side, price: p.price, stop: p.stop, target: p.target, setup: p.setup, why: p.why, t, ctx: this.ctxOf(cs, agent), authority: p.authority ?? 'council' };
     const x = features(cand);
     const costBps = 2 * (c.feeBps + c.slippageBps);
     const odds = oddsR(x, this.forest, costBps);
@@ -452,9 +462,18 @@ export class CryptoSwarm {
     const sizeNote = size && !size.skip ? `risking ${size.riskPct.toFixed(2)}% of the account (${usd(size.riskUsd)}) on a ${usd(size.notional)} position, ${size.lev.toFixed(1)}× the account${size.why ? ` — ${size.why}` : ''}` : '';
     const v = councilR({ cand, odds, riskGate: gate ?? size?.skip ?? null, sizeNote }, c.council);
     this.discuss(cand, v);
+    if (p.labId)
+      this.labNote(p.labId, (b) => {
+        b.signals++;
+        if (!v.trade) {
+          const by = v.votes.find((q) => q.stance === 'veto')?.bot ?? 'score';
+          b.blocked++;
+          b.blockedBy[by] = (b.blockedBy[by] ?? 0) + 1;
+        }
+      });
     if (!v.trade) {
       e?.failed(`council: ${v.summary}`);
-      this.shadow.add({ coin, side: p.side, entry: p.price, stop: p.stop, target: p.target, t, maxHoldMs: agent === 'lab' ? p.labHoldMs ?? 72 * HOUR : agent === 'trend' ? 72 * HOUR : agent === 'auction' ? 8 * HOUR : 15 * MIN, x, agent, costR: odds.costR });
+      this.shadow.add({ coin, side: p.side, entry: p.price, stop: p.stop, target: p.target, t, maxHoldMs: agent === 'lab' ? p.labHoldMs ?? 72 * HOUR : agent === 'trend' ? 72 * HOUR : agent === 'auction' ? 8 * HOUR : 15 * MIN, x, agent, costR: odds.costR, labId: p.labId ?? null });
       return;
     }
     const risk = Math.abs(p.price - p.stop);
@@ -623,6 +642,11 @@ export class CryptoSwarm {
     }
     if (pos.mode === this.mode) this.setBook(recordClose(this.book(), pos.r, c.risk, this.now()));
     this.learn(pos.x, pos.r, pos.mode, pos.agent);
+    if (pos.labId)
+      this.labNote(pos.labId, (b) => {
+        b.taken++;
+        b.takenR += pos.r;
+      });
     this.say(pos.agent, `${pos.coin}: closed (${reason}) @ ${tidy(exit)} — ${pos.pnl >= 0 ? '+' : '−'}${usd(Math.abs(pos.pnl))} (${pos.r >= 0 ? '+' : ''}${pos.r.toFixed(2)}R)`, pos.pnl >= 0 ? 'win' : 'loss');
     this.notify('result', pos);
     if (pos.mode === 'live') void this.refreshEquity();
@@ -690,6 +714,13 @@ export class CryptoSwarm {
 
   // ---------- state ----------
 
+  /** update a Lab strategy's book (what the council did with its signals) */
+  labNote(id, fn) {
+    const b = (this.labBook[id] ??= { signals: 0, blocked: 0, blockedBy: {}, refused: 0, taken: 0, takenR: 0, shadowN: 0, shadowR: 0 });
+    fn(b);
+    this.db.set('cswarm:labBook', this.labBook);
+  }
+
   persist() {
     this.db.set('cswarm:paper', this.paper);
     if (this.liveBook) this.db.set('cswarm:liveBook', this.liveBook);
@@ -730,6 +761,7 @@ export class CryptoSwarm {
       closed: closed.slice(-40).reverse().map(({ x: _x, ...p }) => p),
       totals: { trades: closed.length, wins: closed.filter((p) => p.pnl > 0).length, pnl: closed.reduce((s, p) => s + p.pnl, 0) },
       byAgent,
+      labBook: this.labBook,
       coins,
       lines: this.lines.slice(-150),
       forest: { samples: this.samples.length, trained: fs ? { n: fs.n, accuracy: fs.accuracy, baseline: fs.baseline, trainedAt: fs.trainedAt } : null, shadowOpen: this.shadow.open.length },

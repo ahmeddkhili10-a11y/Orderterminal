@@ -15,9 +15,10 @@ import { useSettings } from '../store/settings';
 import { applyTheme } from '../ui/theme';
 import { loadLayout, loadProLayout, PRESETS, PRO_LAYOUTS, sanitize, saveLayout, saveProLayout, tab } from './layouts';
 import { CommandBar, openFunction, StatusLine, switchUi } from '../pro/ProBar';
-import type { FnHome, Workspace } from '../pro/functions';
+import { FUNCTIONS, WORKSPACES, type FnHome, type Workspace } from '../pro/functions';
+import { desktop } from '../desktop/bridge';
 import { startLabLink } from '../lab/store';
-import { AddPanelModal, ConnectionModal, LayoutsModal, SettingsModal, type Placement } from './Modals';
+import { AddPanelModal, ConnectionModal, LayoutsModal, Modal, SettingsModal, type Placement } from './Modals';
 import { KeysModal } from './KeysModal';
 import { PanelHost } from './PanelHost';
 import { TopBar, type ModalKind } from './TopBar';
@@ -45,11 +46,31 @@ function Toasts() {
 
 const WS: Workspace[] = ['markets', 'lab', 'quant'];
 
-/** ⧉ on each tab bar: pop the selected panel out into its own window (desktop) */
-function popButton(m: Model) {
+/** a tab on its way to another workspace or window */
+interface Moving {
+  from: Workspace;
+  id: string;
+  comp: string;
+  name: string;
+  config: Record<string, unknown>;
+}
+
+/** where a panel lives when it comes back to the terminal: the workspace its function key is on */
+export function homeOf(panel: string): FnHome {
+  return FUNCTIONS.find((f) => f.panel === panel)?.ws ?? 'markets';
+}
+
+/** ⧉ on each tab bar: pop the selected panel out into its own window (desktop); ⇄ moves it to another workspace */
+function popButton(m: Model, onMove?: (sel: TabNode) => void) {
   return (node: TabSetNode | BorderNode, rv: ITabSetRenderValues) => {
     const sel = node.getSelectedNode() as TabNode | undefined;
     const comp = sel?.getComponent();
+    if (sel && comp && onMove)
+      rv.buttons.push(
+        <button key="move" className="flexlayout__tab_toolbar_button move-tab-btn" title="Move this tab to another workspace (Markets, Strategy Lab, Quant desk) or its own window" onClick={() => onMove(sel)}>
+          ⇄
+        </button>,
+      );
     if (!sel || !comp || !canPopOut(comp)) return;
     rv.buttons.push(
       <button
@@ -88,6 +109,41 @@ export function App() {
   const model = pro ? proModels[ws] : classicModel;
   const layoutApi = () => (pro ? (proRefs.current[ws] ?? null) : layoutRef.current);
   const sessionStart = useMemo(() => Date.now(), []);
+  const [moving, setMoving] = useState<Moving | null>(null);
+  /** put a tab into a workspace's layout (its own settings kept) and go there */
+  const placeIn = (target: Workspace, comp: string, name?: string, config?: Record<string, unknown>) => {
+    const m = proModels[target];
+    const json = { ...tab(comp), ...(name ? { name } : {}), ...(config ? { config } : {}) };
+    const at = m.getActiveTabset() ?? m.getFirstTabSet();
+    if (at) m.doAction(Actions.addNode(json, at.getId(), DockLocation.CENTER, -1, true));
+    else m.doAction(Actions.addNode(json, m.getRootRow()!.getId(), DockLocation.RIGHT, -1, true));
+    const st = useSettings.getState();
+    if (st.ui !== 'pro') switchUi('pro');
+    st.set({ workspace: target });
+  };
+  const moveTo = (target: Workspace | 'window') => {
+    if (!moving) return;
+    const mv = moving;
+    setMoving(null);
+    if (target === 'window') {
+      void popOut(mv.comp, mv.name, mv.config).then((id) => {
+        if (id !== null) proModels[mv.from].doAction(Actions.deleteTab(mv.id));
+      });
+      return;
+    }
+    if (target === mv.from) return;
+    proModels[mv.from].doAction(Actions.deleteTab(mv.id));
+    placeIn(target, mv.comp, mv.name, mv.config);
+  };
+  // a popped-out window sent back: the panel returns to its workspace (or to the swarm view's drawer)
+  useEffect(() => {
+    const off = desktop?.screens.onDock?.(({ panel, title, config }) => {
+      const home = homeOf(panel);
+      if (home === 'swarm') openFunction(panel, 'swarm');
+      else placeIn(home, panel, title, config);
+    });
+    return () => off?.();
+  });
 
   useEffect(() => {
     hub();
@@ -284,7 +340,7 @@ export function App() {
         WS.filter((w) => visited.has(w)).map((w) => (
           <div key={w} className="layout-host pro-host" data-ws={w} style={pro && w === ws ? undefined : { display: 'none' }}>
             <div className="layout-inner">
-              <Layout ref={(r) => void (proRefs.current[w] = r)} model={proModels[w]} factory={proFactories[w]} onModelChange={(m) => saveProLayout(w, m.toJson())} onRenderTabSet={popButton(proModels[w])} realtimeResize />
+              <Layout ref={(r) => void (proRefs.current[w] = r)} model={proModels[w]} factory={proFactories[w]} onModelChange={(m) => saveProLayout(w, m.toJson())} onRenderTabSet={popButton(proModels[w], (sel) => setMoving({ from: w, id: sel.getId(), comp: sel.getComponent() ?? '', name: sel.getName(), config: (sel.getConfig() ?? {}) as Record<string, unknown> }))} realtimeResize />
             </div>
           </div>
         ))}
@@ -294,6 +350,24 @@ export function App() {
       {modal === 'add' && <AddPanelModal onClose={() => setModal(null)} onAdd={addPanel} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} />}
       {modal === 'keys' && <KeysModal onClose={() => setModal(null)} onOpenPanel={openPanel} />}
+      {moving && (
+        <Modal title={`Move “${moving.name}”`} onClose={() => setMoving(null)} width={460}>
+          <div className="move-tab-body">
+            {WORKSPACES.map((w) => (
+              <button key={w.id} className={`move-tab-opt${w.id === moving.from ? ' here' : ''}`} disabled={w.id === moving.from} onClick={() => moveTo(w.id)}>
+                <b>{w.name}</b>
+                <span>{w.id === moving.from ? 'it is here now' : w.desc}</span>
+              </button>
+            ))}
+            {canPopOut(moving.comp) && (
+              <button className="move-tab-opt" onClick={() => moveTo('window')}>
+                <b>⧉ Its own window</b>
+                <span>Pop it out, then send it to any screen (Screens). It stays open whichever view the terminal is on — the crypto swarm included.</span>
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
       <Toasts />
     </div>
   );

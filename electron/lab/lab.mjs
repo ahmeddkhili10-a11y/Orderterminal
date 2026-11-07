@@ -86,7 +86,7 @@ export class LabService {
       progress: this.progress,
       error: this.error,
       cfg: this.cfg,
-      deployed: this.deployedList.map(({ spec, ...d }) => ({ ...d, name: spec.name, spec: { ...spec, meta: spec.meta ? { threshold: spec.meta.threshold, trees: spec.meta.model.trees.length } : undefined } })),
+      deployed: this.deployedList.map(({ spec, ...d }) => ({ ...d, name: spec.name, spec: { ...spec, meta: spec.meta ? { threshold: spec.meta.threshold, trees: spec.meta.model?.trees.length ?? 0, nn: !!spec.meta.nn } : undefined } })),
       last: last ? { at: last.at, trials: last.trials, top: last.top.length, verdicts: last.top.map((t) => t.verdict) } : null,
     };
   }
@@ -95,7 +95,7 @@ export class LabService {
   result() {
     const r = this.read('result.json', null);
     if (!r) return null;
-    return { ...r, top: r.top.map((t) => ({ ...t, spec: { ...t.spec, meta: t.spec.meta ? { threshold: t.spec.meta.threshold, trees: t.spec.meta.model.trees.length } : undefined } })) };
+    return { ...r, top: r.top.map((t) => ({ ...t, spec: { ...t.spec, meta: t.spec.meta ? { threshold: t.spec.meta.threshold, trees: t.spec.meta.model?.trees.length ?? 0, nn: !!t.spec.meta.nn } : undefined } })) };
   }
 
   setConfig(patch) {
@@ -253,7 +253,7 @@ export class LabService {
   // ---------- deployment ----------
 
   /** deploy one of the last result's top five (by rank), or a hand-built spec */
-  deploy({ rank, spec, tfH, stats }, targets = { crypto: true, meme: false }, coins) {
+  deploy({ rank, spec, tfH, stats, authority }, targets = { crypto: true, meme: false }, coins) {
     let s = spec;
     let st = stats;
     let tf = tfH;
@@ -266,7 +266,7 @@ export class LabService {
       st = { sharpe: t.oos.sharpe, t: t.oos.t, dsr: t.dsr, trades: t.oos.trades, verdict: t.verdict };
     }
     if (!s) throw new Error('nothing to deploy');
-    const d = { id: randomUUID(), spec: s, tfH: tf ?? 1, coins: coins ?? this.cfg.coins, targets, stats: st ?? { sharpe: 0, t: 0, dsr: 0, trades: 0, verdict: 'untested' }, deployedAt: this.now(), on: true };
+    const d = { id: randomUUID(), spec: s, tfH: tf ?? 1, coins: coins ?? this.cfg.coins, targets, stats: st ?? { sharpe: 0, t: 0, dsr: 0, trades: 0, verdict: 'untested' }, deployedAt: this.now(), on: true, authority: authority === 'tested' ? 'tested' : 'council' };
     this.deployedList = [...this.deployedList, d];
     this.write('deployed.json', this.deployedList);
     this.push();
@@ -276,6 +276,13 @@ export class LabService {
 
   undeploy(id) {
     this.deployedList = this.deployedList.filter((d) => d.id !== id);
+    this.write('deployed.json', this.deployedList);
+    this.push();
+  }
+
+  /** who decides a deployed strategy's trades: the swarm's council (it can block a signal), or the strategy as tested (only the safety bots can) */
+  setAuthority(id, authority) {
+    this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, authority: authority === 'tested' ? 'tested' : 'council' } : d));
     this.write('deployed.json', this.deployedList);
     this.push();
   }

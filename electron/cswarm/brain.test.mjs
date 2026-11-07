@@ -62,6 +62,22 @@ describe('crypto swarm brain', () => {
     expect(smaller.riskUsd).toBeLessThan(base.riskUsd);
   });
 
+  it('a Lab strategy deployed "as tested": the opinion bots only advise; Guardian and Risk still stop it', () => {
+    const lab = cand({ agent: 'lab', setup: 'Lab · RSI dip in the trend', authority: 'tested', ctx: { ...cand().ctx, flow: { deltaRatio: -0.6 }, daily: { dir: -1, up: 0 } } });
+    // the tape and the trend against it and the forest vetoing would stop it under the council…
+    const odds = { ...oddsOk, expR: -0.3, trust: 0.5 };
+    expect(councilR({ cand: { ...lab, authority: 'council' }, odds, riskGate: null, sizeNote: '' }).trade).toBe(false);
+    // …as tested, they are advice: it trades, and the advice is on the record
+    const v = councilR({ cand: lab, odds, riskGate: null, sizeNote: '' });
+    expect(v.trade).toBe(true);
+    expect(v.advisory).toBe(true);
+    expect(v.votes.find((q) => q.bot === 'forest').stance).toBe('against');
+    expect(v.summary).toMatch(/only Guardian and Risk can stop it/);
+    // the safety bots still stop it
+    expect(councilR({ cand: lab, odds, riskGate: 'down 5% today', sizeNote: '' }).summary).toBe('vetoed by Risk (safety)');
+    expect(councilR({ cand: { ...lab, ctx: { ...lab.ctx, book: { imbalance: 0, spreadBps: 20 } } }, odds, riskGate: null, sizeNote: '' }).trade).toBe(false);
+  });
+
   it('the council: proposer and risk carry a clean trade; the tape against it or a veto stops it', () => {
     const go = councilR({ cand: cand(), odds: oddsOk, riskGate: null, sizeNote: 'risking 1% ($0.30)' });
     expect(go.trade).toBe(true);

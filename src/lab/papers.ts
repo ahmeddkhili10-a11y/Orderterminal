@@ -410,6 +410,20 @@ export const PAPERS: Record<string, Paper> = {
     venue: 'Transactions of the American Society of Civil Engineers 116',
     finding: 'The rescaled-range exponent: 0.5 for independent steps, above for persistence, below for anti-persistence.',
   },
+  lo91: {
+    id: 'lo91',
+    cite: 'Lo (1991)',
+    title: 'Long-term memory in stock market prices',
+    venue: 'Econometrica 59(5)',
+    finding: 'A modified rescaled-range test for long memory: short-term dependence can mimic it, so the Hurst exponent is read alongside a robust test.',
+  },
+  kb15: {
+    id: 'kb15',
+    cite: 'Kingma & Ba (2015)',
+    title: 'Adam: a method for stochastic optimization',
+    venue: 'International Conference on Learning Representations',
+    finding: 'An optimiser that adapts each weight’s step from running averages of its gradient and squared gradient — the standard way to train neural networks.',
+  },
   ham89: {
     id: 'ham89',
     cite: 'Hamilton (1989)',

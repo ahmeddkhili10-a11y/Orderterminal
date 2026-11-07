@@ -87,11 +87,26 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForSelector('.bb-canvas', { timeout: 10_000 });
   expect((await page.locator('.bb-node').count()) === 8, 'the bot builder: style, strategy, market model, forecast, risk, rules, backtest, deploy');
+  await page.click('.bb-node[data-block="deploy"]');
   expect(await page.locator('.bb-deploy').isDisabled(), 'deploy waits for a backtest');
-  await page.locator('.bb-node.t-a select').selectOption('scalp');
-  await page.locator('.bb-node.t-b select').selectOption('rsi2');
-  await page.locator('.bb-node.t-d select').selectOption('meta');
+  await page.click('.bb-node[data-block="style"]');
+  await page.click('.bb2-inspector [data-opt="scalp"]');
   expect(/1h candles/.test(await page.locator('.bb').innerText()) && (await page.locator('text=crashed').count()) === 0, 'choosing a style re-plans the bot (scalping: 1-hour candles)');
+  // a block holds several picks, and the check says how they fit together
+  await page.click('.bb-node[data-block="strategy"]');
+  await page.click('.bb2-inspector [data-opt="rsi2"]');
+  await page.waitForSelector('.bb2-finding.pair', { timeout: 5_000 });
+  expect((await page.locator('.bb-node[data-block="strategy"] .bb2-chip').count()) === 2, 'a block holds two strategies (trend + dip)');
+  expect((await page.locator('.bb2-finding.pair').count()) > 0, 'the check: a trend rule and a dip rule pair well when all must agree');
+  await page.click('.bb2-inspector [data-opt="any"]');
+  await page.waitForSelector('.bb2-finding.clash', { timeout: 5_000 });
+  expect(true, 'the check: the same two with “any one” clash');
+  await page.click('.bb2-inspector [data-opt="all"]');
+  await page.click('.bb-node[data-block="forecast"]');
+  await page.click('.bb2-inspector [data-opt="both"]');
+  expect(/Neural network \+ decision forest/.test(await page.locator('.bb-node[data-block="forecast"]').innerText()), 'the neural network and the decision forest paired as the decision maker');
+  await page.click('.bb-node[data-block="deploy"]');
+  expect((await page.locator('.bb2-inspector [data-opt="tested"]').count()) === 1, 'deploy: choose who decides its trades (council, or as tested)');
   await page.screenshot({ path: `${OUT}desktop-bot-builder.png` });
   const ls = await page.evaluate(() => window.novus.lab.state());
   expect(!!ls && ls.cfg.coins.length > 0 && Array.isArray(ls.deployed), 'the Lab answers from the desktop process');
@@ -164,6 +179,28 @@ try {
   await page.keyboard.press('Control+2');
   await page.waitForSelector('.cc > .cc-top', { timeout: 10_000 });
   expect(true, 'Ctrl+2 back to the crypto swarm');
+  // the swarm on this screen, the quant desk's neural network on another: any tool opens in its own window from the swarm view
+  await page.click('.scr > .chip');
+  await page.fill('.scr-open-bar input', 'NNET');
+  const nnWin = app.waitForEvent('window', { timeout: 30_000 });
+  await page.click('.scr-open-row[data-panel="qnn"]');
+  const nnPop = await nnWin;
+  await nnPop.waitForSelector('.popout-bar', { timeout: 30_000 });
+  const nnBar = await nnPop.locator('.popout-bar').innerText();
+  const ccOn = await page.locator('.cc > .cc-top').count();
+  expect(/Neural network/i.test(nnBar) && ccOn === 1, `(${nnBar.slice(0, 40)} · swarm on screen: ${ccOn}) ` + 'from the crypto swarm view, the quant desk’s NNET opens in its own window while the swarm stays on screen');
+  await page.keyboard.press('Escape');
+  // ⇤ sends it back: the window closes and the panel opens on the quant desk
+  await nnPop.click('.popout-bar .chip:has-text("Back to the terminal")');
+  await page.waitForSelector('.pro-ws-tab.active:has-text("QUANT DESK")', { timeout: 15_000 });
+  expect((await page.locator('.flexlayout__tab_button--selected:has-text("NNET")').count()) > 0, '⇤ Back to the terminal: the window closes and NNET opens on the quant desk');
+  // ⇄ moves a tab to another workspace
+  await page.locator('.pro-host:not([style*="none"]) .move-tab-btn').first().click();
+  await page.waitForSelector('.move-tab-opt', { timeout: 5_000 });
+  expect((await page.locator('.move-tab-opt').count()) >= 3, '⇄ offers the other workspaces and its own window');
+  await page.click('.modal .x');
+  await page.keyboard.press('Control+2');
+  await page.waitForSelector('.cc > .cc-top', { timeout: 10_000 });
   // the classic order-flow look, from Settings, for the checks below
   await page.click('button[title="Settings"]');
   await page.click('.modal .chip:has-text("Classic order-flow terminal")');

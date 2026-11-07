@@ -44,6 +44,7 @@ square, every number on screen backed by live data. The classic swarm views
 | `SWRM` | Crypto swarm view | | `CAPM` | CAPM (F3) |
 | `SWCF` | Swarm rules (swarm view) | | `EF` | Efficient frontier (F3) |
 | | | | `KELLY` | Kelly criterion (F3) |
+| | | | `NNET` | Neural network (F3) |
 | `TAS` | Time & sales | | `DHG` | Delta hedging (F3) |
 | `CVD` | Cumulative delta | | `WALL` | Wallet |
 | `FLOW` | Flow pulse | | `TG` | Telegram |
@@ -103,6 +104,14 @@ coin on the board, and the tables list a set of coins you choose.
   leverage cap, and Kelly on the crypto swarm's own trade record.
 - **GV** gains a model choice (best by BIC, GARCH or **GJR-GARCH**) and the
   news-impact curve, which shows GJR's extra response to falls.
+- **NNET — the neural network.** Train a small neural network (two hidden
+  layers) on a coin's candles to forecast whether it is higher a few candles
+  later; the error falls epoch by epoch on screen and it stops when the latest
+  training data stops improving. Judged on the last 30 % it never saw against
+  a random forest on the same inputs and the two paired: how often each was
+  right against guessing, its confident calls as a trading record, what it
+  looks at most, and how well its odds held up. The same network is in the
+  Strategy Lab as a rule, a second opinion and an AI decision maker.
 
 The same models feed the Strategy Lab: see [STRATEGY-LAB.md](STRATEGY-LAB.md).
 
@@ -132,3 +141,16 @@ heat maps follow the theme.
 - Popped-out panels hide while the terminal is locked and come back where they
   were the next time you unlock.
 - The meme swarm's panels stay in the main window: the meme swarm runs there.
+
+
+## Moving tabs between workspaces, views and screens
+
+- **⇄** on any tab bar moves that tab to another workspace (Markets, Strategy
+  Lab, Quant desk) or into its own window.
+- **⧉ Screens → Open any tool in its own window** — from any view, the crypto
+  swarm's included: search any tool (BOT, NNET, VAR, the footprint…), choose a
+  screen. The swarm can fill one screen while the quant desk or the bot
+  builder fills another; windows stay open whichever view the main window is
+  on. The swarm view's drawer has **⧉ Window** for its tools too.
+- **⇤ Back to the terminal** on a popped-out window closes it and opens the
+  tool where it lives.
