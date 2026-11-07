@@ -337,8 +337,8 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
         return (
           <>
             <Group title="Who decides its trades in the swarm">
-              <OptionRow id="council" radio on={c.authority === 'council'} name="Council decides" plain="The bot proposes; the swarm’s council (trend, tape, crowd, forest) votes and can block a signal. Safer while a bot is unproven — but the council was not part of the test, so it changes which trades happen." explain={c.explain} onClick={() => set({ authority: 'council' })} />
-              <OptionRow id="tested" radio on={c.authority === 'tested'} name="Trade as tested" plain="The bot takes every signal it was tested on; the council’s votes are recorded as advice. Guardian (spreads, volatility spikes) and Risk (daily loss, drawdown, the size of every trade) can still stop any trade. For bots that held up on unseen data." explain={c.explain} onClick={() => set({ authority: 'tested' })} />
+              <OptionRow id="council" radio on={c.authority === 'council'} name="Council decides" plain="The bot proposes; the swarm’s council (trend, tape, crowd, forest) votes and can block a signal. Safer while a bot is unproven — but the council was not part of the test, so it changes which trades happen." explain={c.explain} onClick={() => setConfig({ authority: 'council' })} />
+              <OptionRow id="tested" radio on={c.authority === 'tested'} name="Trade as tested" plain="The bot takes every signal it was tested on; the council’s votes are recorded as advice. Guardian (spreads, volatility spikes) and Risk (daily loss, drawdown, the size of every trade) can still stop any trade. For bots that held up on unseen data." explain={c.explain} onClick={() => setConfig({ authority: 'tested' })} />
             </Group>
             <button className={`btn bb-deploy bb2-primary${v ? ` t-${v.tone}` : ''}`} disabled={!res} onClick={deploy} title={res ? 'Deploy to the crypto swarm' : 'Run the backtest first'}>
               {deployed ? '✓ Deployed' : res ? 'Deploy to the crypto swarm' : 'Backtest first'}
