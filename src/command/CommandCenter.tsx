@@ -569,7 +569,8 @@ export function CommandCenter() {
 
   // ---------- the core ----------
   const GC = gaugeColors(theme);
-  const warm = (agent: string) => coins.filter((c) => c.engines[agent]?.warm).length;
+  // the Trend agent reads daily candles (no tape engine): it is warm on a coin once it has read that coin's daily trend
+  const warm = (agent: string) => coins.filter((c) => (agent === 'trend' ? !!c.daily : c.engines[agent]?.warm)).length;
   const feedsOk = coins.filter((c) => c.feed === 'open').length;
   const fundingApr = coins.length ? coins.reduce((a, c) => a + Math.abs(c.funding ?? 0), 0) / coins.length / 1e-4 : 0;
   const recent = lines.filter((l) => now - l.t < 60 * 60_000);
