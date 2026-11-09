@@ -452,17 +452,30 @@
   <div class="box stop"><b>Three rules that protect your money</b>
     <ol style="margin-bottom:2px"><li><b>Never</b> send USDC from an exchange straight to Hyperliquid: it credits the wallet that sent it — the exchange's — and the money is lost. Always go through your own wallet.</li>
     <li><b>Never</b> give anyone, or any app, your wallet's recovery phrase or main private key.</li>
-    <li>Deposit <b>at least 5 USDC</b> each time; smaller deposits are not credited.</li></ol></div>
+    <li>Deposit <b>at least 5 USDC</b> each time; smaller deposits are not credited.</li>
+    <li><b>Never</b> send a Hyperliquid withdrawal straight to Luno: Hyperliquid pays out USDC on Arbitrum, and Luno lists USDC deposits on Ethereum only.</li></ol></div>
+  <p>There are two ways to get USDC into Hyperliquid. Both start with a wallet of your own (step 1), which is also your Hyperliquid account.</p>
+  <table>
+    <tr><th style="width:22%">Route</th><th>How</th><th style="width:30%">Cost</th></tr>
+    <tr><td><b>A · Card, inside Hyperliquid</b> (quickest)</td><td><code>app.hyperliquid.xyz</code> → <b>Connect</b> → <b>Deposit → Fiat</b>; pay by card or bank transfer through the payment company (Swapped), which may verify your identity the first time. Check the screen says it lands in your <b>Hyperliquid balance</b>.</td><td>No Hyperliquid fee; about 2 % in the price, often 3–5 % in all by card, plus any foreign transaction fee from your bank. The total shows before you confirm.</td></tr>
+    <tr><td><b>B · Through an exchange</b> (cheapest)</td><td>Buy USDC on Binance → withdraw to <b>your own wallet</b> on <b>Arbitrum One</b> → <b>Deposit</b> on Hyperliquid.</td><td>The exchange's trading fee and cents of ETH for network fees.</td></tr>
+  </table>
   <ol class="steps">
     <li><b>Get a wallet of your own</b> — the <b>Rabby</b> or <b>MetaMask</b> browser extension on the computer that runs Novus Ordo is the most reliable. Keep the recovery phrase on paper.</li>
-    <li><b>Buy USDC</b> on your exchange, plus about $2 of ETH for network fees.</li>
-    <li><b>Withdraw both to your own wallet on the Arbitrum One network</b>. Send a small test amount first.</li>
-    <li><b>Deposit</b>: open <code>app.hyperliquid.xyz</code> in the same browser → <b>Connect</b> → <b>Deposit</b> (5 USDC or more).</li>
+    <li><b>Fund it — route A</b>: <code>app.hyperliquid.xyz</code> in the same browser → <b>Connect</b> → <b>Deposit → Fiat</b>, pay by card, start small. <b>Or route B</b>: buy USDC (plus about $2 of ETH) on your exchange, withdraw both to your own wallet on <b>Arbitrum One</b> with a small test first, then <b>Connect → Deposit</b> on Hyperliquid (5 USDC or more).</li>
+    <li><b>Keep a little ETH on Arbitrum</b> in your wallet (about $1–2) — needed to send USDC on to Binance when you cash out. Buy it with the wallet's own <b>Buy</b> button or withdraw it from Binance on Arbitrum One.</li>
     <li><b>Create the API wallet</b>: <b>More → API</b> → name it Novus Ordo → <b>Generate</b> → <b>Authorize API Wallet</b>. Copy the private key: it is shown once.</li>
     <li><b>Connect it</b>: 🔌 <b>Connect → Hyperliquid</b>. <b>Main wallet address</b> = your wallet's 0x… address; <b>API wallet private key</b> = the key you copied. Save, then <b>Test live</b>.</li>
     <li><b>Allow trading</b> when you are ready, then choose <b>Live</b> in the swarm's rules.</li>
     <li><b>Withdrawing</b> is done only on <code>app.hyperliquid.xyz</code> with your own wallet — the terminal cannot withdraw.</li>
   </ol>
+  <h3>Taking money out — back to rands</h3>
+  <ol class="steps">
+    <li>On <code>app.hyperliquid.xyz</code>: <b>Withdraw</b> → amount → sign. The USDC arrives in your wallet on Arbitrum a few minutes later (Hyperliquid charges a small flat fee).</li>
+    <li>On Binance: <b>Deposit → USDC → network Arbitrum One</b>, copy the address, and send the USDC to it from your wallet (a test amount first).</li>
+    <li>Sell the USDC for rands on Binance and withdraw to your bank.</li>
+  </ol>
+  <div class="box stop"><b>Not to Luno — unless it shows Arbitrum</b>Luno's help pages list USDC deposits on the Ethereum network only, so USDC sent to Luno on Arbitrum will most likely not arrive. Before ever using Luno for this, open the Luno app → <b>Receive → USDC</b> and use it only if <b>Arbitrum</b> is listed. Hyperliquid's own cash-out to a bank is reported to be coming; when it supports rands, this gets simpler.</div>
   <div class="box tip"><b>Practise first</b>Make an API wallet on <code>app.hyperliquid-testnet.xyz</code> (its faucet gives free test USDC), tick <b>testnet / sandbox</b> on the key, and run the swarm live against the testnet.</div>
   <h2 data-toc>Luno, Telegram and Phantom</h2>
   <h3>Luno (South African rands)</h3>
@@ -552,6 +565,7 @@
     <tr><td><b>An exchange rejects a key</b></td><td>Use <b>Test live</b> in 🔌 Connect: it explains the exchange's error in plain words (wrong permission, IP restriction, clock difference). Never send anyone your key — send the error message.</td></tr>
     <tr><td><b>A key shows "(read-only)"</b></td><td>Tick <b>Allow trading</b> on it in 🔌 Connect.</td></tr>
     <tr><td><b>Hyperliquid won't connect to a phone wallet</b></td><td>Use the Rabby or MetaMask browser extension on the computer instead (chapter 7), or open the site inside the wallet app's own browser.</td></tr>
+    <tr><td><b>USDC sent from Hyperliquid has not arrived</b></td><td>Check the network: Hyperliquid pays out on Arbitrum, so the receiving address must be an <b>Arbitrum</b> USDC address (Binance: Arbitrum One). If it went to an address on another network, contact that exchange's support with the transaction link.</td></tr>
     <tr><td><b>Windows SmartScreen warning</b></td><td><b>More info → Run anyway</b>.</td></tr>
   </table>
   <h2 data-toc>The log file</h2>
