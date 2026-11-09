@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Novus Ordo — Operator's Manual</title>
+<style>
+  @page { size: A4; margin: 18mm 17mm 20mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font-family: 'Inter', sans-serif; color: #1a1f26; font-size: 10.3pt; line-height: 1.5; }
+  h1, h2, h3, h4 { font-family: 'Inter Display', 'Inter', sans-serif; color: #10141a; }
+  .chapter { break-before: page; }
+  .ch-head { border-bottom: 2px solid #10141a; padding-bottom: 10px; margin-bottom: 16px; }
+  .ch-num { font: 700 9.5pt 'DejaVu Sans Mono', monospace; letter-spacing: 0.3em; color: #b37800; text-transform: uppercase; }
+  h1 { font-size: 26pt; font-weight: 700; letter-spacing: -0.015em; margin: 4px 0 6px; line-height: 1.1; }
+  .ch-lead { font-size: 11.5pt; color: #4a5361; margin: 0; }
+  h2 { font-size: 14.5pt; margin: 20px 0 6px; break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 14px 0 4px; break-after: avoid; }
+  p { margin: 5px 0 7px; }
+  ul, ol { margin: 4px 0 8px 18px; padding: 0; }
+  li { margin: 2px 0; }
+  code, .k { font-family: 'DejaVu Sans Mono', monospace; font-size: 9pt; background: #eef0f3; padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+  kbd { font-family: 'DejaVu Sans Mono', monospace; font-size: 8.6pt; border: 1px solid #b9c0ca; border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: #fafbfc; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 9.3pt; break-inside: auto; }
+  tr { break-inside: avoid; }
+  th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.07em; color: #5a6371; border-bottom: 1.5px solid #10141a; padding: 5px 7px; }
+  td { padding: 5px 7px; border-bottom: 1px solid #e2e6eb; vertical-align: top; }
+  td.code { font-family: 'DejaVu Sans Mono', monospace; font-weight: 700; color: #8a5c00; white-space: nowrap; width: 54px; }
+  .box { border-radius: 8px; padding: 9px 12px; margin: 10px 0; font-size: 9.8pt; break-inside: avoid; }
+  .box > b:first-child { display: block; margin-bottom: 3px; font-family: 'Inter Display', 'Inter', sans-serif; }
+  .tip { background: #eef6ff; border: 1px solid #a9c8ec; }
+  .warn { background: #fff5e6; border: 1px solid #efb75c; }
+  .stop { background: #fdeeee; border: 1px solid #e69b9b; }
+  .ok { background: #edf7f1; border: 1px solid #93cfac; }
+  figure { margin: 10px 0 12px; break-inside: avoid; }
+  figure img { width: 100%; display: block; border-radius: 6px; border: 1px solid #c9ced6; }
+  figcaption { font-size: 8.6pt; color: #5a6371; margin-top: 4px; }
+  .crop { overflow: hidden; border-radius: 6px; border: 1px solid #c9ced6; }
+  .crop img { border: 0; border-radius: 0; }
+  .steps { counter-reset: s; list-style: none; margin-left: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 30px; margin: 7px 0; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 20px; height: 20px; border-radius: 50%; background: #10141a; color: #ffc23d; font: 700 9pt 'Inter', sans-serif; display: grid; place-items: center; }
+  .cap { break-inside: avoid; border: 1px solid #dfe3e8; border-radius: 8px; padding: 8px 12px 6px; margin: 9px 0; }
+  .cap h3 { margin: 2px 0 4px; display: flex; align-items: baseline; gap: 10px; }
+  .cap h3 .code { font: 700 9.5pt 'DejaVu Sans Mono', monospace; color: #fff; background: #10141a; padding: 1px 7px; border-radius: 4px; }
+  .cap dl { display: grid; grid-template-columns: 92px 1fr; gap: 2px 10px; margin: 2px 0 4px; font-size: 9.6pt; }
+  .cap dt { font-weight: 700; color: #5a6371; font-size: 8.4pt; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 1.5px; }
+  .cap dd { margin: 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  /* contents */
+  .toc h1 { margin-bottom: 14px; }
+  .toc ol { list-style: none; margin: 0; padding: 0; }
+  .toc li { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 3.2px 0; font-size: 10.4pt; }
+  .toc li .t { white-space: nowrap; }
+  .toc li .dots { flex: 1; border-bottom: 1px dotted #9aa3ae; transform: translateY(-3px); }
+  .toc li .pg { font-family: 'DejaVu Sans Mono', monospace; font-size: 9.6pt; min-width: 22px; text-align: right; }
+  .toc li.c { font-weight: 700; font-size: 11pt; padding-top: 9px; }
+  .toc li.c .n { color: #b37800; font-family: 'DejaVu Sans Mono', monospace; width: 26px; }
+  .toc li.s { padding-left: 32px; color: #333b46; }
+  .credit { text-align: center; padding-top: 40px; }
+  .credit img { width: 90px; height: 90px; background: #0b0e12; border-radius: 18px; padding: 12px; }
+  .small { font-size: 8.8pt; color: #5a6371; }
+  .gloss dt { font-weight: 700; margin-top: 6px; }
+  .gloss dd { margin: 0 0 2px 0; }
+  .fn td { padding: 3.6px 7px; }
+  .gloss { column-count: 2; column-gap: 22px; }
+  .gloss div { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<!-- ============ copyright / about ============ -->
+<section>
+  <div style="padding-top:36px">
+    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.0</div>
+    <h1 style="font-size:22pt">About this manual</h1>
+    <p>This manual explains how to use every part of Novus Ordo, the professional crypto trading terminal: the market terminal, the Quant desk, the Strategy Lab and its bot builder, the crypto swarm, and the wallet and exchange connections that link it to your accounts. It is written in plain English. Where a technical term is unavoidable, it is explained where it first appears and again in the glossary at the back.</p>
+    <p>Each chapter starts with what a part of the terminal is for, then shows how to use it step by step. Function codes — short names you type on the command line, such as <code>VAR</code> or <code>BOT</code> — appear in a box like this so you can find them on screen.</p>
+    <div class="box tip"><b>How to read the screenshots</b>The screenshots in this manual were taken from the real application running on its built-in market simulator and on sample paper-trading data. Prices, balances and results shown in them are illustrations, not real performance.</div>
+    <h2>Designed and constructed by</h2>
+    <p style="font-size:13pt;margin-top:2px"><b>Quincy Gininda</b></p>
+    <p>Novus Ordo — its concept, design, trading systems and this manual — is a construction by Quincy Gininda.</p>
+    <h2>Copyright</h2>
+    <p>© 2026 Quincy Gininda. All rights reserved. No part of this manual may be reproduced or distributed without written permission from Quincy Gininda. Novus Ordo and the Novus Ordo emblem are the work of Quincy Gininda.</p>
+    <p>Exchange, wallet and service names mentioned in this manual (Hyperliquid, Binance, Bybit, OKX, Coinbase, Kraken, Bitget, KuCoin, Luno, Deribit, Phantom, MetaMask, Rabby, Telegram, Yahoo Finance) belong to their owners and are used only to describe how Novus Ordo connects to them. Novus Ordo is independent of them.</p>
+    <h2>Important risk notice</h2>
+    <p>Trading cryptocurrencies, and especially leveraged perpetual futures, carries a high risk of loss, including the loss of all money deposited. Novus Ordo is software: it is not financial advice, an investment adviser or a broker, and it does not hold your money. Backtests and forecasts describe the past and estimate probabilities; they do not guarantee future results. Use paper trading first, start small, and only trade money you can afford to lose. See chapter 11 for the full notice.</p>
+  </div>
+</section>
+
+<!-- ============ contents ============ -->
+<section class="chapter toc">
+  <div class="ch-num">Contents</div>
+  <h1>Table of contents</h1>
+  <ol id="toc"></ol>
+</section>
+
+<!-- ============ 1 welcome ============ -->
+<section class="chapter" data-ch="1">
+  <div class="ch-head"><div class="ch-num">Chapter 1</div><h1>Welcome to Novus Ordo</h1><p class="ch-lead">One terminal for the serious crypto trader: read the market, model it, build and test strategies, and let an autonomous swarm trade them under strict risk control.</p></div>
+  <h2 data-toc>What Novus Ordo is</h2>
+  <p>Novus Ordo is a desktop trading terminal for Windows. It connects directly to the major crypto exchanges, shows their order flow in real time, gives you institutional quantitative models, lets you build and backtest trading bots without writing code, and runs an autonomous team of trading agents — the crypto swarm — on your own exchange account.</p>
+  <p>Everything runs on your computer. Your exchange keys are encrypted on your machine and never leave it; the terminal talks to the exchanges directly.</p>
+  <h2 data-toc>The four modes</h2>
+  <table>
+    <tr><th style="width:24%">Mode</th><th style="width:14%">Open with</th><th>What it is for</th></tr>
+    <tr><td><b>Markets</b></td><td><kbd>F1</kbd></td><td>Reading the market: prices, order flow, footprint charts, liquidity, funding, open interest, news. Chapter 3.</td></tr>
+    <tr><td><b>Strategy Lab</b></td><td><kbd>F2</kbd></td><td>Building, testing and deploying strategies: the bot builder, research runs on published strategies, the backtest builder. Chapter 5.</td></tr>
+    <tr><td><b>Quant desk</b></td><td><kbd>F3</kbd></td><td>Institutional risk and portfolio models: value at risk, volatility forecasting, CAPM, the efficient frontier, the Kelly criterion, regimes, delta hedging and a neural network. Chapter 4.</td></tr>
+    <tr><td><b>Crypto swarm</b></td><td><kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>The autonomous trading team and your accounts: the Command Center, deployed strategies, the order ticket, wallets and alerts. Chapter 6.</td></tr>
+  </table>
+  <p>Markets, the Strategy Lab and the Quant desk are the three workspaces of <b>the Terminal</b> (<kbd>Ctrl</kbd>+<kbd>1</kbd>). The <b>Crypto swarm</b> is a separate view. The two meet in one place only: the strategies you deploy from the Strategy Lab into the swarm.</p>
+  <figure><img src="img/swarm.jpg" /><figcaption>The crypto swarm's Command Center: the swarm core in the centre, the account on the left and right, the gauges along the bottom.</figcaption></figure>
+  <h2 data-toc>Who it is for</h2>
+  <ul>
+    <li><b>Active traders</b> who want to see what is really happening in the market — who is buying, who is selling, where the liquidity sits — rather than price alone.</li>
+    <li><b>Systematic traders</b> who want to test ideas on years of data before risking money, with honest statistics that say when an idea has no edge.</li>
+    <li><b>Anyone who wants automation with control</b>: bots that trade only within limits you set, start on paper, and report every decision.</li>
+  </ul>
+  <h2 data-toc>What you need</h2>
+  <ul>
+    <li>A Windows 10 or Windows 11 computer (64-bit) and an internet connection.</li>
+    <li>For live trading: an account on a supported exchange — Hyperliquid for the crypto swarm (chapter 7 explains how to fund it), or any of the exchanges in chapter 7 for the order ticket and bots.</li>
+    <li>For notifications on your phone (optional): a Telegram account.</li>
+  </ul>
+</section>
+
+<!-- ============ 2 getting started ============ -->
+<section class="chapter" data-ch="2">
+  <div class="ch-head"><div class="ch-num">Chapter 2</div><h1>Getting started</h1><p class="ch-lead">Install the terminal, unlock it, and find your way around the screen in a few minutes.</p></div>
+  <h2 data-toc>Installing</h2>
+  <p>Novus Ordo comes in two forms. Use one of them, not both.</p>
+  <table>
+    <tr><th style="width:30%">Download</th><th>How to use it</th></tr>
+    <tr><td><b>Zip</b> (recommended)<br /><span class="small">NovusOrdo-…-win-x64.zip</span></td><td>Extract it once to a folder such as <code>C:\Novus Ordo</code> (not inside the zip viewer), then run <b>Novus Ordo.exe</b>. Pin it to the taskbar. It opens in seconds.</td></tr>
+    <tr><td><b>Portable</b><br /><span class="small">NovusOrdo-…-portable.exe</span></td><td>A single file you can run from anywhere. It unpacks itself on every launch, so it starts more slowly, especially while Windows Defender scans it.</td></tr>
+  </table>
+  <div class="box tip"><b>First launch on Windows</b>If Windows SmartScreen shows "Windows protected your PC", choose <b>More info → Run anyway</b>. This appears for new applications that are not yet widely downloaded.</div>
+  <h2 data-toc>The lock screen and your ledger key</h2>
+  <p>Novus Ordo opens on a black lock screen with the emblem and the prompt <b>ENTER LEDGER KEY</b>. While it waits, the terminal loads in the background — the database, the key vault, the exchange connectors and the market feeds — and lists each item in the bottom-right corner as it arrives.</p>
+  <ol class="steps">
+    <li>Type your 8-digit <b>ledger key</b>. The terminal opens as soon as the eighth digit is entered.</li>
+    <li>Until the key is entered, nothing private is available: API keys, trading, bots, wallets and Telegram stay sealed by the desktop process itself.</li>
+    <li>Five wrong attempts lock the input for 30 seconds, doubling after each further miss.</li>
+    <li>To change the key: <b>⚙ Settings → Ledger key</b>. You need the current key; the new one must be 8 digits and not a simple pattern.</li>
+  </ol>
+  <p><b>🔒 Lock</b> on the top bar returns to the lock screen whenever you leave the computer. Market data and running bots keep working underneath, and the lock screen shows how long the terminal has been locked and what is running.</p>
+  <h2 data-toc>Finding your way around</h2>
+  <figure><img src="img/markets.jpg" style="object-fit:cover;height:300px;object-position:0 0" /><figcaption>The terminal: views and workspaces on the top bar, the command line and quote tape, the function keys, then the panels.</figcaption></figure>
+  <ul>
+    <li><b>Top bar</b> — the two views (<b>▤ Terminal</b> and <b>Crypto swarm</b>), the three workspaces (<b>MARKETS</b>, <b>STRATEGY LAB</b>, <b>QUANT DESK</b>), the current coin and venue, the live price, 🔌 <b>Connect</b>, the theme, ⧉ <b>Screens</b>, 🔒 <b>Lock</b> and ⚙ <b>Settings</b>.</li>
+    <li><b>Command line</b> — type a function code and press <kbd>Enter</kbd>. Put a coin first to switch the market at the same time: <code>ETH GP</code> opens the price graph for ETH, <code>SOL BOOK</code> the order book for SOL. Suggestions appear as you type; pick one with <kbd>↑</kbd>/<kbd>↓</kbd>. Type <code>HELP</code> for every function.</li>
+    <li><b>Function keys</b> — under the command line, the most-used functions of the current workspace, numbered 1 to 10. Click one to open it.</li>
+    <li><b>Quote tape</b> — the most traded markets, scrolling, with their 24-hour change.</li>
+    <li><b>Panels</b> — every function opens as a panel. Panels sit in tab groups; drag a tab to rearrange, drag the gaps to resize.</li>
+    <li><b>Status line</b> — at the bottom: the feed and its speed, the Strategy Lab's state, UTC and local time.</li>
+  </ul>
+  <h2 data-toc>Keyboard shortcuts</h2>
+  <table>
+    <tr><th style="width:34%">Keys</th><th>Action</th></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd> / <kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>Switch between the Terminal and the Crypto swarm view</td></tr>
+    <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Markets, Strategy Lab, Quant desk</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>`</kbd></td><td>Jump to the command line</td></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd> then <kbd>Enter</kbd></td><td>Choose a suggestion on the command line</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Leave the command line; close a drawer or dialog</td></tr>
+    <tr><td>Double-click a tab bar</td><td>Maximise that panel group; again to restore</td></tr>
+  </table>
+  <h2 data-toc>Layouts, themes and several screens</h2>
+  <ul>
+    <li><b>✎ Layout</b> unlocks the layout: drag panels by their tabs onto another panel to stack them or onto an edge to split; <b>×</b> closes a panel; <b>+ Add panel</b> adds one. Layouts save automatically.</li>
+    <li><b>⇄</b> on any tab bar moves that tab to another workspace or into its own window.</li>
+    <li><b>⧉</b> on any tab bar pops the panel out into its own window. <b>⧉ Screens</b> on the top bar lists every screen and window: send any window to any screen as <b>Fill</b>, <b>Full</b> (full screen) or <b>Float</b>. From any view — the crypto swarm included — <b>Open any tool in its own window</b> opens any function on another monitor. <b>⇤ Back to the terminal</b> on a pop-out returns it.</li>
+    <li><b>Themes</b>: Terminal Amber (black and amber), Workspace, Eikon Blue, Graphite and Paper, from the top bar. Charts follow the theme.</li>
+  </ul>
+  <figure><img src="img/screens.jpg" /><figcaption>⧉ Screens: the crypto swarm on one screen, the Quant desk's neural network and the bot builder on another.</figcaption></figure>
+  <div class="box ok"><b>Start safely</b>Everything that trades starts in <b>paper</b> mode — real prices, simulated money, fees and slippage counted. Keys stay read-only until you tick <b>Allow trading</b>. Run on paper first, then on an exchange testnet, then live with a small amount.</div>
+</section>
+
+<!-- ============ 3 market terminal ============ -->
+<section class="chapter" data-ch="3">
+  <div class="ch-head"><div class="ch-num">Chapter 3</div><h1>The market terminal</h1><p class="ch-lead">Markets (F1) shows what is happening in the market right now — and who is doing it.</p></div>
+  <h2 data-toc>Choosing a market and venues</h2>
+  <ul>
+    <li><b>Coin</b> — type it on the command line (<code>ETH</code> then <kbd>Enter</kbd>) or pick it on the top bar. Every panel follows the coin.</li>
+    <li><b>Primary venue</b> — the exchange whose order book and trades the main charts show (for example Binance Futures). Choose it on the top bar.</li>
+    <li><b>Σ aggregate</b> — add other venues to see their trades combined with the primary's: the tape, cumulative delta and footprint then show the whole market, not one exchange.</li>
+  </ul>
+  <p>Supported venues: Binance (futures and spot), Bybit, OKX, Hyperliquid, Coinbase, Kraken, Bitget, Bitfinex and Deribit (options), plus any of more than 100 exchanges through CCXT. A built-in <b>Simulator</b> produces a realistic synthetic market for learning and testing; it is clearly labelled.</p>
+  <figure><img src="img/orderflow.jpg" /><figcaption>The order-flow layout: the depth ladder (left), the footprint chart (centre), the tape and market summary (right), cumulative delta below.</figcaption></figure>
+  <h2 data-toc>Price and order-flow functions</h2>
+  <table>
+    <tr><th>Code</th><th style="width:26%">Function</th><th>What it shows and what it is for</th></tr>
+    <tr><td class="code">MON</td><td>Monitor</td><td>The quote board: last price, change, range, volume, funding and open interest for your coins. Your first look at the day.</td></tr>
+    <tr><td class="code">HMAP</td><td>Heat map</td><td>The whole market as tiles — size by volume, colour by change. Spot where money is moving at a glance.</td></tr>
+    <tr><td class="code">GP</td><td>Graph price</td><td>Candles or market profile (TPO) with VWAP and moving averages, any timeframe. The main price chart.</td></tr>
+    <tr><td class="code">GIP</td><td>Footprint</td><td>Each candle broken into prices with the volume bought and sold at each: bid × ask, delta and imbalances. Shows whether buyers or sellers are in control inside a candle.</td></tr>
+    <tr><td class="code">LHM</td><td>Liquidity heat map</td><td>Resting orders in the book over time, with trades on top. Find where large orders wait and whether price respects them.</td></tr>
+    <tr><td class="code">BOOK</td><td>Order book</td><td>The composite order book across venues.</td></tr>
+    <tr><td class="code">DOM</td><td>Depth ladder</td><td>The price ladder with resting size, traded volume and delta at each price. Click a level to send its price to the order ticket.</td></tr>
+    <tr><td class="code">DPTH</td><td>Depth chart</td><td>Cumulative bid and ask depth: how much it takes to move price.</td></tr>
+    <tr><td class="code">TAS</td><td>Time &amp; sales</td><td>Every trade across venues, sized and coloured; filter by size to see only the large ones.</td></tr>
+    <tr><td class="code">CVD</td><td>Cumulative delta</td><td>Buy minus sell volume over time, per venue. Divergence between price and delta warns of weakness.</td></tr>
+    <tr><td class="code">FLOW</td><td>Flow pulse</td><td>Buy against sell notional over 30 seconds to 15 minutes.</td></tr>
+    <tr><td class="code">BLCK</td><td>Block trades</td><td>Large prints and net whale flow.</td></tr>
+    <tr><td class="code">LIQ</td><td>Liquidations</td><td>Forced closures of leveraged positions, long against short. Cascades often mark turning points.</td></tr>
+    <tr><td class="code">VP</td><td>Volume profile</td><td>Volume at each price and the value area (where 70 % of trading happened).</td></tr>
+  </table>
+  <h2 data-toc>Derivatives, volatility and market context</h2>
+  <table>
+    <tr><th>Code</th><th style="width:26%">Function</th><th>What it shows and what it is for</th></tr>
+    <tr><td class="code">OI</td><td>Open interest</td><td>Open positions per venue. Rising price with rising OI means new money; with falling OI, positions closing.</td></tr>
+    <tr><td class="code">FUND</td><td>Funding</td><td>Funding rates, their yearly rate and the basis. High positive funding means longs are crowded.</td></tr>
+    <tr><td class="code">OMON</td><td>Options</td><td>Deribit option trades, implied volatility and the put/call balance.</td></tr>
+    <tr><td class="code">SPRD</td><td>Venue spread</td><td>Each venue's price against the primary.</td></tr>
+    <tr><td class="code">CORR</td><td>Correlation</td><td>Correlation matrix of the coins, beta to bitcoin and volatility.</td></tr>
+    <tr><td class="code">HVOL</td><td>Volatility</td><td>Realised volatility over a day, week and month, the term structure and its rank.</td></tr>
+    <tr><td class="code">GV</td><td>GARCH volatility</td><td>The volatility forecast for the hours ahead as a heat calendar (see chapter 4).</td></tr>
+    <tr><td class="code">FCST</td><td>Candle forecast</td><td>The next candle's expected range and its odds of closing up, with its track record on unseen data.</td></tr>
+    <tr><td class="code">DES</td><td>Description</td><td>The market summary: price, 24-hour statistics, funding, open interest, long/short ratio, basis.</td></tr>
+    <tr><td class="code">SCRN</td><td>Screener</td><td>Every perpetual on a venue, sortable.</td></tr>
+    <tr><td class="code">WL</td><td>Watchlist</td><td>Your symbols on any venue.</td></tr>
+    <tr><td class="code">TOP</td><td>Top news</td><td>Real-time crypto headlines by coin.</td></tr>
+    <tr><td class="code">WEI</td><td>World markets</td><td>Stocks, indices, FX and futures from Yahoo Finance.</td></tr>
+  </table>
+  <h2 data-toc>How to read the order flow</h2>
+  <ol class="steps">
+    <li><b>Start wide.</b> <code>MON</code> and <code>HMAP</code>: which coins are moving, on what volume.</li>
+    <li><b>Find the levels.</b> <code>VP</code> for the value area and the point of control (the busiest price); <code>LHM</code> for large resting orders.</li>
+    <li><b>Watch the aggression.</b> <code>GIP</code> footprint and <code>CVD</code>: a breakout with buyers lifting the offer and delta rising is real; a new high on falling delta is suspect.</li>
+    <li><b>Check positioning.</b> <code>FUND</code>, <code>OI</code> and <code>LIQ</code>: crowded funding and stacked liquidations show where a squeeze could come from.</li>
+    <li><b>Act or alert.</b> Send a price from the <code>DOM</code> to the order ticket, or set an alert with <code>ALRT</code>.</li>
+  </ol>
+  <h2 data-toc>History and the local database</h2>
+  <p>The terminal records the live trades of the markets you watch into a local database, so charts open with history already filled in; any gap since you last ran it is filled from the exchange. Old trades are cleaned out automatically after the retention period (3 days by default). The <code>DB</code> panel shows the database size, each recorded market and the retention, and exports a market's trades to CSV.</p>
+</section>
+
+<!-- ============ 4 quant desk ============ -->
+<section class="chapter" data-ch="4">
+  <div class="ch-head"><div class="ch-num">Chapter 4</div><h1>The Quant desk</h1><p class="ch-lead">Quant desk (F3): the models institutions use to measure risk, size positions and build portfolios — each explained, each one keystroke away.</p></div>
+  <p>Every Quant desk panel follows the coin on the board, and the tables cover a list of coins you choose (type them in the coins box, separated by spaces). Each capability below is described by <b>what it is</b>, <b>what it is used for</b> and <b>how to use it</b>.</p>
+  <figure><img src="img/quant.jpg" /><figcaption>The Quant desk: efficient frontier, value at risk, GARCH volatility and more, side by side.</figcaption></figure>
+
+  <h2 data-toc>Risk: value at risk and volatility</h2>
+  <div class="cap"><h3><span class="code">VAR</span> Value at risk and expected shortfall</h3><dl>
+    <dt>What it is</dt><dd>The loss that should not be exceeded 95, 99 or 99.5 % of the time over an hour, a day or a week — as a share of the position and in dollars — by five methods: historical, normal, Cornish–Fisher (allowing for skew and fat tails), EWMA (RiskMetrics) and GARCH. Expected shortfall shows the average loss on the days that are worse.</dd>
+    <dt>Used for</dt><dd>Knowing how much a position can realistically lose on a bad day before you take it, and comparing coins by risk. A portfolio line shows what spreading across coins saves.</dd>
+    <dt>How to use</dt><dd>Enter your coins, choose the confidence (99 % is standard) and horizon, and your position size in dollars. Check the backtest table: each method's past forecasts against what happened — Kupiec says whether it was breached the right number of times, Christoffersen whether breaches cluster. Trust the methods that pass.</dd></dl></div>
+  <div class="cap"><h3><span class="code">GV</span> GARCH and GJR-GARCH volatility</h3><dl>
+    <dt>What it is</dt><dd>A volatility forecast: GARCH models how volatility clusters (calm follows calm, storms follow storms); GJR-GARCH adds the extra jump in volatility after falls. Shown as a heat calendar of the hours ahead against each coin's long-run level, with the news-impact curve.</dd>
+    <dt>Used for</dt><dd>Seeing a storm coming before it arrives: widen stops, cut size, or wait when the forecast is hot; trade breakouts when volatility is expanding.</dd>
+    <dt>How to use</dt><dd>Choose the model (best by BIC, GARCH or GJR-GARCH) and the horizon. Blue hours are calmer than normal, orange and red hotter.</dd></dl></div>
+  <div class="cap"><h3><span class="code">VTGT</span> Volatility targeting and position sizing</h3><dl>
+    <dt>What it is</dt><dd>Volatility measured seven ways (close-to-close, Parkinson, Garman–Klass, Rogers–Satchell, Yang–Zhang, EWMA, GARCH) and the position size that runs at a target volatility on your account.</dd>
+    <dt>Used for</dt><dd>Keeping risk steady: a smaller position when the market is wild, a bigger one when it is calm. A chart compares buy-and-hold with the same coin volatility-targeted.</dd>
+    <dt>How to use</dt><dd>Set your target (for example 40 % a year) and account size; read the position for each estimator. A Kelly calculator is included.</dd></dl></div>
+  <div class="cap"><h3><span class="code">DHG</span> Delta hedging and option greeks</h3><dl>
+    <dt>What it is</dt><dd>Black–Scholes price and greeks for a call, put or straddle on the coin, priced at the GARCH forecast, realised volatility or your own; the hedge to hold on the perpetual now; a strike ladder; and a backtest of selling or buying the option daily and hedging it every 1, 4, 12 or 24 hours.</dd>
+    <dt>Used for</dt><dd>Understanding options risk and the volatility premium, and knowing exactly how much of the coin to hold against an option position.</dd>
+    <dt>How to use</dt><dd>Choose the option (strike, days, size, bought or sold) and the volatility to price it with; read the delta and the hedge; compare hedging frequencies in the backtest.</dd></dl></div>
+
+  <h2 data-toc>Portfolio: CAPM, efficient frontier and Kelly</h2>
+  <div class="cap"><h3><span class="code">CAPM</span> Capital asset pricing model</h3><dl>
+    <dt>What it is</dt><dd>Each coin measured against the market (bitcoin or an equal-weight index): beta (how much it moves with the market), Jensen's alpha and its t-statistic (return beyond what its beta explains), R², the return CAPM expects for that beta, Treynor and information ratios, Sharpe and the security market line.</dd>
+    <dt>Used for</dt><dd>Telling a coin's own performance from simply riding the market, and finding coins that add something beyond bitcoin.</dd>
+    <dt>How to use</dt><dd>Choose the market and the period. A coin above the security market line did better than its risk implied; a high R² means it mostly follows the market.</dd></dl></div>
+  <div class="cap"><h3><span class="code">EF</span> Efficient frontier (Markowitz)</h3><dl>
+    <dt>What it is</dt><dd>The long-only mixes of your coins with the best expected return for each level of risk, with the minimum-variance portfolio, the maximum-Sharpe (tangency) portfolio, the capital market line, equal weight and the Kelly portfolio — and their weights.</dd>
+    <dt>Used for</dt><dd>Deciding how to split money across coins rather than guessing.</dd>
+    <dt>How to use</dt><dd>Enter the coins and the risk-free rate; choose how much to shrink expected returns toward the average (past returns are noisy, so 50 % is a sensible start). Read the weights in the table.</dd></dl></div>
+  <div class="cap"><h3><span class="code">KELLY</span> Kelly criterion</h3><dl>
+    <dt>What it is</dt><dd>The leverage that grows capital fastest in the long run for each coin, and half of it; the growth curve by leverage (it peaks at full Kelly and falls back to nothing at twice it); the growth-optimal portfolio under a leverage cap; and Kelly on the crypto swarm's own trade record.</dd>
+    <dt>Used for</dt><dd>Sizing bets so that you grow without risking ruin. Most professionals use half Kelly or less.</dd>
+    <dt>How to use</dt><dd>Read full and half Kelly per coin; for a strategy, enter its win rate and average win in R to get its Kelly bet.</dd></dl></div>
+
+  <h2 data-toc>Market behaviour: momentum and regimes</h2>
+  <div class="cap"><h3><span class="code">MOM</span> Momentum</h3><dl>
+    <dt>What it is</dt><dd>Returns from a week to six months, the month's move in its own standard deviations, the 60-day trend t-statistic, the Kalman-filter slope, a composite signal and each coin's rank against the others.</dd>
+    <dt>Used for</dt><dd>Finding the coins with the strongest and weakest trends — the basis of trend-following strategies.</dd>
+    <dt>How to use</dt><dd>Sort by the composite signal; a high trend t-statistic means the trend is clear, not noise.</dd></dl></div>
+  <div class="cap"><h3><span class="code">REGM</span> Regimes</h3><dl>
+    <dt>What it is</dt><dd>Whether a coin is trending, mean-reverting or random (Hurst exponent, variance ratio, Ornstein–Uhlenbeck half-life and s-score), and whether it is in a calm or turbulent state (a two-state hidden Markov model with the odds hour by hour).</dd>
+    <dt>Used for</dt><dd>Matching the strategy to the market: trend strategies in trending regimes, dip-buying in mean-reverting ones, smaller size in turbulence.</dd>
+    <dt>How to use</dt><dd>Read the character column for each coin and the odds of turbulence before choosing a strategy.</dd></dl></div>
+  <div class="cap"><h3><span class="code">FCST</span> Candle forecast</h3><dl>
+    <dt>What it is</dt><dd>A machine-learning forecast of the next candle from candle shapes, volatility and momentum: its expected high and low and the odds it closes up, with its record on data it never saw.</dd>
+    <dt>Used for</dt><dd>A second opinion on the next move — trusted only as far as its track record shows.</dd>
+    <dt>How to use</dt><dd>Compare its hit rate on unseen data with simple guessing before giving it weight.</dd></dl></div>
+
+  <h2 data-toc>Artificial intelligence: the neural network</h2>
+  <div class="cap"><h3><span class="code">NNET</span> Neural network</h3><dl>
+    <dt>What it is</dt><dd>A small neural network (two hidden layers) trained on a coin's candles to forecast whether price will be higher a chosen number of candles later. It reads around 30 market measurements at each candle and stops learning when its latest training data stops improving, so it does not memorise.</dd>
+    <dt>Used for</dt><dd>Testing whether a learned model finds anything in a market — compared fairly with a random forest on the same inputs, and with the two paired.</dd>
+    <dt>How to use</dt><dd>Choose the coin, candle size, how far ahead to forecast and the network size; press <b>Train the network</b> and watch the error fall. Read the table "on the 30 % it never saw": a model is only useful if it is right more often than guessing. The panel also shows what the network looks at most and how well its odds held up.</dd></dl></div>
+  <figure><img src="img/nn.jpg" /><figcaption>NNET: the learning curve, the forecast now, and the results on unseen data against a random forest and the two paired.</figcaption></figure>
+  <div class="box tip"><b>The same models power the Strategy Lab</b>GARCH, value at risk, volatility targeting, Kelly sizing, the efficient frontier, regimes, the Kalman trend and the neural network are all available as building blocks in the bot builder (chapter 5).</div>
+</section>
+
+<!-- ============ 5 strategy lab ============ -->
+<section class="chapter" data-ch="5">
+  <div class="ch-head"><div class="ch-num">Chapter 5</div><h1>The Strategy Lab</h1><p class="ch-lead">Strategy Lab (F2): build a strategy, test it honestly on years of data, and deploy it to the crypto swarm.</p></div>
+  <h2 data-toc>The Lab's screens</h2>
+  <table>
+    <tr><th>Code</th><th style="width:24%">Screen</th><th>What it does</th></tr>
+    <tr><td class="code">BOT</td><td>Bot builder</td><td>Build a bot block by block in plain English, backtest it and deploy it. The easiest way in.</td></tr>
+    <tr><td class="code">RSCH</td><td>Research</td><td>Tests the whole library of published strategies on years of history, mixes them, and ranks the five best with an honest verdict.</td></tr>
+    <tr><td class="code">LIB</td><td>Strategy library</td><td>Every rule and filter, the research papers behind it, and why it should work.</td></tr>
+    <tr><td class="code">BT</td><td>Backtest builder</td><td>Build a strategy by hand from the library and test it.</td></tr>
+    <tr><td class="code">DEPL</td><td>Deployed</td><td>The strategies trading in the crypto swarm: on or off, who decides their trades, and their record.</td></tr>
+  </table>
+  <h2 data-toc>The bot builder, step by step</h2>
+  <p>The bot builder is a canvas of eight connected blocks. Click a block and its options open in the panel on the right, each explained in plain English (tick <b>Explain</b>). A block can hold several choices.</p>
+  <figure><img src="img/bb-2-pair.jpg" /><figcaption>The bot builder: eight blocks on the canvas, the selected block's options on the right, the compatibility check underneath.</figcaption></figure>
+  <ol class="steps">
+    <li><b>Trading style</b> — scalping (hours), intraday, swing (a few days), one-week trades, position (weeks to months) or long-term hold (up to a year). The style sets the candle size, look-backs, holding time, stop width and years of history for every other block.</li>
+    <li><b>Strategies</b> — the entry rules: trend following, breakouts, buying dips and selling rallies, timing and seasons, funding, and AI (neural network, random forest, linear and next-candle forecasts). Pick one or several; several are joined by <b>all must agree</b>, <b>majority vote</b> or <b>any one</b>.</li>
+    <li><b>Market models</b> — when the bot may trade: with the big trend, trending or ranging markets (ADX), statistical regimes (variance ratio, Hurst, hidden-Markov), calm or stormy volatility (GARCH), activity, trading hours and funding crowding. Every filter you pick must allow a trade.</li>
+    <li><b>Forecasts &amp; AI</b> — second opinions that must agree, and an <b>AI decision maker</b> that learns from the bot's own past trades which signals to skip: the decision forest, the neural network, or both paired. It is kept only if it improves results on unseen data.</li>
+    <li><b>Risk management</b> — steady risk (volatility targeting), a daily loss cap (value at risk), half Kelly, storm-aware GARCH stops, a bitcoin hedge; two sizing rules can be combined (the smaller size wins). Also the stop width and how money is split across coins (equally, by calm, minimum variance or the efficient frontier).</li>
+    <li><b>Rules of engagement</b> — long and short or one side only; let winners run or take profit at 1.5, 2 or 3 times the risk; holding time; whether an opposite signal closes the trade.</li>
+    <li><b>Backtest</b> — choose the coins and press <b>Run backtest</b> (or <b>▶ Test bot</b> at the top).</li>
+    <li><b>Deploy</b> — available only after a backtest (see "Deploying a strategy").</li>
+  </ol>
+  <h3>The compatibility check</h3>
+  <p>Every pick is checked against the others as you make it, and each option is tagged before you choose it:</p>
+  <ul>
+    <li><b>✕ Clash</b> — the picks work against each other: for example a trend rule only allowed in a ranging market, or a breakout rule only allowed when it is quiet.</li>
+    <li><b>≈ Overlap</b> — they say the same thing: two trend rules, or a second opinion from the same model as the strategy.</li>
+    <li><b>+ Pairs well</b> — they add to each other: a trend rule with a dip rule when all must agree ("buy the dips in an uptrend"), or the neural network paired with the forest.</li>
+  </ul>
+  <figure><img src="img/bb-3-clash.jpg" /><figcaption>A clash flagged: a trend rule and a dip rule joined by "any one". The wires turn red and the check explains how to fix it.</figcaption></figure>
+  <h2 data-toc>Reading a backtest</h2>
+  <p>Every bot is built on the first 70 % of the history and judged on the last 30 % it never saw, with fees and slippage. The result comes in plain words:</p>
+  <table>
+    <tr><th style="width:30%">Tile</th><th>What it means</th></tr>
+    <tr><td><b>Verdict</b></td><td>Looks good, Maybe, or Not yet — and why.</td></tr>
+    <tr><td><b>Return a year</b> vs <b>Buy-and-hold</b></td><td>The bot's yearly return on unseen data, against simply holding the same coins.</td></tr>
+    <tr><td><b>Worst drop</b></td><td>The biggest fall from a high before recovering (maximum drawdown).</td></tr>
+    <tr><td><b>Win rate</b> and <b>Trades</b></td><td>The share of winning trades and how many it took.</td></tr>
+    <tr><td><b>Sharpe ratio</b></td><td>Return for the risk taken: above 1 is good, above 2 excellent.</td></tr>
+    <tr><td><b>Chance it's luck</b></td><td>How often pure chance would look this good; under 5 % is convincing.</td></tr>
+    <tr><td><b>Chance of a losing run</b></td><td>Shuffling its trades 2,000 times: how often the account ends lower.</td></tr>
+  </table>
+  <p>Below the tiles, <b>Measured on the data</b> shows each strategy alone and together, how two strategies actually related (correlation and how often they agreed), what each filter added, and how each AI decision maker did. If the bot did much better on the data it was built on than on new data, the Lab says so: that is a sign of over-fitting.</p>
+  <figure><img src="img/bb-10-verdict.jpg" /><figcaption>A tested bot: the compatibility check, the bot in words, the verdict and the result tiles.</figcaption></figure>
+  <h2 data-toc>Research runs</h2>
+  <ol class="steps">
+    <li>Open <code>RSCH</code>. Choose the coins, the timeframe, the years of history and how many mixes to try.</li>
+    <li>Press <b>Run research</b>. The Lab downloads the history (cached for next time), tests every published rule, mixes the best with filters, exits and sizing, and sends the finalists to the unseen data.</li>
+    <li>Each finalist faces the out-of-sample Sharpe ratio, the deflated Sharpe ratio (corrected for how many strategies were tried), a random-entry test, a trade-shuffle test, a regression on buy-and-hold and simulated markets with no edge.</li>
+    <li>The top five get a verdict: <b>EDGE</b>, <b>PROMISING</b> or <b>NO EDGE</b> — said plainly when nothing passes.</li>
+  </ol>
+  <figure><img src="img/research.jpg" /><figcaption>Research: the top five with their verdicts, the selected strategy's rules and its equity against buy-and-hold.</figcaption></figure>
+  <h2 data-toc>Deploying a strategy</h2>
+  <ol class="steps">
+    <li>From the bot builder's <b>Deploy</b> block, from Research (<b>Deploy → Crypto swarm</b>), or from the swarm's deploy gate.</li>
+    <li>Choose <b>who decides its trades</b>:
+      <ul>
+        <li><b>Council decides</b> — the strategy proposes; the swarm's council votes and the forest can veto. Safer while a strategy is unproven.</li>
+        <li><b>Trade as tested</b> — the strategy takes the signals it was tested on; the council's votes are recorded as advice. For strategies that held up on unseen data.</li>
+      </ul>
+      Either way, <b>Guardian</b> (spreads, volatility spikes) and <b>Risk</b> (daily loss, drawdown and the size of every trade) can always stop a trade.</li>
+    <li>In <code>DEPL</code> or the swarm's deploy gate: switch each strategy on or off, change who decides, or remove it. Each strategy keeps a record of its signals, trades, and any signals the council blocked — followed anyway, so you can see whether the council saved or cost money.</li>
+  </ol>
+  <figure><img src="img/bb-13-deploy.jpg" /><figcaption>The Deploy block: choose who decides the bot's trades, then deploy to the crypto swarm.</figcaption></figure>
+  <div class="box warn"><b>Honest limits</b>A backtest, however careful, describes the past. Markets change and published edges fade. Out-of-sample results on one history are one draw: more coins, more years and another timeframe make a verdict firmer. Fills in fast markets can be worse than tested. Always run a new strategy on paper first.</div>
+</section>
+
+<!-- ============ 6 crypto swarm ============ -->
+<section class="chapter" data-ch="6">
+  <div class="ch-head"><div class="ch-num">Chapter 6</div><h1>The crypto swarm</h1><p class="ch-lead">A team of agents that trades crypto perpetual futures on Hyperliquid — every decision debated, every trade sized and guarded.</p></div>
+  <h2 data-toc>How the swarm works</h2>
+  <p>Three kinds of agent propose trades; five more vote on them. A trade happens only when no one vetoes it and the weighted vote is strong enough (unless a deployed strategy is set to trade as tested — then only Guardian and Risk can stop it).</p>
+  <table>
+    <tr><th style="width:17%">Agent</th><th style="width:16%">Role</th><th>What it does</th></tr>
+    <tr><td><b>Auctioneer</b></td><td>proposes</td><td>Intraday auction market theory: the session's value area, initial-balance breakouts, the 80 % rule back into value.</td></tr>
+    <tr><td><b>Trend</b></td><td>proposes</td><td>Time-series momentum: the 20-, 60- and 120-day trends vote; entries on hourly breakouts in their direction.</td></tr>
+    <tr><td><b>Lab</b></td><td>proposes</td><td>Your strategies deployed from the Strategy Lab.</td></tr>
+    <tr><td><b>Tape</b></td><td>votes</td><td>Aggressive buying and selling in the last seconds and the order book: for or against.</td></tr>
+    <tr><td><b>Crowd</b></td><td>votes</td><td>Funding: against a crowded side that pays a lot to hold, for when the other side pays.</td></tr>
+    <tr><td><b>Guardian</b></td><td>veto</td><td>Stops any trade when the spread is too wide or the market spikes.</td></tr>
+    <tr><td><b>Forest</b></td><td>votes, veto once trusted</td><td>A decision forest that learns from every trade (taken or refused) the odds of a loss, scratch, win or big win.</td></tr>
+    <tr><td><b>Risk</b></td><td>veto, sizes</td><td>The compounding risk manager: it decides the size of every trade and enforces the account's limits.</td></tr>
+  </table>
+  <h2 data-toc>The Command Center</h2>
+  <p>Open the swarm with <b>Crypto swarm</b> on the top bar or <kbd>Ctrl</kbd>+<kbd>2</kbd>.</p>
+  <ul>
+    <li><b>Top</b> — the swarm's talk scrolling past, <b>⇢ Deploy</b>, <b>☰ Accounts &amp; tools</b> and <b>Start / Stop swarm</b>.</li>
+    <li><b>Left</b> — the account and its profit curve; the coin in focus with its chart, entry, stop and target; the feeds; capital at risk.</li>
+    <li><b>Centre — the swarm core</b> — what the agents read flows in from the left; each coin is a sphere of particles that grows as its signals heat up; results flow out to the right. Click a coin to focus it.</li>
+    <li><b>Right</b> — equity, peak and drawdown; results; the execution tape of every fill.</li>
+    <li><b>Bottom — the gauges</b> — Guardian, Auctioneer, Trend, Lab · deploy, Council, Forest, Optimizer, Exposure, Loss limit and Floor; then the live feed of every proposal and vote.</li>
+  </ul>
+  <figure><img src="img/gate.jpg" /><figcaption>The deploy gate: the decision chain, a deployed strategy set to "Trade as tested" with its record, and the Lab's latest research ready to deploy.</figcaption></figure>
+  <h2 data-toc>Running the swarm: paper, then live</h2>
+  <ol class="steps">
+    <li><b>Paper first.</b> The swarm starts on a paper account trading Hyperliquid's real prices, with fees and slippage counted. Press <b>Start swarm</b> and watch the council work.</li>
+    <li><b>Check the rules.</b> <b>Account · rules</b> (or <code>SWCF</code>): the coins, which agents may propose, risk per trade, leverage limits, daily loss limit, the floor.</li>
+    <li><b>Deploy strategies</b> from the Strategy Lab (chapter 5) or the deploy gate.</li>
+    <li><b>Go live.</b> Connect Hyperliquid (chapter 7), tick <b>Allow trading</b>, then in the rules choose <b>Live</b> and your key, and start the swarm. A dialog asks you to confirm. Every live position gets a stop on the exchange itself.</li>
+    <li><b>Stop at any time.</b> <b>Stop swarm</b> stops new trades (open positions keep their exchange stops). The top bar's kill switch stops every bot; <b>Stop &amp; close all</b> closes positions at market.</li>
+  </ol>
+  <h2 data-toc>Risk control and compounding</h2>
+  <ul>
+    <li>Every trade risks <b>1 % of what the account is worth now</b> (between 0.25 % and 2 % after adjustments): profits make the next trade bigger, losses smaller.</li>
+    <li>Leverage is a consequence of the stop, capped at 3× per coin and 3× for all positions together, on isolated margin. One position per coin.</li>
+    <li>After 20 closed trades, size follows the record (a quarter of the Kelly bet). Strong odds from the forest add size; weak odds take it off.</li>
+    <li>Three-quarter size 10 % under the account's high; half size 20 % under.</li>
+    <li>No new trades for the day after losing 5 %; a pause after three losses in a row.</li>
+    <li><b>The floor</b>: no trades under 70 % of the starting balance; once the account reaches 1.25× its start, the floor rises to 80 % of its high and only goes up — profits get locked in.</li>
+  </ul>
+  <div class="box warn"><b>No system is always in profit</b>These rules keep losses small and survivable and let wins compound. They cannot remove market risk.</div>
+  <h2 data-toc>The swarm's tools</h2>
+  <table>
+    <tr><th>Code</th><th style="width:22%">Tool</th><th>What it is for</th></tr>
+    <tr><td class="code">TKT</td><td>Order ticket</td><td>Market, limit, stop and stop-limit orders on any connected exchange, with safety limits (chapter 8).</td></tr>
+    <tr><td class="code">PORT</td><td>Portfolio</td><td>Balances, positions, open orders and fills on your connected accounts; cancel or close.</td></tr>
+    <tr><td class="code">AMT</td><td>AMT bots</td><td>Auction-market-theory bots you run yourself, one per market: scalp, intraday, growth, order-flow hybrid, adaptive and daily trend styles, each with paper or live, backtest and training.</td></tr>
+    <tr><td class="code">ALRT</td><td>Alerts</td><td>Price and order-flow alerts.</td></tr>
+    <tr><td class="code">TG</td><td>Telegram</td><td>Your Telegram bot: trade cards and commands (chapter 7).</td></tr>
+    <tr><td class="code">WALL</td><td>Wallet</td><td>Phantom wallet balances and activity (chapter 7).</td></tr>
+    <tr><td class="code">LUNO</td><td>Luno lane</td><td>Crypto against South African rands on Luno: daily trend bots.</td></tr>
+    <tr><td class="code">CALC</td><td>Calculator</td><td>Position size, risk/reward and liquidation price.</td></tr>
+    <tr><td class="code">NOTE</td><td>Journal</td><td>Timestamped trading notes.</td></tr>
+    <tr><td class="code">DB</td><td>Database</td><td>Recorded trades, retention and CSV export.</td></tr>
+  </table>
+  <h2 data-toc>Trade reports on your phone</h2>
+  <p>With Telegram connected, every swarm trade sends three messages, each with a chart: <b>the setup</b> (entry, stop, target, the potential against the risk, the odds and the council's votes), <b>managing</b> (the first decision after entry, such as moving the stop to break-even) and <b>the result</b> (profit or loss in dollars and R, how long it was held, fees, and a verdict in plain words).</p>
+</section>
+
+<!-- ============ 7 wallets & connections ============ -->
+<section class="chapter" data-ch="7">
+  <div class="ch-head"><div class="ch-num">Chapter 7</div><h1>Wallets and connections</h1><p class="ch-lead">Connect exchanges, wallets and Telegram — safely. Everything starts from 🔌 Connect on the top bar.</p></div>
+  <h2 data-toc>Connection options</h2>
+  <table>
+    <tr><th style="width:24%">Connection</th><th>What it is used for</th></tr>
+    <tr><td><b>Hyperliquid</b></td><td>Crypto perpetual futures — the crypto swarm's exchange, the order ticket and bots. Your account is a wallet; its money is USDC. No documents, no IP whitelist.</td></tr>
+    <tr><td><b>Luno (ZAR)</b></td><td>Buying and selling crypto with South African rands; the Luno lane's daily trend bots.</td></tr>
+    <tr><td><b>Binance, Binance Futures, Coinbase, Bybit, OKX, Kraken, Bitget, KuCoin</b></td><td>Balances, positions and orders through the portfolio and the order ticket; AMT bots.</td></tr>
+    <tr><td><b>Any CCXT exchange</b></td><td>More than 100 further exchanges, through the same vault.</td></tr>
+    <tr><td><b>Telegram bot</b></td><td>Trade cards and commands on your phone.</td></tr>
+    <tr><td><b>Phantom wallet</b></td><td>Read-only view of a Solana wallet's balances and activity (<code>WALL</code>).</td></tr>
+    <tr><td><b>Solana RPC</b> (optional)</td><td>A private Solana connection for heavy wallet use; the app works without it.</td></tr>
+  </table>
+  <h2 data-toc>How keys are kept safe</h2>
+  <ul>
+    <li>Keys are <b>encrypted with your operating system's key store</b> (Windows DPAPI) before they reach the local database. The screen only ever shows masked values.</li>
+    <li>Keys are used only by the desktop process; they never leave your computer except to sign requests to that exchange.</li>
+    <li>Every key is <b>read-only until you tick "Allow trading"</b> on it. A key marked <b>testnet / sandbox</b> only trades the exchange's testnet.</li>
+    <li><b>Never enable withdrawals or transfers</b> on any exchange key. The terminal never needs them.</li>
+    <li>For Hyperliquid, the terminal uses an <b>API wallet</b> key, which can trade but can never withdraw. It refuses your main wallet's own key.</li>
+  </ul>
+  <h2 data-toc>Hyperliquid: funding and connecting</h2>
+  <div class="box stop"><b>Three rules that protect your money</b>
+    <ol style="margin-bottom:2px"><li><b>Never</b> send USDC from an exchange straight to Hyperliquid: it credits the wallet that sent it — the exchange's — and the money is lost. Always go through your own wallet.</li>
+    <li><b>Never</b> give anyone, or any app, your wallet's recovery phrase or main private key.</li>
+    <li>Deposit <b>at least 5 USDC</b> each time; smaller deposits are not credited.</li></ol></div>
+  <ol class="steps">
+    <li><b>Get a wallet of your own</b> — the <b>Rabby</b> or <b>MetaMask</b> browser extension on the computer that runs Novus Ordo is the most reliable. Keep the recovery phrase on paper.</li>
+    <li><b>Buy USDC</b> on your exchange, plus about $2 of ETH for network fees.</li>
+    <li><b>Withdraw both to your own wallet on the Arbitrum One network</b>. Send a small test amount first.</li>
+    <li><b>Deposit</b>: open <code>app.hyperliquid.xyz</code> in the same browser → <b>Connect</b> → <b>Deposit</b> (5 USDC or more).</li>
+    <li><b>Create the API wallet</b>: <b>More → API</b> → name it Novus Ordo → <b>Generate</b> → <b>Authorize API Wallet</b>. Copy the private key: it is shown once.</li>
+    <li><b>Connect it</b>: 🔌 <b>Connect → Hyperliquid</b>. <b>Main wallet address</b> = your wallet's 0x… address; <b>API wallet private key</b> = the key you copied. Save, then <b>Test live</b>.</li>
+    <li><b>Allow trading</b> when you are ready, then choose <b>Live</b> in the swarm's rules.</li>
+    <li><b>Withdrawing</b> is done only on <code>app.hyperliquid.xyz</code> with your own wallet — the terminal cannot withdraw.</li>
+  </ol>
+  <div class="box tip"><b>Practise first</b>Make an API wallet on <code>app.hyperliquid-testnet.xyz</code> (its faucet gives free test USDC), tick <b>testnet / sandbox</b> on the key, and run the swarm live against the testnet.</div>
+  <h2 data-toc>Luno, Telegram and Phantom</h2>
+  <h3>Luno (South African rands)</h3>
+  <ol class="steps">
+    <li>On luno.com (the website): <b>Settings → Security → API keys → Create API key</b>.</li>
+    <li>Choose the permission that can view balances and place and cancel orders — <b>never</b> one that can send, withdraw or transfer.</li>
+    <li>Paste the Key ID and Secret into 🔌 <b>Connect → Luno</b>, press <b>Test live</b>, and tick <b>Allow trading</b> only when you want orders placed.</li>
+  </ol>
+  <h3>Telegram</h3>
+  <ol class="steps">
+    <li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code>, choose a name and a username ending in "bot".</li>
+    <li>Paste the token into 🔌 <b>Connect → Telegram bot</b>.</li>
+    <li>Open the Telegram panel (<code>TG</code>), press Start in your bot's chat, then <b>Detect chat</b> and <b>Send test message</b>.</li>
+    <li>The bot also answers <code>/price</code>, <code>/status</code> and <code>/help</code> — only from your own chat, while the terminal is open.</li>
+  </ol>
+  <h3>Phantom wallet</h3>
+  <p><b>Connect Phantom</b> in the Wallet panel opens a one-time page in your browser, where you approve the connection and sign a message. The terminal verifies the signature and then shows the wallet's SOL and token balances, their value and recent activity. It is read-only: the terminal never sees a private key and cannot move funds.</p>
+</section>
+
+<!-- ============ 8 trading & orders ============ -->
+<section class="chapter" data-ch="8">
+  <div class="ch-head"><div class="ch-num">Chapter 8</div><h1>Placing orders and managing accounts</h1><p class="ch-lead">The order ticket, the portfolio and the safety rules that protect every order.</p></div>
+  <h2 data-toc>The order ticket</h2>
+  <ol class="steps">
+    <li>Open <code>TKT</code>. Choose the connected key (exchange account) and the market.</li>
+    <li>Choose the order type: <b>Market</b>, <b>Limit</b>, <b>Stop</b> or <b>Stop limit</b>. Size it in the coin or in dollars, or use 10/25/50/100 % of your free balance.</li>
+    <li>Options: post-only, reduce-only, time in force (GTC, IOC, FOK) and leverage on derivatives. Clicking a level on the <code>DOM</code> sends its price to the ticket.</li>
+    <li>Review the confirmation, which shows the full order with a <b>LIVE</b> or <b>TESTNET</b> badge, and send.</li>
+  </ol>
+  <h2 data-toc>Built-in order safety</h2>
+  <p>These rules run in the desktop process, not the screen, so nothing can bypass them:</p>
+  <table>
+    <tr><th style="width:36%">Rule</th><th>Default</th></tr>
+    <tr><td>A key places orders only after <b>Allow trading</b> is ticked on it</td><td>off until you tick it (cancelling always works)</td></tr>
+    <tr><td>Maximum value of one order</td><td>$1,000 (reduce-only and close orders are exempt: they can only shrink a position)</td></tr>
+    <tr><td>Rate limit</td><td>10 orders a minute</td></tr>
+    <tr><td>Maximum distance from the market price</td><td>50 %</td></tr>
+    <tr><td>Confirmation before sending</td><td>on (can be switched off under ⚙ in the ticket)</td></tr>
+    <tr><td>Testnet keys</td><td>never fall back to live</td></tr>
+    <tr><td>Order log</td><td>every attempt — placed, rejected or failed — is recorded</td></tr>
+  </table>
+  <p>Stops that would trigger immediately, post-only on non-limit orders and reduce-only on spot are refused before they reach the exchange.</p>
+  <h2 data-toc>Portfolio, calculator, alerts and journal</h2>
+  <ul>
+    <li><code>PORT</code> — balances, positions, open orders and fills; <b>Cancel</b>, <b>Cancel all</b> and <b>Close</b> (reduce-only at market).</li>
+    <li><code>CALC</code> — position size from risk, reward-to-risk, and liquidation price before you trade.</li>
+    <li><code>ALRT</code> — price and order-flow alerts that pop up on screen.</li>
+    <li><code>NOTE</code> — a timestamped trading journal.</li>
+  </ul>
+</section>
+
+<!-- ============ 9 security ============ -->
+<section class="chapter" data-ch="9">
+  <div class="ch-head"><div class="ch-num">Chapter 9</div><h1>Security and safety</h1><p class="ch-lead">How Novus Ordo protects your keys, your account and your data.</p></div>
+  <h2 data-toc>Security at a glance</h2>
+  <table>
+    <tr><th style="width:32%">Protection</th><th>How it works</th></tr>
+    <tr><td><b>Ledger key lock</b></td><td>An 8-digit key, stored only as a salted digest. Until it is entered, the desktop process refuses keys, trading, bots, wallets and Telegram. Wrong attempts lock input for longer each time.</td></tr>
+    <tr><td><b>Encrypted key vault</b></td><td>Exchange keys are encrypted by the operating system's key store before they are stored; the screen shows only masked values; copying a key clears the clipboard after 30 seconds.</td></tr>
+    <tr><td><b>Read-only by default</b></td><td>No key can place an order until you tick Allow trading on it.</td></tr>
+    <tr><td><b>No withdrawals</b></td><td>The terminal never needs, and never uses, withdrawal permission. Hyperliquid uses an API wallet that cannot withdraw.</td></tr>
+    <tr><td><b>Order limits</b></td><td>Order value, rate and distance limits, confirmations and a full order log (chapter 8).</td></tr>
+    <tr><td><b>Risk limits</b></td><td>The swarm's daily loss limit, drawdown cuts and rising floor; exchange-side stops on live positions (chapter 6).</td></tr>
+    <tr><td><b>Kill switch</b></td><td>One click on the top bar stops every bot.</td></tr>
+    <tr><td><b>Local data</b></td><td>Your database, settings and keys live on your computer only.</td></tr>
+  </table>
+  <h2 data-toc>Good practice</h2>
+  <ul>
+    <li>Use a strong, private ledger key, and press 🔒 <b>Lock</b> when you leave the computer.</li>
+    <li>Create exchange keys with trading permission only; restrict them to your IP address where the exchange offers it.</li>
+    <li>Keep wallet recovery phrases on paper, offline, and never type them into any application.</li>
+    <li>Start on paper, then testnet, then live with a small amount; raise size only after a record you trust.</li>
+    <li>If you think a key has leaked, delete it on the exchange and in 🔌 Connect, and create a new one.</li>
+  </ul>
+</section>
+
+<!-- ============ 10 troubleshooting ============ -->
+<section class="chapter" data-ch="10">
+  <div class="ch-head"><div class="ch-num">Chapter 10</div><h1>Troubleshooting</h1><p class="ch-lead">Quick answers to the most common problems.</p></div>
+  <h2 data-toc>Common problems</h2>
+  <table>
+    <tr><th style="width:34%">Problem</th><th>What to do</th></tr>
+    <tr><td><b>"Novus Ordo is already open" or "database is locked"</b></td><td>Another copy is still running or closing. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Esc</kbd>, end every <b>Novus Ordo</b> task in Task Manager, then press <b>Try again</b> or open it again. Your data is safe. Use only one copy (zip or portable, not both).</td></tr>
+    <tr><td><b>The window stays blank or black</b></td><td>If it is a graphics-driver problem, the terminal restarts itself in <b>safe mode</b> (no GPU). You can also choose <b>Help → Restart in safe mode</b>. If it persists, send the log (below).</td></tr>
+    <tr><td><b>The portable version starts slowly</b></td><td>It unpacks itself on every launch while Windows Defender scans it. Use the zip version for fast starts.</td></tr>
+    <tr><td><b>A feed shows "error" or no data</b></td><td>Check your internet connection; some exchanges are restricted in some countries — choose another venue. The terminal reconnects by itself.</td></tr>
+    <tr><td><b>An exchange rejects a key</b></td><td>Use <b>Test live</b> in 🔌 Connect: it explains the exchange's error in plain words (wrong permission, IP restriction, clock difference). Never send anyone your key — send the error message.</td></tr>
+    <tr><td><b>A key shows "(read-only)"</b></td><td>Tick <b>Allow trading</b> on it in 🔌 Connect.</td></tr>
+    <tr><td><b>Hyperliquid won't connect to a phone wallet</b></td><td>Use the Rabby or MetaMask browser extension on the computer instead (chapter 7), or open the site inside the wallet app's own browser.</td></tr>
+    <tr><td><b>Windows SmartScreen warning</b></td><td><b>More info → Run anyway</b>.</td></tr>
+  </table>
+  <h2 data-toc>The log file</h2>
+  <p><b>Help → Open log folder</b> shows <code>novus.log</code>, which records start-up timings, any delay of the app and any error. When reporting a problem, send this file — never your keys.</p>
+  <p class="small">Location on Windows: <code>C:\Users\&lt;you&gt;\AppData\Roaming\novus-ordo\logs\novus.log</code></p>
+</section>
+
+<!-- ============ 11 legal ============ -->
+<section class="chapter" data-ch="11">
+  <div class="ch-head"><div class="ch-num">Chapter 11</div><h1>Risk disclosure and terms of use</h1><p class="ch-lead">Please read before trading with real money.</p></div>
+  <h2 data-toc>Risk disclosure</h2>
+  <p>Cryptocurrencies are highly volatile. Perpetual futures use leverage: a small move against a position can cause a large loss, and a position can be liquidated, losing all the margin committed to it. Past performance — in a backtest, a paper account or live trading — is not a reliable indicator of future results. Statistical tests and forecasts estimate probabilities; they do not remove risk.</p>
+  <p>Automated trading carries additional risks: software errors, connection failures, exchange outages, delays and fills worse than expected in fast markets. Monitor live trading, keep limits conservative, and use the kill switch when in doubt.</p>
+  <h2 data-toc>Not financial advice</h2>
+  <p>Novus Ordo is software that displays market data, runs calculations and executes instructions you configure. It is not an investment adviser, broker, exchange or custodian, and nothing in the terminal or this manual is a recommendation to buy or sell any asset. You are solely responsible for your trading decisions, for the keys and permissions you grant, and for complying with the laws and tax obligations where you live. Exchange availability varies by country; use only services that are permitted for you.</p>
+  <h2 data-toc>Your responsibilities</h2>
+  <ul>
+    <li>Keep your ledger key, exchange keys and wallet recovery phrases secret.</li>
+    <li>Never grant withdrawal permission to any key used with the terminal.</li>
+    <li>Test on paper and testnet before trading live; trade only money you can afford to lose.</li>
+  </ul>
+</section>
+
+<!-- ============ appendices ============ -->
+<section class="chapter" data-ch="A">
+  <div class="ch-head"><div class="ch-num">Appendix A</div><h1>Function code reference</h1><p class="ch-lead">Every function, by code. Type the code on the command line; put a coin first to switch market (<code>ETH GP</code>).</p></div>
+  <h2 data-toc>All functions</h2>
+  <div class="two fn">
+  <table>
+    <tr><th>Code</th><th>Function</th></tr>
+    <tr><td class="code">MON</td><td>Monitor</td></tr><tr><td class="code">HMAP</td><td>Heat map</td></tr><tr><td class="code">GP</td><td>Graph price</td></tr><tr><td class="code">GIP</td><td>Footprint</td></tr><tr><td class="code">LHM</td><td>Liquidity heat map</td></tr><tr><td class="code">BOOK</td><td>Order book</td></tr><tr><td class="code">DOM</td><td>Depth ladder</td></tr><tr><td class="code">DPTH</td><td>Depth chart</td></tr><tr><td class="code">TAS</td><td>Time &amp; sales</td></tr><tr><td class="code">CVD</td><td>Cumulative delta</td></tr><tr><td class="code">FLOW</td><td>Flow pulse</td></tr><tr><td class="code">BLCK</td><td>Block trades</td></tr><tr><td class="code">LIQ</td><td>Liquidations</td></tr><tr><td class="code">VP</td><td>Volume profile</td></tr><tr><td class="code">OI</td><td>Open interest</td></tr><tr><td class="code">FUND</td><td>Funding</td></tr><tr><td class="code">OMON</td><td>Options</td></tr><tr><td class="code">SPRD</td><td>Venue spread</td></tr><tr><td class="code">CORR</td><td>Correlation</td></tr><tr><td class="code">HVOL</td><td>Volatility</td></tr><tr><td class="code">GV</td><td>GARCH volatility</td></tr><tr><td class="code">FCST</td><td>Candle forecast</td></tr><tr><td class="code">DES</td><td>Description</td></tr><tr><td class="code">SCRN</td><td>Screener</td></tr><tr><td class="code">WL</td><td>Watchlist</td></tr><tr><td class="code">TOP</td><td>Top news</td></tr><tr><td class="code">WEI</td><td>World markets</td></tr>
+  </table>
+  <table>
+    <tr><th>Code</th><th>Function</th></tr>
+    <tr><td class="code">BOT</td><td>Bot builder</td></tr><tr><td class="code">RSCH</td><td>Research</td></tr><tr><td class="code">LIB</td><td>Strategy library</td></tr><tr><td class="code">BT</td><td>Backtest builder</td></tr><tr><td class="code">DEPL</td><td>Deployed strategies</td></tr>
+    <tr><td class="code">VAR</td><td>Value at risk</td></tr><tr><td class="code">CAPM</td><td>CAPM</td></tr><tr><td class="code">EF</td><td>Efficient frontier</td></tr><tr><td class="code">KELLY</td><td>Kelly criterion</td></tr><tr><td class="code">NNET</td><td>Neural network</td></tr><tr><td class="code">DHG</td><td>Delta hedging</td></tr><tr><td class="code">VTGT</td><td>Volatility targeting</td></tr><tr><td class="code">MOM</td><td>Momentum</td></tr><tr><td class="code">REGM</td><td>Regimes</td></tr>
+    <tr><td class="code">SWRM</td><td>Crypto swarm view</td></tr><tr><td class="code">SWCF</td><td>Swarm rules</td></tr><tr><td class="code">TKT</td><td>Order ticket</td></tr><tr><td class="code">PORT</td><td>Portfolio</td></tr><tr><td class="code">AMT</td><td>AMT bots</td></tr><tr><td class="code">ALRT</td><td>Alerts</td></tr><tr><td class="code">TG</td><td>Telegram</td></tr><tr><td class="code">WALL</td><td>Wallet</td></tr><tr><td class="code">LUNO</td><td>Luno lane</td></tr><tr><td class="code">CALC</td><td>Calculator</td></tr><tr><td class="code">NOTE</td><td>Journal</td></tr><tr><td class="code">DB</td><td>Database</td></tr><tr><td class="code">HELP</td><td>Every function</td></tr>
+  </table>
+  </div>
+</section>
+
+<section class="chapter" data-ch="B">
+  <div class="ch-head"><div class="ch-num">Appendix B</div><h1>Glossary</h1><p class="ch-lead">The terms used in the terminal, in plain English.</p></div>
+  <h2 data-toc>Terms A to Z</h2>
+  <dl class="gloss">
+    <div><dt>ATR (average true range)</dt><dd>The average size of a candle's range; used to set stops that fit how much a coin normally moves.</dd></div>
+    <div><dt>Backtest</dt><dd>Running a strategy on past data to see how it would have done.</dd></div>
+    <div><dt>Beta</dt><dd>How much a coin tends to move when the market moves; beta 1.5 moves 1.5 % for the market's 1 %.</dd></div>
+    <div><dt>CVD (cumulative volume delta)</dt><dd>Running total of buying minus selling volume.</dd></div>
+    <div><dt>Delta</dt><dd>In order flow, buying minus selling volume; in options, how much the option's price moves with the coin.</dd></div>
+    <div><dt>Drawdown</dt><dd>A fall from the account's high before it recovers.</dd></div>
+    <div><dt>Efficient frontier</dt><dd>The mixes of assets with the best expected return for each level of risk.</dd></div>
+    <div><dt>Expected shortfall</dt><dd>The average loss on the days worse than the value at risk.</dd></div>
+    <div><dt>Footprint</dt><dd>A chart showing the volume bought and sold at each price inside each candle.</dd></div>
+    <div><dt>Funding</dt><dd>Regular payments between long and short holders of a perpetual future, keeping its price near the spot price.</dd></div>
+    <div><dt>GARCH / GJR-GARCH</dt><dd>Models that forecast volatility from how it clusters; GJR adds the larger reaction to falls.</dd></div>
+    <div><dt>In-sample / out-of-sample</dt><dd>Data a strategy was built on, and data it never saw and is judged on.</dd></div>
+    <div><dt>Isolated margin</dt><dd>Each position has its own margin, so it can only lose that margin.</dd></div>
+    <div><dt>Kelly criterion</dt><dd>The bet size that grows capital fastest in the long run; half Kelly is the common, safer choice.</dd></div>
+    <div><dt>Leverage</dt><dd>Trading a position larger than the money put up; it magnifies gains and losses.</dd></div>
+    <div><dt>Liquidation</dt><dd>The forced closing of a leveraged position when its margin runs out.</dd></div>
+    <div><dt>Neural network</dt><dd>A machine-learning model of connected artificial neurons that learns patterns from data.</dd></div>
+    <div><dt>Open interest</dt><dd>The number of open futures contracts.</dd></div>
+    <div><dt>Order flow</dt><dd>The actual buying and selling — who is aggressive, at what prices, in what size.</dd></div>
+    <div><dt>Over-fitting</dt><dd>A strategy tuned so closely to past data that it fails on new data.</dd></div>
+    <div><dt>Paper trading</dt><dd>Trading with simulated money at real prices.</dd></div>
+    <div><dt>Perpetual future</dt><dd>A futures contract with no expiry, kept near the spot price by funding.</dd></div>
+    <div><dt>POC (point of control)</dt><dd>The price with the most volume traded in a session.</dd></div>
+    <div><dt>R (risk unit)</dt><dd>The amount risked on a trade; a 2R win made twice what was risked.</dd></div>
+    <div><dt>Random forest / decision forest</dt><dd>A machine-learning model made of many decision trees that vote.</dd></div>
+    <div><dt>Sharpe ratio</dt><dd>Return per unit of risk; above 1 is good, above 2 excellent.</dd></div>
+    <div><dt>Slippage</dt><dd>The difference between the expected price and the price actually filled.</dd></div>
+    <div><dt>Stop (stop-loss)</dt><dd>An order that closes a trade if price moves against it by a set amount.</dd></div>
+    <div><dt>Testnet</dt><dd>An exchange's practice environment with free test money.</dd></div>
+    <div><dt>Value area</dt><dd>The price range where 70 % of a session's volume traded.</dd></div>
+    <div><dt>Value at risk (VaR)</dt><dd>The loss not expected to be exceeded at a chosen confidence over a chosen time.</dd></div>
+    <div><dt>Volatility</dt><dd>How much price moves; usually given as a yearly percentage.</dd></div>
+    <div><dt>Volatility targeting</dt><dd>Sizing positions so the portfolio's risk stays near a chosen level.</dd></div>
+  </dl>
+</section>
+
+<section class="chapter" data-ch="C">
+  <div class="credit">
+    <img src="img/emblem.png" />
+    <div class="ch-num" style="margin-top:22px">Credits</div>
+    <h1 style="font-size:30pt;letter-spacing:0.18em;margin-top:10px">NOVUS ORDO</h1>
+    <p style="font-size:12pt;color:#4a5361">The professional crypto trading terminal</p>
+    <p style="margin-top:40px;font-size:10pt;color:#5a6371;letter-spacing:0.2em;text-transform:uppercase">Conceived, designed and constructed by</p>
+    <p style="font-family:'Inter Display','Inter',sans-serif;font-size:26pt;font-weight:700;margin:6px 0 4px">Quincy Gininda</p>
+    <p style="max-width:420px;margin:24px auto 0;color:#4a5361">The market terminal, the Quant desk, the Strategy Lab and bot builder, the crypto swarm and its agents, and this manual are the work of Quincy Gininda.</p>
+    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.0 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
+  </div>
+</section>
+
+<script>
+  // the table of contents, from the chapters and their sections (page numbers are filled in by the build)
+  const toc = document.getElementById('toc');
+  for (const ch of document.querySelectorAll('section[data-ch]')) {
+    const n = ch.dataset.ch;
+    const title = ch.querySelector('h1').textContent;
+    const label = /^[A-Z]$/.test(n) ? (n === 'C' ? '' : n) : n;
+    if (n === 'C') {
+      toc.insertAdjacentHTML('beforeend', `<li class="c" data-find="${title}"><span class="n"></span><span class="t">Credits</span><span class="dots"></span><span class="pg">00</span></li>`);
+      continue;
+    }
+    toc.insertAdjacentHTML('beforeend', `<li class="c" data-find="${title}"><span class="n">${label}</span><span class="t">${/^[A-Z]$/.test(n) ? 'Appendix ' + n + ' — ' : ''}${title}</span><span class="dots"></span><span class="pg">00</span></li>`);
+    for (const h of ch.querySelectorAll('h2[data-toc]')) toc.insertAdjacentHTML('beforeend', `<li class="s" data-find="${h.textContent}"><span class="t">${h.textContent}</span><span class="dots"></span><span class="pg">00</span></li>`);
+  }
+  window.__toc = [...toc.querySelectorAll('li')].map((li) => li.dataset.find);
+</script>
+</body>
+</html>

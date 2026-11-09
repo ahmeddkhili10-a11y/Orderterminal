@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Novus Ordo — Operator's Manual (cover)</title>
+<style>
+  @page { size: A4; margin: 0; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html, body { margin: 0; padding: 0; }
+  .page { width: 210mm; height: 297mm; position: relative; overflow: hidden; box-sizing: border-box;
+    background: radial-gradient(ellipse 90% 55% at 50% 34%, #1a1f27 0%, #0b0e12 55%, #050608 100%); color: #e8ebef;
+    font-family: 'Inter', sans-serif; }
+  .grid { position: absolute; inset: 0; opacity: 0.07;
+    background-image: linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px);
+    background-size: 12mm 12mm; background-position: center; }
+  .frame { position: absolute; inset: 11mm; border: 0.4mm solid rgba(255,255,255,0.10); border-radius: 3mm; }
+  .top { position: absolute; top: 20mm; left: 22mm; right: 22mm; display: flex; justify-content: space-between;
+    font: 600 8.5pt 'DejaVu Sans Mono', monospace; letter-spacing: 0.28em; color: #8b939e; text-transform: uppercase; }
+  .top b { color: #ffc23d; font-weight: 700; }
+  .emblem { position: absolute; top: 52mm; left: 50%; transform: translateX(-50%); width: 72mm; height: 72mm; }
+  .halo { position: absolute; top: 40mm; left: 50%; transform: translateX(-50%); width: 120mm; height: 96mm;
+    background: radial-gradient(closest-side, rgba(255,194,61,0.16), rgba(255,194,61,0) 70%); }
+  .chrome { background: linear-gradient(180deg, #ffffff 0%, #e4e8ee 40%, #9aa3ae 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .word { position: absolute; top: 142mm; left: 50%; transform: translateX(-50%); height: 15mm; }
+  .rule { position: absolute; top: 162mm; left: 50%; width: 36mm; margin-left: -18mm; height: 0.6mm; background: #ffc23d; border-radius: 1mm; }
+  .title { position: absolute; top: 170mm; left: 0; right: 0; text-align: center; font: 700 22pt 'Inter Display', 'Inter', sans-serif; letter-spacing: 0.02em; color: #f3f5f8; }
+  .sub { position: absolute; top: 184mm; left: 0; right: 0; text-align: center; font-size: 12pt; color: #9aa3ae; }
+  .modes { position: absolute; top: 204mm; left: 0; right: 0; display: flex; justify-content: center; gap: 3mm; }
+  .modes span { font: 600 8.6pt 'Inter', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #c9ced6;
+    border: 0.3mm solid rgba(255,255,255,0.16); border-radius: 10mm; padding: 1.6mm 4mm; background: rgba(255,255,255,0.03); }
+  .by { position: absolute; bottom: 34mm; left: 0; right: 0; text-align: center; }
+  .by .l { font: 600 8.5pt 'Inter', sans-serif; letter-spacing: 0.32em; text-transform: uppercase; color: #8b939e; }
+  .by .n { display: block; margin: 2.5mm auto 0; height: 9.5mm; }
+  .foot { position: absolute; bottom: 19mm; left: 22mm; right: 22mm; display: flex; justify-content: space-between;
+    font: 500 8pt 'DejaVu Sans Mono', monospace; letter-spacing: 0.18em; color: #6d7580; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="grid"></div>
+    <div class="frame"></div>
+    <div class="top"><span>Operator's Manual</span><span><b>Edition 1.0</b></span></div>
+    <div class="halo"></div>
+    <img class="emblem" src="img/emblem.png" alt="Novus Ordo emblem" />
+    <img class="word" src="img/cover-word.png" alt="NOVUS ORDO" />
+    <div class="rule"></div>
+    <div class="title">Operator's Manual</div>
+    <div class="sub">The professional crypto trading terminal — how to use every part of it</div>
+    <div class="modes"><span>Markets</span><span>Quant desk</span><span>Strategy Lab</span><span>Crypto swarm</span><span>Wallets</span></div>
+    <div class="by">
+      <div class="l">Constructed by</div>
+      <img class="n" src="img/cover-name.png" alt="Quincy Gininda" />
+    </div>
+    <div class="foot"><span>Windows desktop</span><span>November 2026</span></div>
+  </div>
+</body>
+</html>
