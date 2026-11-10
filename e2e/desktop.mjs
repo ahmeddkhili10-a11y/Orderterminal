@@ -140,6 +140,55 @@ try {
   expect(true, 'REGM on the command line opens the regimes screen');
   await page.screenshot({ path: `${OUT}desktop-pro-quant.png` });
   expect((await page.locator('text=crashed').count()) === 0, 'no quant panel crashed');
+  // the new desk functions: pairs, seasonality, Monte Carlo
+  for (const [code, sel, what] of [
+    ['MC', '.mc-ladder tbody tr', 'MC: a strategy’s trades as 2,000 futures, with ruin by risk per trade'],
+    ['SEAS', '.seas-panel .seas-grid, .seas-panel .pro-empty', 'SEAS: the hour-of-day and weekday map opens'],
+    ['PAIR', '.pair-panel .pair-table, .pair-panel .pro-empty', 'PAIR: pairs and cointegration opens'],
+  ]) {
+    await page.click('.pro-cmd-input');
+    await page.keyboard.type(code);
+    await page.keyboard.press('Enter');
+    await page.waitForSelector(`.flexlayout__tab_button--selected:has-text("${code} ·")`, { timeout: 10_000 });
+    await page.waitForSelector(sel, { timeout: 20_000 });
+    expect(true, what);
+  }
+  expect((await page.locator('.mc-ladder tbody tr').count()) === 7, 'MC compares seven risk levels');
+  await page.screenshot({ path: `${OUT}desktop-pro-quant-new.png` });
+  expect((await page.locator('text=crashed').count()) === 0, 'no new quant panel crashed');
+  // the bridge: a model on the Quant desk goes into a bot with its settings — the neural network as the bot's strategy
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('NNET');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.flexlayout__tab_button--selected:has-text("NNET")', { timeout: 10_000 });
+  await page.locator('.nn-panel select').nth(2).selectOption('large');
+  await page.click('.nn-panel button:has-text("Use in a bot")');
+  await page.click('.use-bot [data-use="strategy:nn"] >> nth=0');
+  await page.waitForSelector('.pro-ws-tab.active:has-text("STRATEGY LAB")', { timeout: 10_000 });
+  await page.waitForSelector('.bb2-arrived', { timeout: 10_000 });
+  const arrived = await page.locator('.bb2-arrived').innerText();
+  expect(await page.locator('.bb2-arrived').evaluate((el) => { const r = el.getBoundingClientRect(); const p = el.closest('.pro-scroll').getBoundingClientRect(); return r.top >= p.top - 1 && r.bottom <= p.bottom + 1; }), 'the note about what arrived is in view');
+  expect(/From NNET/.test(arrived) && /32 → 16 hidden units/.test(arrived), `the bot builder says what arrived (${arrived.slice(0, 110)}…)`);
+  const chips = await page.locator('.bb-node[data-block="strategy"] .bb2-chip').allInnerTexts();
+  expect(chips.length === 1 && /neural network/i.test(chips[0]), `the network is the bot’s strategy (${chips.join(', ')})`);
+  expect((await page.locator('[data-tune="strategy:nn"] .chip.active:has-text("Large")').count()) === 1, 'its size came with it and can be changed in the bot builder');
+  expect(/32 and 16 hidden units/.test(await page.locator('.bb2-row').first().innerText()), 'the bot’s rules in words carry the network’s size');
+  // a second send: the Kelly panel's sizing joins the same bot
+  await page.keyboard.press('F3');
+  await page.waitForSelector('.pro-ws-tab.active:has-text("QUANT DESK")', { timeout: 10_000 });
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('KELLY');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.flexlayout__tab_button--selected:has-text("KELLY")', { timeout: 10_000 });
+  await page.click('.kelly-panel button:has-text("Use in a bot")');
+  await page.click('.use-bot [data-use="risk:kelly"]');
+  await page.waitForSelector('.pro-ws-tab.active:has-text("STRATEGY LAB")', { timeout: 10_000 });
+  const riskChips = await page.locator('.bb-node[data-block="risk"] .bb2-chip').allInnerTexts();
+  expect(riskChips.some((t) => /kelly/i.test(t)), `Kelly sizing from the desk joined the bot’s risk block (${riskChips.join(', ')})`);
+  await page.screenshot({ path: `${OUT}desktop-bridge.png` });
+  await page.click('.bb2-arrived button');
+  await page.keyboard.press('F3');
+  await page.waitForSelector('.pro-ws-tab.active:has-text("QUANT DESK")', { timeout: 10_000 });
   await page.selectOption('.pro-theme-select', 'pro-eikon');
   expect((await page.evaluate(() => document.documentElement.dataset.theme)) === 'pro-eikon', 'professional themes switch');
   await page.selectOption('.pro-theme-select', 'pro-amber');

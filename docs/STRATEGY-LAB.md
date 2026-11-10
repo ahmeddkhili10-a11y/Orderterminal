@@ -42,8 +42,13 @@ English (tick **Explain** to see what each one does). A block can hold
    neural network, the random forest, the linear forecast, the next-candle
    forecast), and an **AI decision maker** that learns from the bot's own past
    trades which signals to skip: the decision forest, the neural network, or
-   **both paired** (their odds averaged). It is kept only if it helps on unseen
-   data.
+   **both paired** (their odds averaged). It is kept only if it passes a check
+   **inside the training years**: fitted on the earlier training trades, it must
+   lift the Sharpe ratio on the last 30 % of them. The unseen data is never
+   used to choose it — choosing there would flatter the very result the test
+   reports. Where a network is picked (strategy, second opinion or decision
+   maker) its **size** (small 8→4, medium 16→8, large 32→16) and, for a
+   strategy or second opinion, **how far ahead it looks** can be set.
 5. **Risk management** — steady risk (volatility targeting), a cap on the daily
    loss (value at risk), **half Kelly** (found from the bot's training-years
    trades), GARCH stops, a bitcoin hedge (CAPM beta); two sizing rules combine
@@ -77,6 +82,30 @@ Not yet), the return a year against buy-and-hold, the worst drop, the win rate,
 the trades, the Sharpe ratio, the chance it is luck and of a losing run, the
 equity curve and each coin.
 
+## From the Quant desk into a bot ("Use in a bot")
+
+Every Quant desk function has a **⇢ Use in a bot** button. It sends the model
+on screen — with the settings it is being studied with — into the bot builder,
+as the kind of pick it is:
+
+| From | Becomes |
+|---|---|
+| `NNET` | the bot's **strategy** (replacing or joining the others), a **second opinion**, or the **decision maker** (alone or paired with the forest) — with the panel's network size, horizon, candles and coin |
+| `GV` | a calm or stormy **volatility filter**, **GARCH stops**, or volatility-scaled momentum |
+| `VAR` · `VTGT` · `KELLY` | a **sizing rule**: a value-at-risk cap, volatility targeting at the panel's target, half Kelly |
+| `DHG` · `CAPM` | the **bitcoin hedge**; CAPM also offers the bitcoin market-trend filter |
+| `EF` | the **split across coins**: efficient frontier, minimum variance, inverse volatility |
+| `MOM` · `REGM` · `FCST` | momentum / Kalman rules; Hurst, variance-ratio and hidden-Markov **filters**; the OU rule; the next-candle forecast |
+| `PAIR` | a **hedged pairs trade** on the coin, window and threshold on screen |
+| `SEAS` | the hour picked on the map as a **strategy**; weekday, weekend and session **filters** |
+
+The bot builder opens, says what arrived, and shows the settings beside the
+pick (a "reset" returns it to the style's defaults). The bot is then tested
+like any other: the Lab fits the model **on the training years only** — the
+same network, the same size and horizon, but not the weights trained on the
+desk, which have seen the period the test must keep unseen. `MC` goes the
+other way: it resamples the unseen-data trades of the last bot tested.
+
 ## Deployed strategies and the crypto swarm
 
 A deployed strategy reads its rules on each coin's closed candles of its own
@@ -100,7 +129,7 @@ because the swarm already held the coin.
 
 ## The library
 
-Twenty-two entry rules and eleven filters, each written from its paper:
+Twenty-nine entry rules and thirteen filters, each written from its paper:
 
 | Rule | Family | Papers |
 |---|---|---|
@@ -125,6 +154,29 @@ Twenty-two entry rules and eleven filters, each written from its paper:
 | Next-candle forecast | ml | Nison (1991); Marshall, Young & Rose (2006); Lu, Shiu & Liu (2012); Breiman (2001) |
 | Kalman-filter trend | trend | Kalman (1960); Harvey (1990) |
 | Ornstein–Uhlenbeck reversion | reversion | Uhlenbeck & Ornstein (1930); Avellaneda & Lee (2010); Bertram (2010) |
+
+Crypto-specific rules (added from the crypto literature):
+
+| Rule | Family | Papers | What it does |
+|---|---|---|---|
+| Volume-weighted momentum | momentum | Huang et al. (2024); Moskowitz et al. (2012); Llorente et al. (2002) | the trend with each candle weighted by its volume |
+| Trend composite (17 indicators) | trend | Fieberg, Liedtke, Poddig, Walker & Zaremba (2025, JFQA); Hudson & Urquhart (2021) | RSI, stochastic, CCI, seven moving averages, MACD, volume trends, money flow and Bollinger bands vote; the published factor weights them by machine learning across 3,000 coins, here each has one vote on one coin |
+| New high / new low | breakout | Padyšák & Vojtko (2022) | buys a close at a new 10-day high (trend) and at a new 10-day low (bounce); never shorts |
+| Big-day follow-through | momentum | Li, Urquhart, Wang & Zhang (2021); Caporale & Plastun (2019) | trades with a 1-day move beyond k standard deviations — the published edge could not be told from luck after costs, so the Lab's test decides |
+| Late-evening hours | seasonal | Padyšák & Vojtko (2022); Baur et al. (2019) | long 21:00–23:00 UTC; the pattern weakened after 2021 |
+| Pairs: the coin against bitcoin | relative | Gatev, Goetzmann & Rouwenhorst (2006); Fil & Kristoufek (2020); Avellaneda & Lee (2010) | rolling regression of the coin on bitcoin; buys the coin when it is k standard deviations cheap, sells when rich, only while the fit explains half the moves. With the bitcoin hedge it is the true pairs trade |
+| Bitcoin leads, the coin catches up | relative | Guo, Sang, Tu & Wang (2024); Liu, Tsyvinski & Wu (2022) | when bitcoin has moved and the coin has not done its beta's share, trade the coin in bitcoin's direction |
+
+The last two read bitcoin's price beside the coin's: BTC joins the coins
+tested (it is not traded by them), and the crypto swarm gives a deployed
+strategy bitcoin's candles live. Two more filters: **bitcoin's market trend**
+(Liu, Tsyvinski & Wu 2022; Faber 2007 — longs only while bitcoin is above its
+long average) and **weekdays or weekends** (Kinateder & Papavassiliou 2021;
+Aharon & Qadan 2019 — lower risk and volume at weekends).
+
+Rules with a holding time of their own (the two evening hours, a day for the
+Monday effect, the new high/low and the big-day rule) are never held longer
+than that by the bot builder's style.
 
 Filters: long-term trend (Faber 2007), volatility regime (Moreira & Muir 2017;
 Barroso & Santa-Clara 2015), trend strength ADX (Wilder 1978), participation
@@ -273,8 +325,11 @@ perpetual does not have.
    - **Regression on buy-and-hold**: alpha (and its t) and beta — is it more
      than the market's drift?
    - **Random-forest meta-labelling** (López de Prado 2018): a forest learns,
-     in sample, which of the strategy's signals tend to fail, and is kept only
-     if it lifts the out-of-sample Sharpe
+     in sample, which of the strategy's signals tend to fail. Whether it is
+     kept is decided inside the training data: fitted on the trades of the
+     first 70 % of the training bars, it must lift the Sharpe ratio on the last
+     30 % of them. The out-of-sample numbers are read afterwards and decide
+     nothing (deciding there would bias them upward)
    - **Probability of backtest overfitting** for the group (Bailey, Borwein,
      López de Prado & Zhu 2017)
    - **GARCH worlds** (the leading eight): does it beat simulated markets with

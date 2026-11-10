@@ -162,6 +162,22 @@ try {
   await page.screenshot({ path: `${OUT}quant-nnet.png` });
   if (!/Neural network/.test(await page.locator('.nn-panel .pro-table').first().innerText())) errors.push('NNET: no result table');
   if ((await page.locator('text=crashed').count()) !== 0) errors.push('NNET: crashed');
+  // PAIR, SEAS and MC render on the simulator
+  for (const [tab, sel] of [['PAIR ·', '.pair-panel .pair-table, .pair-panel .pro-empty'], ['MC ·', '.mc-panel .mc-ladder'], ['SEAS ·', '.seas-panel .seas-grid, .seas-panel .pro-empty']]) {
+    await page.locator(`.flexlayout__tab_button:has-text("${tab}")`).first().click();
+    await page.waitForSelector(sel, { timeout: 30_000 });
+    await page.waitForTimeout(600);
+  }
+  await page.screenshot({ path: `${OUT}quant-seas.png` });
+  await page.locator('.flexlayout__tab_button:has-text("PAIR ·")').first().click();
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}quant-pair.png` });
+  await page.locator('.flexlayout__tab_button:has-text("MC ·")').first().click();
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}quant-mc.png` });
+  if ((await page.locator('.mc-ladder tbody tr').count()) !== 7) errors.push('MC: the risk ladder is missing');
+  if ((await page.locator('button:has-text("Use in a bot")').count()) < 3) errors.push('the “Use in a bot” buttons are missing on the quant desk');
+  if ((await page.locator('text=crashed').count()) !== 0) errors.push('PAIR/SEAS/MC: a panel crashed');
   console.log('quant desk: ok');
 } catch (e) {
   failed = true;

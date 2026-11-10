@@ -45,6 +45,9 @@ square, every number on screen backed by live data. The classic swarm views
 | `SWCF` | Swarm rules (swarm view) | | `EF` | Efficient frontier (F3) |
 | | | | `KELLY` | Kelly criterion (F3) |
 | | | | `NNET` | Neural network (F3) |
+| | | | `PAIR` | Pairs & cointegration (F3) |
+| | | | `SEAS` | Seasonality (F3) |
+| | | | `MC` | Monte Carlo (F3) |
 | `TAS` | Time & sales | | `DHG` | Delta hedging (F3) |
 | `CVD` | Cumulative delta | | `WALL` | Wallet |
 | `FLOW` | Flow pulse | | `TG` | Telegram |
@@ -110,8 +113,31 @@ coin on the board, and the tables list a set of coins you choose.
   training data stops improving. Judged on the last 30 % it never saw against
   a random forest on the same inputs and the two paired: how often each was
   right against guessing, its confident calls as a trading record, what it
-  looks at most, and how well its odds held up. The same network is in the
-  Strategy Lab as a rule, a second opinion and an AI decision maker.
+  looks at most, and how well its odds held up. **⇢ Use in a bot** sends it
+  into the bot builder with its size, horizon, candles and coin — as the bot's
+  strategy, a second opinion or its decision maker.
+- **PAIR — pairs and cointegration.** Which coins are tied to bitcoin (or any
+  other coin): R², the hedge ratio, the Engle–Granger test of whether the gap
+  between them keeps closing (against the stricter Engle–Granger critical
+  values), the half-life of a gap, the gap now in standard deviations over the
+  pairs rule's window, what the rule would do — and who moves first (the
+  correlation of one coin's move with the other's a few candles apart).
+- **SEAS — seasonality.** The average return by hour of the day and by weekday
+  (UTC) on a year of hourly candles from the Lab's history, each with its
+  t-statistic. Twenty-four hours are twenty-four tries, so an hour only
+  "stands out" past |t| 3.08 (Bonferroni); the panel says plainly when the map
+  is within what luck draws. Click an hour to send it to the bot builder.
+- **MC — Monte Carlo on a strategy's trades.** The trades (a win rate and
+  payoff, or the unseen-data trades of the last bot tested) resampled into
+  2,000 futures: the account's fan of paths, the unlucky/median/lucky result,
+  the deepest drawdown, the longest losing streak, the odds of reaching a goal
+  and of a ruinous drawdown — and the same at seven risk-per-trade levels, with
+  the most risk that keeps ruin under one in twenty.
+
+Every Quant desk function has a **⇢ Use in a bot** button: the model on screen
+goes into the bot builder with its settings, as a strategy, a filter, a second
+opinion, a decision maker, a sizing rule or the split across coins (see
+STRATEGY-LAB.md, "From the Quant desk into a bot").
 
 The same models feed the Strategy Lab: see [STRATEGY-LAB.md](STRATEGY-LAB.md).
 

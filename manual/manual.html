@@ -61,7 +61,7 @@
   .small { font-size: 8.8pt; color: #5a6371; }
   .gloss dt { font-weight: 700; margin-top: 6px; }
   .gloss dd { margin: 0 0 2px 0; }
-  .fn td { padding: 3.6px 7px; }
+  .fn td { padding: 2.6px 7px; }
   .gloss { column-count: 2; column-gap: 22px; }
   .gloss div { break-inside: avoid; }
 </style>
@@ -71,7 +71,7 @@
 <!-- ============ copyright / about ============ -->
 <section>
   <div style="padding-top:36px">
-    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.0</div>
+    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.1</div>
     <h1 style="font-size:22pt">About this manual</h1>
     <p>This manual explains how to use every part of Novus Ordo, the professional crypto trading terminal: the market terminal, the Quant desk, the Strategy Lab and its bot builder, the crypto swarm, and the wallet and exchange connections that link it to your accounts. It is written in plain English. Where a technical term is unavoidable, it is explained where it first appears and again in the glossary at the back.</p>
     <p>Each chapter starts with what a part of the terminal is for, then shows how to use it step by step. Function codes — short names you type on the command line, such as <code>VAR</code> or <code>BOT</code> — appear in a box like this so you can find them on screen.</p>
@@ -105,7 +105,7 @@
     <tr><th style="width:24%">Mode</th><th style="width:14%">Open with</th><th>What it is for</th></tr>
     <tr><td><b>Markets</b></td><td><kbd>F1</kbd></td><td>Reading the market: prices, order flow, footprint charts, liquidity, funding, open interest, news. Chapter 3.</td></tr>
     <tr><td><b>Strategy Lab</b></td><td><kbd>F2</kbd></td><td>Building, testing and deploying strategies: the bot builder, research runs on published strategies, the backtest builder. Chapter 5.</td></tr>
-    <tr><td><b>Quant desk</b></td><td><kbd>F3</kbd></td><td>Institutional risk and portfolio models: value at risk, volatility forecasting, CAPM, the efficient frontier, the Kelly criterion, regimes, delta hedging and a neural network. Chapter 4.</td></tr>
+    <tr><td><b>Quant desk</b></td><td><kbd>F3</kbd></td><td>Institutional risk and portfolio models: value at risk, volatility forecasting, CAPM, the efficient frontier, the Kelly criterion, regimes, delta hedging, a neural network, pairs, seasonality and Monte Carlo — each one usable inside a bot. Chapter 4.</td></tr>
     <tr><td><b>Crypto swarm</b></td><td><kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>The autonomous trading team and your accounts: the Command Center, deployed strategies, the order ticket, wallets and alerts. Chapter 6.</td></tr>
   </table>
   <p>Markets, the Strategy Lab and the Quant desk are the three workspaces of <b>the Terminal</b> (<kbd>Ctrl</kbd>+<kbd>1</kbd>). The <b>Crypto swarm</b> is a separate view. The two meet in one place only: the strategies you deploy from the Strategy Lab into the swarm.</p>
@@ -289,9 +289,46 @@
   <div class="cap"><h3><span class="code">NNET</span> Neural network</h3><dl>
     <dt>What it is</dt><dd>A small neural network (two hidden layers) trained on a coin's candles to forecast whether price will be higher a chosen number of candles later. It reads around 30 market measurements at each candle and stops learning when its latest training data stops improving, so it does not memorise.</dd>
     <dt>Used for</dt><dd>Testing whether a learned model finds anything in a market — compared fairly with a random forest on the same inputs, and with the two paired.</dd>
-    <dt>How to use</dt><dd>Choose the coin, candle size, how far ahead to forecast and the network size; press <b>Train the network</b> and watch the error fall. Read the table "on the 30 % it never saw": a model is only useful if it is right more often than guessing. The panel also shows what the network looks at most and how well its odds held up.</dd></dl></div>
+    <dt>How to use</dt><dd>Choose the coin, candle size, how far ahead to forecast and the network size; press <b>Train the network</b> and watch the error fall. Read the table "on the 30 % it never saw": a model is only useful if it is right more often than guessing. Then press <b>⇢ Use in a bot</b> to run this network inside a strategy (see the end of this chapter). The panel also shows what the network looks at most and how well its odds held up.</dd></dl></div>
   <figure><img src="img/nn.jpg" /><figcaption>NNET: the learning curve, the forecast now, and the results on unseen data against a random forest and the two paired.</figcaption></figure>
-  <div class="box tip"><b>The same models power the Strategy Lab</b>GARCH, value at risk, volatility targeting, Kelly sizing, the efficient frontier, regimes, the Kalman trend and the neural network are all available as building blocks in the bot builder (chapter 5).</div>
+  <h2 data-toc>Finding and sizing an edge: pairs, seasons, Monte Carlo</h2>
+  <div class="cap"><h3><span class="code">PAIR</span> Pairs and cointegration</h3><dl>
+    <dt>What it is</dt><dd>A screen of which coins are tied to bitcoin (or to any coin you name): how much of each coin's moves bitcoin explains (R²), the hedge ratio (beta), a statistical test of whether the gap between the two keeps closing (Engle–Granger), how long half of a gap takes to close, where the gap stands now in standard deviations, and who tends to move first.</dd>
+    <dt>Used for</dt><dd>Finding pairs worth trading against each other — buying the coin that is cheap against bitcoin and selling bitcoin, so the market's direction cancels out — and avoiding pairs whose "tie" is not in the data.</dd>
+    <dt>How to use</dt><dd>Enter your coins; read the <b>TIED?</b> column first ("tied" at the 5 % or 1 % level is what you want) and the half-life (shorter is better). Click a coin for its gap chart. Hourly and shorter candles show the effect best; daily candles rarely do.</dd></dl></div>
+  <figure><img src="img/q-PAIR.jpg" /><figcaption>PAIR on the simulator, whose coins are independent of each other — so it rightly reports "not tied" and "no trade". On real markets, tied pairs show a strongly negative ADF and a short half-life.</figcaption></figure>
+  <div class="cap"><h3><span class="code">SEAS</span> Seasonality</h3><dl>
+    <dt>What it is</dt><dd>A map of a coin's average return by hour of the day and day of the week (UTC), on a year of hourly candles, with a t-statistic for every hour and weekday.</dd>
+    <dt>Used for</dt><dd>Checking calendar patterns — the published "21:00 to 23:00 UTC" effect in bitcoin, weekend behaviour, your own hunches — before trading them.</dd>
+    <dt>How to use</dt><dd>Green cells rose on average, red fell. Read the <b>T</b> column: with 24 hours to look at, one will look special by luck, so the panel only says an hour "stands out" past 3.08. Click an hour to select it.</dd></dl></div>
+  <figure><img src="img/q-SEAS.jpg" /><figcaption>SEAS: the weekday-by-hour map, the hours ranked by how sure their average is, and the plain reading underneath. Here an hour is picked (21:00) to send to the bot builder.</figcaption></figure>
+  <div class="cap"><h3><span class="code">MC</span> Monte Carlo on a strategy's trades</h3><dl>
+    <dt>What it is</dt><dd>A strategy's trades reshuffled into 2,000 possible futures: the range of where the account could end, the deepest drawdown on the way, the longest losing streak, and the odds of reaching a goal or of a ruinous drawdown — worked out again at seven levels of risk per trade.</dd>
+    <dt>Used for</dt><dd>Deciding how much to risk a trade before any money is at stake, and knowing in advance how bad a normal bad run looks, so you do not abandon a sound strategy in one.</dd>
+    <dt>How to use</dt><dd>Choose <b>From my last bot test</b> to use the real trades of the bot you last tested in the bot builder, or type a win rate and payoff. Set the risk per trade, the number of trades, your goal and what drawdown counts as ruin. Read the ladder: the highest risk that keeps ruin under 5 % is marked.</dd></dl></div>
+  <figure><img src="img/q-MC.jpg" /><figcaption>MC: the fan of possible account paths, the unlucky, median and lucky outcomes, and the same trades at each risk level.</figcaption></figure>
+
+  <h2 data-toc>Using a Quant desk model inside a bot</h2>
+  <p>The models on the Quant desk are not separate from your strategies. Every Quant desk panel has a <b>⇢ Use in a bot</b> button: it sends the model on screen — with the settings you are looking at — into the Strategy Lab's bot builder, where it becomes part of the bot you are building.</p>
+  <ol class="steps">
+    <li>Set the panel up the way you want the model: for example in <code>NNET</code>, the coin, the candle size, how far ahead it forecasts and the network size.</li>
+    <li>Press <b>⇢ Use in a bot</b> and choose what it should be in the bot (the choices are listed below).</li>
+    <li>The Strategy Lab opens on the bot builder. A note at the top says what arrived, and the settings appear beside the pick, where you can change them or press <b>reset</b>.</li>
+    <li>Press <b>▶ Test bot</b>. The bot is tested like any other, on data it never saw.</li>
+  </ol>
+  <table>
+    <tr><th style="width:17%">From</th><th>What it can become in the bot</th></tr>
+    <tr><td class="code">NNET</td><td>The bot's <b>strategy</b> (replacing or joining the others), a <b>second opinion</b> that must agree, or the <b>AI decision maker</b> (alone, or paired with the decision forest) — with the same network size, horizon, candle size and coin.</td></tr>
+    <tr><td class="code">GV</td><td>A filter for calm or stormy volatility, stops that follow the GARCH forecast, or momentum scaled by GARCH volatility.</td></tr>
+    <tr><td class="code">VAR VTGT KELLY</td><td>A position-sizing rule: a value-at-risk cap, volatility targeting at the target on the panel, or half Kelly.</td></tr>
+    <tr><td class="code">DHG CAPM</td><td>The bitcoin hedge (market-neutral); CAPM also offers the bitcoin market-trend filter.</td></tr>
+    <tr><td class="code">EF</td><td>How the bot's money is split across coins: efficient frontier, minimum variance or inverse volatility.</td></tr>
+    <tr><td class="code">MOM REGM FCST</td><td>Momentum and Kalman-trend strategies; Hurst, variance-ratio and hidden-Markov filters; the Ornstein–Uhlenbeck strategy; the next-candle forecast as a strategy or second opinion.</td></tr>
+    <tr><td class="code">PAIR</td><td>A hedged pairs trade on the coin, window and threshold on screen; or the "bitcoin leads" strategy.</td></tr>
+    <tr><td class="code">SEAS</td><td>The hour you picked on the map as a strategy; weekday, weekend and trading-hours filters.</td></tr>
+  </table>
+  <figure><img src="img/bridge.jpg" /><figcaption>The bot builder after two sends from the Quant desk: the note at the top says what arrived, the neural network is the bot's strategy, and Kelly sizing has joined the risk block.</figcaption></figure>
+  <div class="box warn"><b>Why the bot retrains the network</b>When a neural network goes from NNET into a bot, the bot uses the <i>same network</i> — the same inputs, size and horizon — but the Strategy Lab trains it again on the training years only. The copy trained on the desk has already seen the recent period, and a test is only honest if the model has never seen the data it is judged on.</div>
 </section>
 
 <!-- ============ 5 strategy lab ============ -->
@@ -311,14 +348,27 @@
   <figure><img src="img/bb-2-pair.jpg" /><figcaption>The bot builder: eight blocks on the canvas, the selected block's options on the right, the compatibility check underneath.</figcaption></figure>
   <ol class="steps">
     <li><b>Trading style</b> — scalping (hours), intraday, swing (a few days), one-week trades, position (weeks to months) or long-term hold (up to a year). The style sets the candle size, look-backs, holding time, stop width and years of history for every other block.</li>
-    <li><b>Strategies</b> — the entry rules: trend following, breakouts, buying dips and selling rallies, timing and seasons, funding, and AI (neural network, random forest, linear and next-candle forecasts). Pick one or several; several are joined by <b>all must agree</b>, <b>majority vote</b> or <b>any one</b>.</li>
-    <li><b>Market models</b> — when the bot may trade: with the big trend, trending or ranging markets (ADX), statistical regimes (variance ratio, Hurst, hidden-Markov), calm or stormy volatility (GARCH), activity, trading hours and funding crowding. Every filter you pick must allow a trade.</li>
-    <li><b>Forecasts &amp; AI</b> — second opinions that must agree, and an <b>AI decision maker</b> that learns from the bot's own past trades which signals to skip: the decision forest, the neural network, or both paired. It is kept only if it improves results on unseen data.</li>
+    <li><b>Strategies</b> — the entry rules, 29 in all: trend following, breakouts, buying dips and selling rallies, timing and seasons, funding, trades against bitcoin, and AI (neural network, random forest, linear and next-candle forecasts). Pick one or several; several are joined by <b>all must agree</b>, <b>majority vote</b> or <b>any one</b>. Where the neural network is picked, its size and how far ahead it looks can be set under it.</li>
+    <li><b>Market models</b> — when the bot may trade: with the big trend, trending or ranging markets (ADX), statistical regimes (variance ratio, Hurst, hidden-Markov), calm or stormy volatility (GARCH), bitcoin's own trend (the market), activity, trading hours, weekdays or weekends, and funding crowding. Every filter you pick must allow a trade.</li>
+    <li><b>Forecasts &amp; AI</b> — second opinions that must agree, and an <b>AI decision maker</b> that learns from the bot's own past trades which signals to skip: the decision forest, the neural network, or both paired. It is kept only if it passes a check inside the training years (it must help on the last part of them). The unseen data is never used to choose it, so the result you read is not flattered by the choice.</li>
     <li><b>Risk management</b> — steady risk (volatility targeting), a daily loss cap (value at risk), half Kelly, storm-aware GARCH stops, a bitcoin hedge; two sizing rules can be combined (the smaller size wins). Also the stop width and how money is split across coins (equally, by calm, minimum variance or the efficient frontier).</li>
     <li><b>Rules of engagement</b> — long and short or one side only; let winners run or take profit at 1.5, 2 or 3 times the risk; holding time; whether an opposite signal closes the trade.</li>
     <li><b>Backtest</b> — choose the coins and press <b>Run backtest</b> (or <b>▶ Test bot</b> at the top).</li>
     <li><b>Deploy</b> — available only after a backtest (see "Deploying a strategy").</li>
   </ol>
+  <h3>Strategies built on crypto research</h3>
+  <p>Besides the classic rules, the library holds rules taken from published studies of crypto markets. Each shows its papers in <code>LIB</code>, and each must still pass the Lab's test on your coins.</p>
+  <table>
+    <tr><th style="width:30%">Strategy</th><th>What it does</th></tr>
+    <tr><td><b>Momentum weighted by volume</b></td><td>Momentum where each candle counts by how much was traded; in crypto studies it beat plain momentum.</td></tr>
+    <tr><td><b>Trend composite (17 indicators vote)</b></td><td>RSI, stochastic, CCI, seven moving averages, MACD, volume trends, money flow and Bollinger bands each cast a vote. Based on the crypto trend factor published in 2025.</td></tr>
+    <tr><td><b>New 10-day high or low</b></td><td>Buys a close at a new 10-day high (trend) and at a new 10-day low (the bounce); holds a day; never shorts.</td></tr>
+    <tr><td><b>Follow a big day</b></td><td>After an unusually big daily move, trades in its direction for a day. The published edge is thin — test it.</td></tr>
+    <tr><td><b>Late-evening hours</b></td><td>Buys at 21:00 UTC and sells at 23:00 UTC, where bitcoin's gains were concentrated in 2015–2021. The pattern weakened afterwards.</td></tr>
+    <tr><td><b>Pairs trade: the coin against bitcoin</b></td><td>Buys a coin that is unusually cheap against bitcoin and sells one that is rich. With the bitcoin hedge (Risk block) it is a true market-neutral pairs trade.</td></tr>
+    <tr><td><b>Bitcoin leads, the coin catches up</b></td><td>When bitcoin has moved and a coin has not yet followed, trades the coin in bitcoin's direction.</td></tr>
+  </table>
+  <p>The last two read bitcoin's price, so BTC is added to the coins tested (they do not trade BTC itself). Rules with their own holding time — the two evening hours, one day for the big-day and new-high rules — are never held longer than that, whatever the trading style.</p>
   <h3>The compatibility check</h3>
   <p>Every pick is checked against the others as you make it, and each option is tagged before you choose it:</p>
   <ul>
@@ -601,7 +651,7 @@
   <table>
     <tr><th>Code</th><th>Function</th></tr>
     <tr><td class="code">BOT</td><td>Bot builder</td></tr><tr><td class="code">RSCH</td><td>Research</td></tr><tr><td class="code">LIB</td><td>Strategy library</td></tr><tr><td class="code">BT</td><td>Backtest builder</td></tr><tr><td class="code">DEPL</td><td>Deployed strategies</td></tr>
-    <tr><td class="code">VAR</td><td>Value at risk</td></tr><tr><td class="code">CAPM</td><td>CAPM</td></tr><tr><td class="code">EF</td><td>Efficient frontier</td></tr><tr><td class="code">KELLY</td><td>Kelly criterion</td></tr><tr><td class="code">NNET</td><td>Neural network</td></tr><tr><td class="code">DHG</td><td>Delta hedging</td></tr><tr><td class="code">VTGT</td><td>Volatility targeting</td></tr><tr><td class="code">MOM</td><td>Momentum</td></tr><tr><td class="code">REGM</td><td>Regimes</td></tr>
+    <tr><td class="code">VAR</td><td>Value at risk</td></tr><tr><td class="code">CAPM</td><td>CAPM</td></tr><tr><td class="code">EF</td><td>Efficient frontier</td></tr><tr><td class="code">KELLY</td><td>Kelly criterion</td></tr><tr><td class="code">NNET</td><td>Neural network</td></tr><tr><td class="code">PAIR</td><td>Pairs &amp; cointegration</td></tr><tr><td class="code">SEAS</td><td>Seasonality</td></tr><tr><td class="code">MC</td><td>Monte Carlo</td></tr><tr><td class="code">DHG</td><td>Delta hedging</td></tr><tr><td class="code">VTGT</td><td>Volatility targeting</td></tr><tr><td class="code">MOM</td><td>Momentum</td></tr><tr><td class="code">REGM</td><td>Regimes</td></tr>
     <tr><td class="code">SWRM</td><td>Crypto swarm view</td></tr><tr><td class="code">SWCF</td><td>Swarm rules</td></tr><tr><td class="code">TKT</td><td>Order ticket</td></tr><tr><td class="code">PORT</td><td>Portfolio</td></tr><tr><td class="code">AMT</td><td>AMT bots</td></tr><tr><td class="code">ALRT</td><td>Alerts</td></tr><tr><td class="code">TG</td><td>Telegram</td></tr><tr><td class="code">WALL</td><td>Wallet</td></tr><tr><td class="code">LUNO</td><td>Luno lane</td></tr><tr><td class="code">CALC</td><td>Calculator</td></tr><tr><td class="code">NOTE</td><td>Journal</td></tr><tr><td class="code">DB</td><td>Database</td></tr><tr><td class="code">HELP</td><td>Every function</td></tr>
   </table>
   </div>
@@ -614,6 +664,7 @@
     <div><dt>ATR (average true range)</dt><dd>The average size of a candle's range; used to set stops that fit how much a coin normally moves.</dd></div>
     <div><dt>Backtest</dt><dd>Running a strategy on past data to see how it would have done.</dd></div>
     <div><dt>Beta</dt><dd>How much a coin tends to move when the market moves; beta 1.5 moves 1.5 % for the market's 1 %.</dd></div>
+    <div><dt>Cointegration</dt><dd>Two prices are cointegrated when a mix of them keeps returning to its average, however far each wanders alone — the basis of a pairs trade.</dd></div>
     <div><dt>CVD (cumulative volume delta)</dt><dd>Running total of buying minus selling volume.</dd></div>
     <div><dt>Delta</dt><dd>In order flow, buying minus selling volume; in options, how much the option's price moves with the coin.</dd></div>
     <div><dt>Drawdown</dt><dd>A fall from the account's high before it recovers.</dd></div>
@@ -627,15 +678,18 @@
     <div><dt>Kelly criterion</dt><dd>The bet size that grows capital fastest in the long run; half Kelly is the common, safer choice.</dd></div>
     <div><dt>Leverage</dt><dd>Trading a position larger than the money put up; it magnifies gains and losses.</dd></div>
     <div><dt>Liquidation</dt><dd>The forced closing of a leveraged position when its margin runs out.</dd></div>
+    <div><dt>Monte Carlo</dt><dd>Simulating thousands of possible futures from a strategy's trades to see the range of outcomes, not just the average.</dd></div>
     <div><dt>Neural network</dt><dd>A machine-learning model of connected artificial neurons that learns patterns from data.</dd></div>
     <div><dt>Open interest</dt><dd>The number of open futures contracts.</dd></div>
     <div><dt>Order flow</dt><dd>The actual buying and selling — who is aggressive, at what prices, in what size.</dd></div>
     <div><dt>Over-fitting</dt><dd>A strategy tuned so closely to past data that it fails on new data.</dd></div>
+    <div><dt>Pairs trade</dt><dd>Buying one asset and selling a related one, betting the gap between them closes; the market's direction cancels out.</dd></div>
     <div><dt>Paper trading</dt><dd>Trading with simulated money at real prices.</dd></div>
     <div><dt>Perpetual future</dt><dd>A futures contract with no expiry, kept near the spot price by funding.</dd></div>
     <div><dt>POC (point of control)</dt><dd>The price with the most volume traded in a session.</dd></div>
     <div><dt>R (risk unit)</dt><dd>The amount risked on a trade; a 2R win made twice what was risked.</dd></div>
     <div><dt>Random forest / decision forest</dt><dd>A machine-learning model made of many decision trees that vote.</dd></div>
+    <div><dt>Seasonality</dt><dd>A pattern tied to the clock or calendar: an hour of the day or a day of the week that tends to rise or fall.</dd></div>
     <div><dt>Sharpe ratio</dt><dd>Return per unit of risk; above 1 is good, above 2 excellent.</dd></div>
     <div><dt>Slippage</dt><dd>The difference between the expected price and the price actually filled.</dd></div>
     <div><dt>Stop (stop-loss)</dt><dd>An order that closes a trade if price moves against it by a set amount.</dd></div>
@@ -656,7 +710,7 @@
     <p style="margin-top:40px;font-size:10pt;color:#5a6371;letter-spacing:0.2em;text-transform:uppercase">Conceived, designed and constructed by</p>
     <p style="font-family:'Inter Display','Inter',sans-serif;font-size:26pt;font-weight:700;margin:6px 0 4px">Quincy Gininda</p>
     <p style="max-width:420px;margin:24px auto 0;color:#4a5361">The market terminal, the Quant desk, the Strategy Lab and bot builder, the crypto swarm and its agents, and this manual are the work of Quincy Gininda.</p>
-    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.0 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
+    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.1 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
   </div>
 </section>
 

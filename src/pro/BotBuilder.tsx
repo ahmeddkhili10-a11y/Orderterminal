@@ -177,6 +177,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
   useEffect(() => setCoinsText(c.coins), [c.coins]);
   // what has arrived from the Quant desk (lab/bridge.ts), in words
   const [arrived, setArrived] = useState<string[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const pending = useLabInbox((st) => st.queue.length);
   const [wrapRef, wrapW] = useWidth<HTMLDivElement>();
   const style = STYLE_MAP[c.style] ?? STYLES[2];
@@ -211,6 +212,8 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
     set({ ...f, tunes: f.tunes });
     setArrived((a) => [...texts, ...a].slice(0, 4));
     if (block) setSel(block);
+    // the note that says what arrived is at the top: bring it into view
+    scrollRef.current?.scrollTo({ top: 0 });
   }, [pending]);
   const tuneOf = (key: string): Params => c.tunes?.[key] ?? {};
   const setTune = (key: string, p: Params | null) => {
@@ -473,7 +476,19 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
           {busy ? 'Testing…' : '▶ Test bot'}
         </button>
       </div>
-      <div className="pro-scroll">
+      <div className="pro-scroll" ref={scrollRef}>
+        {arrived.length > 0 && (
+          <div className="bb2-arrived" role="status">
+            <ul>
+              {arrived.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+            <button className="btn ghost" onClick={() => setArrived([])}>
+              OK
+            </button>
+          </div>
+        )}
         <div className="bb2-body">
           <div className="bb2-canvas-wrap" ref={wrapRef} style={{ height: CH * scale }}>
             <div className="bb-canvas bb2-canvas" style={{ width: CW, height: CH, transform: `scale(${scale})` }}>
@@ -550,18 +565,6 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
           </aside>
         </div>
 
-        {arrived.length > 0 && (
-          <div className="bb2-arrived" role="status">
-            <ul>
-              {arrived.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
-            <button className="btn ghost" onClick={() => setArrived([])}>
-              OK
-            </button>
-          </div>
-        )}
         {err && <div className="lab-error">{err}</div>}
         {msg && <div className="lab-note">{msg}</div>}
 

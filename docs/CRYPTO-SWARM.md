@@ -156,3 +156,12 @@ the swarm, switch them on and off or remove them. The chain is fixed:
 A deployed strategy can never overrule the council, the forest or the risk
 manager. Its tested sizing (a volatility target or a VaR budget) can only ask
 for a **smaller** trade in a storm, never a bigger one.
+
+A deployed strategy reads live what it read in its backtest: its coin's
+closed candles, and — when its rules need them — **bitcoin's candles** on the
+same timeframe (the pairs rule, bitcoin's lead, the bitcoin market filter) and
+the coin's **funding history** from the exchange, refreshed hourly (funding
+carry, the crowding filter). If either cannot be fetched the Lab agent says
+so, and those rules wait rather than trade blind. The swarm's once-a-minute
+look at candles never overlaps itself: a look still downloading history when
+the next minute comes is joined, not started twice.

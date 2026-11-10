@@ -332,7 +332,7 @@ export function KellyPanel({ config: c, setConfig }: PanelProps<KellyConfig>) {
   const [payoff, setPayoff] = useState(2);
   const stratKelly = kellyBet(win / 100, payoff, 1);
   return (
-    <div className="pro-panel">
+    <div className="pro-panel kelly-panel">
       <Toolbar>
         <CoinsInput value={c.coins} onCommit={(coins) => setConfig({ coins })} />
         <NumberInput value={c.rf} step={0.5} min={0} width={56} onChange={(rf) => setConfig({ rf })} title="Risk-free rate, % a year" suffix="%" />

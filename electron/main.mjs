@@ -533,6 +533,13 @@ function registerIpc() {
   handle('lab:run', (_e, patch) => lab.run(patch ?? {}));
   handle('lab:cancel', () => lab.cancel());
   handle('lab:test', (_e, spec, patch) => lab.test(spec, patch ?? {}));
+  // candles from the Lab's own history cache (a year of hourly bars for the Quant desk's seasonality map)
+  handle('lab:bars', async (_e, coin, tf, years) => {
+    const c = String(coin ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+    const t = ['1h', '4h', '1d'].includes(tf) ? tf : '1h';
+    if (!c) throw new Error('no coin');
+    return lab.candles(c, t, Math.max(0.1, Math.min(3, Number(years) || 1)), 'auto');
+  });
   handle('lab:deploy', (_e, args, targets, coins) => lab.deploy(args ?? {}, targets, coins));
   handle('lab:undeploy', (_e, id) => lab.undeploy(String(id)));
   handle('lab:toggle', (_e, id, on) => lab.toggle(String(id), Boolean(on)));

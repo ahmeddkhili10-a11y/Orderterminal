@@ -769,6 +769,8 @@ export interface NovusApi {
     run(patch?: Partial<LabConfig>): Promise<LabStatus['last']>;
     cancel(): Promise<void>;
     test(spec: StrategySpec, patch?: Partial<LabConfig>): Promise<LabTest>;
+    /** candles from the Lab's history cache (topped up from the exchange): up to three years */
+    bars?(coin: string, tf: '1h' | '4h' | '1d', years: number): Promise<{ bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[]; source: string }>;
     deploy(args: { rank?: number; spec?: StrategySpec; tfH?: number; stats?: LabDeployed['stats']; authority?: Authority }, targets?: { crypto: boolean; meme: boolean }, coins?: string[]): Promise<string>;
     undeploy(id: string): Promise<void>;
     toggle(id: string, on: boolean): Promise<void>;

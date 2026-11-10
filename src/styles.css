@@ -6558,9 +6558,18 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
 .use-bot-opt.sent { border-color: color-mix(in srgb, var(--buy) 55%, transparent); background: color-mix(in srgb, var(--buy) 9%, transparent); }
 .use-bot-opt.sent b { color: var(--buy); }
 .use-bot-foot { font-size: 10.5px; color: var(--buy); padding: 4px 4px 0; }
-.bb2-arrived { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0 0; padding: 8px 11px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--pro-head, var(--accent)) 55%, transparent); background: color-mix(in srgb, var(--pro-head, var(--accent)) 9%, transparent); font-size: 12px; line-height: 1.45; }
+.bb2-arrived { display: flex; gap: 10px; align-items: flex-start; margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--pro-head, var(--accent)) 55%, transparent); background: color-mix(in srgb, var(--pro-head, var(--accent)) 9%, transparent); font-size: 12px; line-height: 1.45; }
 .bb2-arrived ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; flex: 1; }
 .bb2-arrived button { flex: none; }
 .bb2-tune { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 1px 0 5px 33px; font-size: 10.5px; color: var(--muted); }
 .bb2-tune .chip { padding: 1px 7px; font-size: 10.5px; }
 .bb2-tune em { font-style: normal; color: var(--pro-head, var(--accent)); }
+
+/* SEAS: the weekday × hour map */
+.seas-grid { display: grid; grid-template-columns: 34px repeat(24, minmax(0, 1fr)); gap: 2px; padding: 6px 10px 2px; align-items: center; }
+.seas-grid .seas-h { font: 600 9.5px var(--mono, monospace); color: var(--muted); background: transparent; border: 0; padding: 2px 0; cursor: pointer; border-radius: 3px; }
+.seas-grid .seas-h:hover, .seas-grid .seas-h.on { color: var(--pro-head, var(--accent)); background: color-mix(in srgb, var(--pro-head, var(--accent)) 14%, transparent); }
+.seas-grid .seas-d { font: 600 10px var(--mono, monospace); color: var(--muted); }
+.seas-grid i { display: block; height: 18px; border-radius: 2px; border: 1px solid color-mix(in srgb, var(--text) 8%, transparent); cursor: pointer; }
+.seas-grid i.on { border-color: var(--pro-head, var(--accent)); }
+.pair-table tbody tr, .seas-table tbody tr, .mc-ladder tbody tr { cursor: pointer; }

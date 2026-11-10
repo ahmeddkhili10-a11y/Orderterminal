@@ -39,6 +39,7 @@ import { LunoLane } from './LunoLane';
 import { BotBuilder, BOT_DEFAULTS } from '../pro/BotBuilder';
 import { CapmPanel, CAPM_DEFAULTS, EF_DEFAULTS, FrontierPanel, KellyPanel, KELLY_DEFAULTS } from '../pro/PortfolioPanels';
 import { NeuralPanel, NEURAL_DEFAULTS } from '../pro/NeuralPanel';
+import { MC_DEFAULTS, MonteCarloPanel, PAIR_DEFAULTS, PairPanel, SEASON_DEFAULTS, SeasonPanel } from '../pro/EdgePanels';
 
 import { BUILDER_DEFAULTS, LabBuilder, LabDeployed, LabLibrary, LabResearch, LIB_DEFAULTS, RESEARCH_PANEL_DEFAULTS } from '../pro/LabPanels';
 import { ProHelp } from '../pro/HelpPanel';
@@ -74,6 +75,9 @@ export const PANELS: PanelDef[] = [
   { id: 'luno', title: 'LUNO · Luno lane', category: 'Account', component: LunoLane, defaults: {}, description: 'Optional: crypto against rands on Luno — daily trend bots beside the swarm.' },
   { id: 'lablib', title: 'LIB · Strategy Library', category: 'Strategy Lab', component: LabLibrary, defaults: { ...LIB_DEFAULTS }, description: 'Every rule and filter in the Strategy Lab with the papers behind it and why it should work.' },
   { id: 'qnn', title: 'NNET · Neural network', category: 'Quant', component: NeuralPanel, defaults: { ...NEURAL_DEFAULTS }, description: 'Train a neural network on a coin’s candles and watch it learn; judged on data it never saw against a random forest and the two paired, with what it looks at and how well its odds hold up.' },
+  { id: 'qpair', title: 'PAIR · Pairs & cointegration', category: 'Quant', component: PairPanel, defaults: { ...PAIR_DEFAULTS }, description: 'Which coins are tied to bitcoin: the hedge ratio, the Engle–Granger test of whether the gap between them keeps closing, how fast, where the gap stands now, and who moves first. Sends a hedged pairs trade to the bot builder.' },
+  { id: 'qseas', title: 'SEAS · Seasonality', category: 'Quant', component: SeasonPanel, defaults: { ...SEASON_DEFAULTS }, description: 'The average return by hour of the day and weekday on a year of hourly candles, each with its t-statistic and an honest bar for having looked at 24 hours. Sends an hour to the bot builder as a strategy.' },
+  { id: 'qmc', title: 'MC · Monte Carlo', category: 'Quant', component: MonteCarloPanel, defaults: { ...MC_DEFAULTS }, description: 'A strategy’s trades resampled into 2,000 futures: how the account might grow, drawdowns, losing streaks, the odds of reaching a goal and of ruin — at each risk per trade. Runs on the bot builder’s last test or on a win rate and payoff.' },
   { id: 'labflow', title: 'BOT · Bot builder', category: 'Strategy Lab', component: BotBuilder, defaults: { ...BOT_DEFAULTS }, description: 'Build a crypto bot in plain English, block by block like n8n: trading style → strategy → market model → forecast → risk → rules → backtest → deploy.' },
   { id: 'labresearch', title: 'RSCH · Research', category: 'Strategy Lab', component: LabResearch, defaults: { ...RESEARCH_PANEL_DEFAULTS }, description: 'Search published rules and their combinations on years of history; rank the top five with out-of-sample tests, Monte Carlo and a deflated Sharpe ratio; deploy them.' },
   { id: 'labbuilder', title: 'BT · Backtest Builder', category: 'Strategy Lab', component: LabBuilder, defaults: { ...BUILDER_DEFAULTS }, description: 'Build a strategy from the library by hand — entry, filters, exits — and backtest it in and out of sample.' },
