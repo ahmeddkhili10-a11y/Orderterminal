@@ -164,4 +164,6 @@ the coin's **funding history** from the exchange, refreshed hourly (funding
 carry, the crowding filter). If either cannot be fetched the Lab agent says
 so, and those rules wait rather than trade blind. The swarm's once-a-minute
 look at candles never overlaps itself: a look still downloading history when
-the next minute comes is joined, not started twice.
+the next minute comes is joined, not started twice. A strategy tested on
+15-minute candles reads 15-minute candles live and is looked at every minute
+(hourly ones every four minutes, daily ones every ten).

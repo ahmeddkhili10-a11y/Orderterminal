@@ -6575,8 +6575,8 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
 .pair-table tbody tr, .seas-table tbody tr, .mc-ladder tbody tr { cursor: pointer; }
 
 /* deploy, where the test result is */
-.bb2-deploy-top:not(:disabled) { border-color: var(--buy); color: var(--buy); }
-.bb2-deploy-top.t-bad:not(:disabled) { border-color: var(--sell); color: var(--sell); }
+.bb2-deploy-top:not(:disabled) { background: var(--buy); border-color: var(--buy); color: #000; }
+.bb2-deploy-top.t-bad:not(:disabled) { background: transparent; border-color: var(--sell); color: var(--sell); }
 .bb2-deploy-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 8px 6px; padding: 8px 12px; border-radius: 8px; border: 1px dashed var(--border); font-size: 12px; }
 .bb2-deploy-bar > span:first-child { flex: 1; min-width: 220px; color: var(--muted); }
 .bb2-deploy-bar > span:first-child b { color: var(--text); }

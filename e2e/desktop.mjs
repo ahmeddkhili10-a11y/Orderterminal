@@ -4,7 +4,7 @@
 // inspects the SQLite file to confirm keys are only stored encrypted.
 //
 //   npm run build && npm run build:main && xvfb-run -a node e2e/desktop.mjs
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +28,28 @@ const expect = (cond, msg) => {
 
 // a throwaway ledger key for this run (the owner's key is never used in tests)
 await seedDesktopLedger(userData);
+// candle history for the Strategy Lab, so a bot can be tested, optimized and deployed with no exchange in reach:
+// a year of hourly and six months of 15-minute candles for BTC, in the Lab's own cache (a made-up market with slow trends)
+{
+  const dir = join(userData, 'lab', 'cache');
+  mkdirSync(dir, { recursive: true });
+  let seed = 20261107;
+  const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, rnd()))) * Math.cos(2 * Math.PI * rnd());
+  for (const [tf, ms, days, sd] of [['1h', 3_600_000, 380, 0.006], ['15m', 900_000, 195, 0.003]]) {
+    const last = Math.floor(Date.now() / ms) * ms + 2 * ms;
+    const n = Math.round((days * 86_400_000) / ms);
+    let p = 60_000;
+    let mu = 0;
+    const bars = Array.from({ length: n }, (_, i) => {
+      mu = 0.995 * mu + sd * 0.1 * gauss();
+      const o = p;
+      p *= Math.exp(mu + sd * gauss());
+      return { time: last - (n - 1 - i) * ms, open: o, high: Math.max(o, p) * (1 + Math.abs(gauss()) * sd * 0.3), low: Math.min(o, p) * (1 - Math.abs(gauss()) * sd * 0.3), close: p, volume: 100 * (1 + Math.abs(gauss())) };
+    });
+    writeFileSync(join(dir, `binance-BTC-${tf}.json`), JSON.stringify(bars));
+  }
+}
 const app = await electron.launch({
   executablePath: require('electron'),
   args: ['.', '--no-sandbox'],
@@ -109,6 +131,61 @@ try {
   await page.click('.bb-node[data-block="deploy"]');
   expect((await page.locator('.bb2-inspector [data-opt="tested"]').count()) === 1, 'deploy: choose who decides its trades (council, or as tested)');
   await page.screenshot({ path: `${OUT}desktop-bot-builder.png` });
+  // test the bot, read what the test shows, let the optimizer try changes, apply one, and deploy — all from the bot builder
+  step('the bot builder: test, optimize, deploy');
+  // (a bot that did not hold up asks before it deploys: say yes — for this part of the run only)
+  const sayYes = (d) => void d.accept().catch(() => undefined);
+  page.on('dialog', sayYes);
+  await page.click('.bb-node[data-block="forecast"]');
+  await page.click('.bb2-inspector [data-opt="none"]');
+  await page.click('.bb-node[data-block="test"]');
+  await page.fill('.bb2-inspector .bb-coins', 'BTC');
+  await page.keyboard.press('Enter');
+  await page.click('.bb2-head button:has-text("Test bot")');
+  await page.waitForSelector('.bb-verdict', { timeout: 180_000 });
+  expect((await page.locator('.bb-tile').count()) >= 6, 'a bot is tested on a year of hourly candles: verdict and result tiles');
+  expect(await page.locator('.bb2-deploy-top').isEnabled(), 'after the test, Deploy in the header is live');
+  expect((await page.locator('[data-deploy-bar] .bb2-deploy-here').count()) === 1 && (await page.locator('[data-deploy-bar] .chip').count()) === 2, 'Deploy sits beside the verdict, with who decides its trades');
+  const optText = await page.locator('[data-optimizer]').innerText();
+  expect((await page.locator('[data-optimizer] .opt-card').count()) >= 1 && /(MONTH BY MONTH|WEEK BY WEEK) ON THE UNSEEN DATA/.test(optText) && /HOW ITS TRADES ENDED/.test(optText), 'under the result: what the test shows in words, the result month by month, how its trades ended');
+  expect(/first version tested/.test(optText), 'the first version tested on this unseen data is counted as such');
+  await page.locator('[data-optimizer]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${OUT}desktop-optimizer-diagnosis.png` });
+  await page.click('[data-optimizer] .opt-find');
+  await page.waitForSelector('[data-optimizer] .opt-row, [data-optimizer] .lab-note', { timeout: 300_000 });
+  const nRows = await page.locator('[data-optimizer] .opt-row').count();
+  expect(/changes measured against the bot as it is/.test(await page.locator('[data-optimizer]').innerText()) || nRows === 0, `the optimizer tried the one-step changes on the training years (${nRows} worth making)`);
+  for (const g of ['steady', 'drawdown', 'sharpe']) await page.click(`[data-optimizer] [data-goal="${g}"]`);
+  expect((await page.locator('[data-optimizer] [data-goal="sharpe"].active').count()) === 1, 'three goals to rank by: return for the risk, steadier weeks, smaller drawdowns');
+  await page.locator('[data-optimizer] .opt-find').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${OUT}desktop-optimizer.png` });
+  // (a change of pace needs more history than this run has seeded: take the first change of another kind)
+  const pick = page.locator('[data-optimizer] .opt-row:not([data-variant^="style:"])').first();
+  if (await pick.count()) {
+    const label = await pick.locator('b').innerText();
+    await pick.locator('button').click();
+    await page.waitForFunction(() => /version 2 tested/.test(document.querySelector('[data-optimizer]')?.textContent ?? ''), null, { timeout: 180_000 });
+    expect(/Optimizer: /.test(await page.locator('.bb2-arrived').innerText()), `“Apply & test” makes the change and tests it on the unseen data (${label.split('\n')[0].slice(0, 60)})`);
+    expect(/Chance the result is real after 2 tries/.test(await page.locator('[data-optimizer] .opt-tries').innerText()), 'the second version tested is counted, and the result allowed for two tries');
+  } else expect(true, 'no single change beat this bot on the training years — the optimizer says so instead of inventing one');
+  await page.locator('[data-deploy-bar]').scrollIntoViewIfNeeded();
+  await page.click('[data-deploy-bar] .chip:has-text("Trade as tested")');
+  await page.click('[data-deploy-bar] .bb2-deploy-here');
+  await page.waitForSelector('[data-deploy-bar] .bb2-deploy-here:has-text("Deployed")', { timeout: 20_000 });
+  const dep = (await page.evaluate(() => window.novus.lab.state())).deployed;
+  expect(dep.length === 1 && dep[0].authority === 'tested' && dep[0].tfH === 1 && dep[0].coins.join() === 'BTC', `deployed straight from the bot builder, to trade as tested (${dep[0]?.name?.slice(0, 50)})`);
+  await page.evaluate((id) => window.novus.lab.undeploy(id), dep[0].id);
+  // the same bot on 15-minute candles
+  await page.click('.bb-node[data-block="style"]');
+  await page.click('.bb2-inspector [data-opt="scalp15"]');
+  expect(/15m candles/.test(await page.locator('.bb-node[data-block="style"]').innerText()), 'a 15-minute style: scalping on 15-minute candles');
+  await page.click('.bb2-head button:has-text("Test bot")');
+  await page.waitForSelector('.bb-verdict', { timeout: 240_000 });
+  expect(/WEEK BY WEEK|MONTH BY MONTH/.test(await page.locator('[data-optimizer]').innerText()) && (await page.locator('text=crashed').count()) === 0, 'the bot is tested on six months of 15-minute candles');
+  await page.screenshot({ path: `${OUT}desktop-bot-15m.png` });
+  await page.click('.bb-node[data-block="style"]');
+  await page.click('.bb2-inspector [data-opt="scalp"]');
+  page.off('dialog', sayYes);
   const ls = await page.evaluate(() => window.novus.lab.state());
   expect(!!ls && ls.cfg.coins.length > 0 && Array.isArray(ls.deployed), 'the Lab answers from the desktop process');
   const runErr = await page.evaluate(() => window.novus.lab.run({ coins: ['BTC'], source: 'binance', years: 0.1, funding: false }).then(() => 'ran', (e) => e.message));

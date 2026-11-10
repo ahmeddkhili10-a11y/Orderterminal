@@ -71,7 +71,7 @@
 <!-- ============ copyright / about ============ -->
 <section>
   <div style="padding-top:36px">
-    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.1</div>
+    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.2</div>
     <h1 style="font-size:22pt">About this manual</h1>
     <p>This manual explains how to use every part of Novus Ordo, the professional crypto trading terminal: the market terminal, the Quant desk, the Strategy Lab and its bot builder, the crypto swarm, and the wallet and exchange connections that link it to your accounts. It is written in plain English. Where a technical term is unavoidable, it is explained where it first appears and again in the glossary at the back.</p>
     <p>Each chapter starts with what a part of the terminal is for, then shows how to use it step by step. Function codes — short names you type on the command line, such as <code>VAR</code> or <code>BOT</code> — appear in a box like this so you can find them on screen.</p>
@@ -347,14 +347,14 @@
   <p>The bot builder is a canvas of eight connected blocks. Click a block and its options open in the panel on the right, each explained in plain English (tick <b>Explain</b>). A block can hold several choices.</p>
   <figure><img src="img/bb-2-pair.jpg" /><figcaption>The bot builder: eight blocks on the canvas, the selected block's options on the right, the compatibility check underneath.</figcaption></figure>
   <ol class="steps">
-    <li><b>Trading style</b> — scalping (hours), intraday, swing (a few days), one-week trades, position (weeks to months) or long-term hold (up to a year). The style sets the candle size, look-backs, holding time, stop width and years of history for every other block.</li>
-    <li><b>Strategies</b> — the entry rules, 29 in all: trend following, breakouts, buying dips and selling rallies, timing and seasons, funding, trades against bitcoin, and AI (neural network, random forest, linear and next-candle forecasts). Pick one or several; several are joined by <b>all must agree</b>, <b>majority vote</b> or <b>any one</b>. Where the neural network is picked, its size and how far ahead it looks can be set under it.</li>
+    <li><b>Trading style</b> — scalping or intraday on <b>15-minute candles</b>, scalping (hours) or intraday on 1-hour candles, swing (a few days), one-week trades, position (weeks to months) or long-term hold (up to a year). The style sets the candle size, look-backs, holding time, stop width and years of history for every other block.</li>
+    <li><b>Strategies</b> — the entry rules, 33 in all: trend following, breakouts, buying dips and selling rallies, the day's own structure (VWAP, the opening range), timing and seasons, funding, trades against bitcoin, and AI (neural network, random forest, linear and next-candle forecasts). Pick one or several; several are joined by <b>all must agree</b>, <b>majority vote</b> or <b>any one</b>. Where the neural network is picked, its size and how far ahead it looks can be set under it.</li>
     <li><b>Market models</b> — when the bot may trade: with the big trend, trending or ranging markets (ADX), statistical regimes (variance ratio, Hurst, hidden-Markov), calm or stormy volatility (GARCH), bitcoin's own trend (the market), activity, trading hours, weekdays or weekends, and funding crowding. Every filter you pick must allow a trade.</li>
     <li><b>Forecasts &amp; AI</b> — second opinions that must agree, and an <b>AI decision maker</b> that learns from the bot's own past trades which signals to skip: the decision forest, the neural network, or both paired. It is kept only if it passes a check inside the training years (it must help on the last part of them). The unseen data is never used to choose it, so the result you read is not flattered by the choice.</li>
     <li><b>Risk management</b> — steady risk (volatility targeting), a daily loss cap (value at risk), half Kelly, storm-aware GARCH stops, a bitcoin hedge; two sizing rules can be combined (the smaller size wins). Also the stop width and how money is split across coins (equally, by calm, minimum variance or the efficient frontier).</li>
     <li><b>Rules of engagement</b> — long and short or one side only; let winners run or take profit at 1.5, 2 or 3 times the risk; holding time; whether an opposite signal closes the trade.</li>
     <li><b>Backtest</b> — choose the coins and press <b>Run backtest</b> (or <b>▶ Test bot</b> at the top).</li>
-    <li><b>Deploy</b> — available only after a backtest (see "Deploying a strategy").</li>
+    <li><b>Deploy</b> — as soon as a test is back, <b>⇢ Deploy</b> lights up in the bot builder's header and beside the verdict (see "Deploying a strategy").</li>
   </ol>
   <h3>Strategies built on crypto research</h3>
   <p>Besides the classic rules, the library holds rules taken from published studies of crypto markets. Each shows its papers in <code>LIB</code>, and each must still pass the Lab's test on your coins.</p>
@@ -369,6 +369,16 @@
     <tr><td><b>Bitcoin leads, the coin catches up</b></td><td>When bitcoin has moved and a coin has not yet followed, trades the coin in bitcoin's direction.</td></tr>
   </table>
   <p>The last two read bitcoin's price, so BTC is added to the coins tested (they do not trade BTC itself). Rules with their own holding time — the two evening hours, one day for the big-day and new-high rules — are never held longer than that, whatever the trading style.</p>
+  <h3>Intraday trading: 15-minute candles</h3>
+  <p>Two styles trade on 15-minute candles: <b>Scalping — 15-minute candles</b> (trades over within a couple of hours, tested on six months of history) and <b>Intraday — 15-minute candles</b> (several trades a day, none held overnight, tested on a year). Every strategy and filter works at this speed, and four rules are made for it:</p>
+  <table>
+    <tr><th style="width:30%">Strategy</th><th>What it does</th></tr>
+    <tr><td><b>VWAP trend</b></td><td>Long while price is above the day's volume-weighted average price (what the average buyer paid today), short while below.</td></tr>
+    <tr><td><b>Opening range breakout</b></td><td>The first two hours of the day set a range; trades the first close beyond it, in that direction, for the rest of the day. One trade a day.</td></tr>
+    <tr><td><b>Intraday momentum beyond the noise</b></td><td>Trades when the day's move is bigger than is normal for that time of day over the last two weeks.</td></tr>
+    <tr><td><b>Fade a stretched candle</b></td><td>After one unusually big candle on heavy volume, bets on part of it coming back within the hour.</td></tr>
+  </table>
+  <div class="box warn"><b>Faster is not automatically better</b>On 15-minute candles a bot trades many times a day, and every trade pays fees and slippage. Many ideas that look good on a chart make nothing after costs. The test counts them, and the line under "How its trades ended" tells you what share of the profit they took — if it says 80 % or more, the idea is too small for its speed.</div>
   <h3>The compatibility check</h3>
   <p>Every pick is checked against the others as you make it, and each option is tagged before you choose it:</p>
   <ul>
@@ -391,6 +401,21 @@
   </table>
   <p>Below the tiles, <b>Measured on the data</b> shows each strategy alone and together, how two strategies actually related (correlation and how often they agreed), what each filter added, and how each AI decision maker did. If the bot did much better on the data it was built on than on new data, the Lab says so: that is a sign of over-fitting.</p>
   <figure><img src="img/bb-10-verdict.jpg" /><figcaption>A tested bot: the compatibility check, the bot in words, the verdict and the result tiles.</figcaption></figure>
+  <h2 data-toc>Optimizing a bot</h2>
+  <p>Under every test result the Lab reads the result back to you and offers ways to improve the bot. It appears on its own as soon as a test finishes.</p>
+  <ol class="steps">
+    <li><b>Read what the test shows.</b> Cards in plain words: for example "70 % of trades end at the stop", "the short trades lose", "fees and slippage eat 90 % of the profit", "only 41 % of weeks made money". Each says what usually fixes it.</li>
+    <li><b>Look at the result month by month</b> (week by week on short histories): each period's return, how many made money, and the worst one. This is what "a return every month" really looked like for this bot.</li>
+    <li><b>Choose a goal</b>: more return for the risk, a steadier result (more winning weeks), or smaller drawdowns.</li>
+    <li>Press <b>🔍 Find improvements</b>. The Lab makes every sensible one-step change to the bot — a wider or tighter stop, another exit, long only, each market filter added or removed, a second opinion, volatility sizing, each strategy's settings one step up and down, another pace — and measures each one.</li>
+    <li>Each change worth making is listed with its numbers before and after. Prefer the ones marked <b>✓ also better on the earlier years</b>. Press <b>Apply &amp; test</b> on one: the bot is changed and tested again.</li>
+    <li>When you are satisfied, press <b>⇢ Deploy</b>.</li>
+  </ol>
+  <figure><img src="img/opt-diagnosis.jpg" /><figcaption>Under a test: the diagnosis in words, the result week by week on the unseen data, and how the bot's trades ended on the training years.</figcaption></figure>
+  <figure><img src="img/opt-changes.jpg" /><figcaption>The optimizer's list: each change, why it might help, the numbers before and after, and whether it also held on the earlier years.</figcaption></figure>
+  <div class="box tip"><b>Why it can be trusted</b>The optimizer never looks at the data your bot is judged on. It measures changes inside the training years only (fitting on the first part of them and scoring on the last part), so a change you apply still gets an honest test afterwards.</div>
+  <div class="box warn"><b>Do not over-optimize</b>Every version of a bot you test on the same unseen data makes it likelier that the best one looks good by luck. The Lab counts your versions and shows "chance the result is real after N tries" — watch that number, not just the Sharpe ratio. Apply one change at a time, and stop when the improvements get small. No optimizer can promise a profit every month; it can only show you how regular a bot has been and which changes made it steadier.</div>
+  <p>Research results have the same optimizer: open a ranked strategy in <code>RSCH</code>, press <b>Find improvements</b>, <b>Test this version</b>, then <b>Deploy this version</b>.</p>
   <h2 data-toc>Research runs</h2>
   <ol class="steps">
     <li>Open <code>RSCH</code>. Choose the coins, the timeframe, the years of history and how many mixes to try.</li>
@@ -401,7 +426,7 @@
   <figure><img src="img/research.jpg" /><figcaption>Research: the top five with their verdicts, the selected strategy's rules and its equity against buy-and-hold.</figcaption></figure>
   <h2 data-toc>Deploying a strategy</h2>
   <ol class="steps">
-    <li>From the bot builder's <b>Deploy</b> block, from Research (<b>Deploy → Crypto swarm</b>), or from the swarm's deploy gate.</li>
+    <li>Straight from the bot builder: once a test is back, press <b>⇢ Deploy</b> in its header or <b>⇢ Deploy to the crypto swarm</b> beside the verdict — the bot builder's test is the same test the backtester runs, so nothing else is needed first. You can also deploy from Research (<b>Deploy → Crypto swarm</b>) or from the swarm's deploy gate.</li>
     <li>Choose <b>who decides its trades</b>:
       <ul>
         <li><b>Council decides</b> — the strategy proposes; the swarm's council votes and the forest can veto. Safer while a strategy is unproven.</li>
@@ -684,6 +709,7 @@
     <div><dt>Order flow</dt><dd>The actual buying and selling — who is aggressive, at what prices, in what size.</dd></div>
     <div><dt>Over-fitting</dt><dd>A strategy tuned so closely to past data that it fails on new data.</dd></div>
     <div><dt>Pairs trade</dt><dd>Buying one asset and selling a related one, betting the gap between them closes; the market's direction cancels out.</dd></div>
+    <div><dt>Opening range</dt><dd>The high and low of the first hour or two of the trading day; a break of it often sets the day's direction.</dd></div>
     <div><dt>Paper trading</dt><dd>Trading with simulated money at real prices.</dd></div>
     <div><dt>Perpetual future</dt><dd>A futures contract with no expiry, kept near the spot price by funding.</dd></div>
     <div><dt>POC (point of control)</dt><dd>The price with the most volume traded in a session.</dd></div>
@@ -696,6 +722,7 @@
     <div><dt>Testnet</dt><dd>An exchange's practice environment with free test money.</dd></div>
     <div><dt>Value area</dt><dd>The price range where 70 % of a session's volume traded.</dd></div>
     <div><dt>Value at risk (VaR)</dt><dd>The loss not expected to be exceeded at a chosen confidence over a chosen time.</dd></div>
+    <div><dt>VWAP</dt><dd>Volume-weighted average price: the average price paid today, counting each trade by its size.</dd></div>
     <div><dt>Volatility</dt><dd>How much price moves; usually given as a yearly percentage.</dd></div>
     <div><dt>Volatility targeting</dt><dd>Sizing positions so the portfolio's risk stays near a chosen level.</dd></div>
   </dl>
@@ -710,7 +737,7 @@
     <p style="margin-top:40px;font-size:10pt;color:#5a6371;letter-spacing:0.2em;text-transform:uppercase">Conceived, designed and constructed by</p>
     <p style="font-family:'Inter Display','Inter',sans-serif;font-size:26pt;font-weight:700;margin:6px 0 4px">Quincy Gininda</p>
     <p style="max-width:420px;margin:24px auto 0;color:#4a5361">The market terminal, the Quant desk, the Strategy Lab and bot builder, the crypto swarm and its agents, and this manual are the work of Quincy Gininda.</p>
-    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.1 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
+    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.2 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
   </div>
 </section>
 

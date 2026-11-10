@@ -26,9 +26,10 @@ block and its options open in the inspector on the right, all in plain
 English (tick **Explain** to see what each one does). A block can hold
 **several picks**:
 
-1. **Trading style** — scalping (hours), intraday, swing (a few days), one-week
+1. **Trading style** — scalping or intraday on **15-minute candles**, scalping
+   (hours) or intraday on 1-hour candles, swing (a few days), one-week
    trades, position (weeks to months) or a long-term hold (up to a year). The
-   style sets everything else's pace: the candles (1 h, 4 h or 1 day), the
+   style sets everything else's pace: the candles (15 min, 1 h, 4 h or 1 day), the
    look-backs, the holding time, the stop width and the years of history.
 2. **Strategies** — every entry rule in the library (trend following,
    breakouts, buy the dip / sell the rip, timing, funding, AI — the neural
@@ -82,6 +83,68 @@ Not yet), the return a year against buy-and-hold, the worst drop, the win rate,
 the trades, the Sharpe ratio, the chance it is luck and of a losing run, the
 equity curve and each coin.
 
+## 15-minute candles and the intraday rules
+
+The Lab runs on 15-minute candles as well as 1-hour, 4-hour and daily ones: in
+the research run (`15 minutes`, a year of history at most — 35,000 candles a
+coin), in two bot builder styles (**scalping** and **intraday** on 15-minute
+candles) and live, where a deployed strategy reads its own timeframe from the
+exchange and is looked at every minute. Rules timed by the clock (the evening
+hours, end-of-day momentum, the Monday rule) fire on the candle that closes at
+the hour, whatever the candle size.
+
+Four rules trade the day's own structure (the "day" starts at 00:00 UTC, or
+with the US session at 13:00):
+
+| Rule | Family | Papers | What it does |
+|---|---|---|---|
+| VWAP trend | trend | Aziz & Zarattini (2023); Zarattini, Aziz & Barbon (2024) | long while price is above the day's volume-weighted average price, short while below |
+| Opening range breakout | breakout | Zarattini & Aziz (2023); Zarattini, Barbon & Aziz (2024); Crabel (1990) | the first hour or two set a range; trade the first close beyond it for the rest of the day |
+| Intraday momentum beyond the noise | momentum | Zarattini, Aziz & Barbon (2024) | trade a move from the day's open bigger than the average move by that time of day over the last 14 days |
+| Fade a stretched candle | reversion | Kitron & Wengrowicz (2026, preprint); Wen et al. (2022) | after one candle of more than k ATR (on heavy volume), trade against it for an hour |
+
+The first three were published on US index funds and stocks by authors with a
+trading business; the fourth is a crypto preprint whose own finding is that the
+edge (about 1.3 basis points a trade) is smaller than the fees. They are in the
+library because they are what intraday traders actually use — and the Lab's
+test, with fees and slippage counted, is what decides. At 15 minutes costs take
+a large share of every trade: the diagnosis under each test says how large.
+
+## The optimizer: what a test shows, and what to try
+
+Under every bot test (and every research result) the Lab now reads the result
+back:
+
+- **What the test shows**, in words — from how the trades went on the
+  *training* years: what ended them (stop, target, trailing stop, time, an
+  opposite signal) and what each ending made, longs against shorts, winners'
+  and losers' holding times, each coin, the trades a month, and the share of
+  the profit that fees and slippage took.
+- **Month by month** (week by week on short histories) on the unseen data:
+  each period's return, the share that made money, the worst one. A yearly
+  figure made by two good months is not a monthly income, and this shows it.
+- **Try changes.** `Find improvements` makes every sensible one-step change to
+  the bot — a wider or tighter stop, each exit, long only, each market filter
+  added or removed, a second opinion, volatility sizing, each strategy's
+  settings one step up and down the values its paper used, another pace on the
+  same candles, a losing coin left out — and measures each one **inside the
+  training years**: models are fitted on the first 70 % of them and every
+  version is scored on the last 30 %. The unseen data is not read. Changes are
+  ranked by the goal chosen — more return for the risk, steadier (more winning
+  weeks, a milder worst week), or smaller drawdowns — and marked when they
+  also beat the bot on the earlier training years.
+- **Apply & test** makes one change and tests the new bot on the unseen data.
+  Every version tested there is counted, and the "chance the result is real"
+  is deflated for the number tried (Bailey & López de Prado 2014): the tenth
+  version of a bot to look good is worth much less than the first.
+
+What it cannot do is promise a return every month. It can show how regular a
+bot has been and rank changes by regularity; markets decide the rest.
+
+**Deploy** is in the bot builder's header and beside the verdict as soon as a
+test is back — the test is the same one the backtester runs, so nothing else
+is needed first.
+
 ## From the Quant desk into a bot ("Use in a bot")
 
 Every Quant desk function has a **⇢ Use in a bot** button. It sends the model
@@ -129,7 +192,7 @@ because the swarm already held the coin.
 
 ## The library
 
-Twenty-nine entry rules and thirteen filters, each written from its paper:
+Thirty-three entry rules and thirteen filters, each written from its paper:
 
 | Rule | Family | Papers |
 |---|---|---|

@@ -481,7 +481,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
         <button className="btn bb2-primary" disabled={busy || blocked} onClick={() => run()}>
           {busy ? 'Testing…' : '▶ Test bot'}
         </button>
-        <button className={`btn bb2-deploy-top${res && v ? ` t-${v.tone}` : ''}`} disabled={!res || busy} onClick={deploy} title={res ? `Deploy this bot to the crypto swarm (${c.authority === 'tested' ? 'to trade as tested' : 'the council decides its trades'}) — change who decides in the Deploy block` : 'Test the bot first: a bot can only be deployed with its test result'}>
+        <button className={`btn bb2-primary bb2-deploy-top${res && v ? ` t-${v.tone}` : ''}`} disabled={!res || busy} onClick={deploy} title={res ? `Deploy this bot to the crypto swarm (${c.authority === 'tested' ? 'to trade as tested' : 'the council decides its trades'}) — change who decides in the Deploy block` : 'Test the bot first: a bot can only be deployed with its test result'}>
           {deployed ? '✓ Deployed' : '⇢ Deploy'}
         </button>
       </div>
