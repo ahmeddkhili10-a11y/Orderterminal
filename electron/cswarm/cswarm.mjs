@@ -22,7 +22,8 @@ import { AmtEngine, INTRADAY_PRESET } from '../amt/engine.mjs';
 import { AGENT_NAME, CCOUNCIL_DEFAULTS, councilR, dirOf, features, MARK, oddsR, PROPOSERS, rClass, trainForest } from './brain.mjs';
 import { newBook, recordClose, RISK_DEFAULTS, riskGate, shiftBook, sizeTrade, updateBook } from './risk.mjs';
 import { atrOf, dailyTrendOf, manageTrend, Shadow, TREND_AGENT_DEFAULTS, trendCandidate } from './agents.mjs';
-import { liveDirection, liveSignal, manageLab } from '../../src/lab/live.ts';
+import { liveDirection, liveMarket, liveSignal, manageLab, specNeeds } from '../../src/lab/live.ts';
+import { alignFunding } from '../lab/lab.mjs';
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -292,7 +293,20 @@ export class CryptoSwarm {
   }
 
   /** Every minute: candles, the Trend agent, the account, the books, learning. */
-  async slow() {
+  /**
+   * The once-a-minute look at candles and deployed strategies. Only one runs at
+   * a time: a first run that is still downloading history when the next minute
+   * comes is joined, not doubled.
+   */
+  slow() {
+    if (this.slowRun) return this.slowRun;
+    this.slowRun = this.slowOnce().finally(() => {
+      this.slowRun = null;
+    });
+    return this.slowRun;
+  }
+
+  async slowOnce() {
     if (!this.running) return;
     const now = this.now();
     const c = this.cfg;
@@ -361,8 +375,14 @@ export class CryptoSwarm {
         continue;
       }
       const closed = L.bars.filter((b) => b.time + tfH * HOUR <= now);
-      const market = { coin: cs.coin, tfH, bars: closed, funding: null };
-      for (const d of strategies.filter((x) => x.tfH === tfH)) {
+      // what these strategies read beside the coin's candles: bitcoin's price (pairs, bitcoin's lead, the
+      // market filter) and the funding history (carry, crowding) — as in their backtest
+      const mine = strategies.filter((x) => x.tfH === tfH);
+      const needs = mine.map((d) => specNeeds(d.spec));
+      const btc = needs.some((x) => x.bench) && cs.coin !== 'BTC' ? await this.labBench(tfH, tf, now) : null;
+      const funding = needs.some((x) => x.funding) ? await this.labFunding(cs, closed, tfH, now) : null;
+      const market = liveMarket(cs.coin, tfH, closed, { btc, funding });
+      for (const d of mine) {
         const pos = this.openOn(cs.coin);
         // an opposite signal closes the Lab's own trade, if the rules say so
         if (pos && pos.agent === 'lab' && pos.labId === d.id && d.spec.exit.onFlip && !pos.closing) {
@@ -378,6 +398,40 @@ export class CryptoSwarm {
         this.propose(cs.coin, 'lab', { ...sig, price, stop: sig.stop + shift, target: sig.target + shift, setup: `Lab · ${sig.setup}`, why: `${sig.why}${stats}`, labId: d.id, labTfH: tfH, labHoldMs: d.spec.exit.maxBars * tfH * HOUR, authority: d.authority === 'tested' ? 'tested' : 'council' });
       }
     }
+  }
+
+  /** bitcoin's candles on a timeframe, shared by every coin's Lab strategies that read them */
+  async labBench(tfH, tf, now) {
+    const B = ((this.bench ??= {})[tfH] ??= { bars: [], at: 0 });
+    const symbol = symbolFor('BTC', this.cfg.exchangeId);
+    try {
+      if (!B.bars.length) {
+        B.bars = await this.ccxt.history(this.cfg.exchangeId, symbol, tf, now - 3000 * tfH * HOUR, 3000);
+        B.at = now;
+      } else if (now - B.at >= 10 * MIN) {
+        const fresh = await this.ccxt.ohlcv(this.cfg.exchangeId, symbol, tf, 10);
+        B.bars = [...B.bars.filter((b) => b.time < (fresh[0]?.time ?? Infinity)), ...fresh].filter((b, i, a) => i === 0 || b.time > a[i - 1].time).slice(-3000);
+        B.at = now;
+      }
+    } catch (err) {
+      this.sayOnce(`lab:bench:${tf}`, 'lab', `bitcoin's ${tf} candles are unavailable (${err?.message ?? err}) — strategies that read bitcoin beside a coin wait for them`, 'warn', 30 * MIN);
+    }
+    return B.bars.length ? B.bars.filter((b) => b.time + tfH * HOUR <= now) : null;
+  }
+
+  /** the funding paid per candle on this coin (the exchange's history, refreshed hourly), lined up with its candles */
+  async labFunding(cs, closed, tfH, now) {
+    const F = (cs.fund ??= { rows: [], at: 0 });
+    if (!F.rows.length || now - F.at >= HOUR) {
+      try {
+        if (!this.ccxt.fundingHistory) throw new Error('no funding history on this connection');
+        F.rows = await this.ccxt.fundingHistory(this.cfg.exchangeId, cs.symbol, now - 45 * 24 * HOUR, 3000);
+        F.at = now;
+      } catch (err) {
+        this.sayOnce(`lab:fund:${cs.coin}`, 'lab', `${cs.coin}: funding history unavailable (${err?.message ?? err}) — funding rules cannot fire without it`, 'warn', 60 * MIN);
+      }
+    }
+    return F.rows.length && closed.length ? alignFunding(closed, F.rows, tfH) : null;
   }
 
   async refreshEquity() {

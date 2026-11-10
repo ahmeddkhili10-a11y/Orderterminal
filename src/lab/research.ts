@@ -23,7 +23,7 @@ import { backtest, COSTS, rawSignal, type BTResult, type Costs, type Sizing, typ
 import { candleForecast, type CandleReport } from './candles';
 import { forecastTest, garchVar, horizonVol, hourProfile, simulate, valueAtRisk, type ForecastTest } from './garch';
 import { barsPerYear, ctxOf, EXIT_DEFAULT, features, FEATURES, FILTER_MAP, FILTERS, garchOf, gridOf, logRet, SIGNAL_MAP, SIGNALS, type Ctx, type ExitSpec, type Market, type Params, type SignalDef } from './library';
-import { fitForest, fitMLP, metaOdds, predictForest, regress, rngOf, type ForestModel, type MetaModel } from './ml';
+import { fitForest, fitMLP, metaOdds, regress, rngOf, type ForestModel, type MetaModel } from './ml';
 import { efficientFrontier, meanCov } from './quant';
 import { deflatedSharpe, monteCarlo, pbo, perf, randomEntryTest, type MonteCarlo, type Perf } from './stats';
 
@@ -53,6 +53,9 @@ export interface MetaInfo {
   oosSharpeBefore: number;
   oosSharpeAfter: number;
   tradesAfter: number;
+  /** the check that decides whether it is kept: the Sharpe ratio on the last 30 % of the training bars without and with it (null: too few trades to check) */
+  valBefore?: number | null;
+  valAfter?: number | null;
   oob: number | null;
   base: number;
   importance: [string, number][];
@@ -191,15 +194,86 @@ function pool(per: { bt: BTResult; m?: Market }[], weights?: Record<string, numb
   return { rets: Float64Array.from(times, (t) => acc.get(t)![0] / acc.get(t)![1]), times };
 }
 
-function runAll(ctxs: Ctx[], spec: StrategySpec, part: 'is' | 'oos' | 'all', costs: Costs, gate?: (c: Ctx, i: number, side: 1 | -1) => boolean): Run {
+/** where the validation part of the training bars starts: their last 30 % */
+const valStart = (c: Ctx) => Math.max(50, Math.floor(c.trainEnd * 0.7));
+
+/** is: the training bars · val: the last 30 % of the training bars · oos: the unseen bars · all: everything */
+function runAll(ctxs: Ctx[], spec: StrategySpec, part: 'is' | 'val' | 'oos' | 'all', costs: Costs, gate?: (c: Ctx, i: number, side: 1 | -1) => boolean): Run {
   const per = ctxs.map((c) => {
     const n = c.m.bars.length;
-    const from = part === 'oos' ? c.trainEnd : 50;
-    const to = part === 'is' ? c.trainEnd : n;
+    const from = part === 'oos' ? c.trainEnd : part === 'val' ? valStart(c) : 50;
+    const to = part === 'is' || part === 'val' ? c.trainEnd : n;
     return { m: c.m, c, bt: backtest(c, spec, from, to, costs, gate ? (i, s) => gate(c, i, s) : undefined) };
   });
   const p = pool(per, spec.coinWeights);
   return { per, ...p, trades: per.flatMap((x) => x.bt.trades), exposure: per.reduce((a, x) => a + x.bt.exposure, 0) / (per.length || 1) };
+}
+
+// ---------- the AI trade filter (meta-labelling) ----------
+
+type DeciderKind = 'forest' | 'nn' | 'both';
+type Gate = (c: Ctx, i: number, side: 1 | -1) => boolean;
+interface Deciders {
+  /** in-sample trades the models learned from */
+  trainedOn: number;
+  /** the models fitted on every in-sample trade (what is deployed when kept) */
+  models: Partial<Record<DeciderKind, MetaModel>>;
+  forest: ForestModel | null;
+  /** each kind judged on the last 30 % of the training bars by models fitted on the trades before them */
+  val: Partial<Record<DeciderKind, { before: number; after: number; trades: number; kept: boolean }>>;
+}
+const gateOf = (mm: MetaModel): Gate => (c, i, side) => {
+  const row = [...features(c)[i], side];
+  return !row.every(Number.isFinite) || metaOdds(mm, row) >= mm.threshold;
+};
+
+/**
+ * Train the decision makers on a strategy's in-sample trades, and decide
+ * whether each one helps WITHOUT touching the unseen data: models fitted on
+ * the trades of the first 70 % of the training bars are judged on the last
+ * 30 % of them. Choosing on the unseen data instead would flatter the result
+ * it is then reported on.
+ */
+function trainDeciders(ctxs: Ctx[], spec: StrategySpec, costs: Costs, bpy: number, seed: number, kinds: DeciderKind[]): Deciders {
+  const isRun = runAll(ctxs, spec, 'is', costs);
+  const rows: { x: number[]; y: number; early: boolean }[] = [];
+  for (const { c, bt } of isRun.per) {
+    const F = features(c);
+    const v = valStart(c);
+    for (const tr of bt.trades) {
+      const x = [...F[tr.sig], tr.side];
+      if (!x.every(Number.isFinite)) continue;
+      // early: the trade was over before the validation bars began
+      rows.push({ x, y: tr.r > 0 ? 1 : 0, early: tr.exitI < v });
+    }
+  }
+  const out: Deciders = { trainedOn: rows.length, models: {}, forest: null, val: {} };
+  if (rows.length < 40) return out;
+  const nf = FEATURES.length + 1;
+  const needNN = kinds.some((k) => k !== 'forest');
+  const fit = (rs: typeof rows): Partial<Record<DeciderKind, MetaModel>> & { f: ForestModel } => {
+    const X = rs.map((r) => r.x);
+    const y = rs.map((r) => r.y);
+    const f = fitForest(X, y, { trees: 60, maxDepth: 4, minLeaf: Math.max(5, Math.floor(X.length / 40)), seed });
+    const nn = needNN ? fitMLP(X, y, { hidden: spec.metaNet ?? [8, 4], epochs: 80, l2: 1e-3, seed, patience: 10 }) : null;
+    return { f, forest: { model: f, threshold: 0.5, nf }, ...(nn ? { nn: { nn, threshold: 0.5, nf }, both: { model: f, nn, threshold: 0.5, nf } } : {}) };
+  };
+  const full = fit(rows);
+  out.forest = full.f;
+  for (const k of kinds) if (full[k]) out.models[k] = full[k];
+  const early = rows.filter((r) => r.early);
+  if (early.length >= 30 && early.some((r) => r.y) && early.some((r) => !r.y)) {
+    const e = fit(early);
+    const plain = runAll(ctxs, spec, 'val', costs);
+    const before = perf(plain.rets, plain.trades, bpy, plain.exposure);
+    for (const k of kinds) {
+      if (!e[k]) continue;
+      const g = runAll(ctxs, spec, 'val', costs, gateOf(e[k]!));
+      const a = perf(g.rets, g.trades, bpy, g.exposure);
+      out.val[k] = { before: before.sharpe, after: a.sharpe, trades: a.trades, kept: a.sharpe > before.sharpe + 0.1 && a.trades >= Math.max(5, before.trades * 0.3) };
+    }
+  }
+  return out;
 }
 
 const keyOf = (s: StrategySpec) => JSON.stringify([s.signal, s.filters, s.exit, s.sides, s.sizing ?? null, s.hedge ?? null]);
@@ -263,7 +337,7 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
   const canHedge = ctxs.some((c) => !!c.m.bench);
   const hasFunding = ms.some((m) => m.funding && m.funding.some((x) => x !== 0));
   if (!hasFunding) notes.push('no funding history: the carry signal and the crowding filter were skipped');
-  const usable = (s: SignalDef) => (s.needsFunding && !hasFunding ? 'needs funding history' : s.intraday && tfH >= 24 ? 'needs bars shorter than a day' : null);
+  const usable = (s: SignalDef) => (s.needsFunding && !hasFunding ? 'needs funding history' : s.needsBench && !(canHedge && ctxs.some((c) => !!c.m.bench)) ? 'needs bitcoin and one other coin among the coins' : s.intraday && tfH >= 24 ? 'needs bars shorter than a day' : null);
   const filters = FILTERS.filter((f) => !(f.needsFunding && !hasFunding));
   const rnd = rngOf(cfg.seed);
   const tick = async (p: Progress) => {
@@ -434,37 +508,26 @@ export async function research(markets: Market[], cfg0: Partial<ResearchCfg> = {
       return b > a ? sum / (b - a) : 0;
     }));
 
-    // meta-labelling: a forest learns, in sample, which signals to skip
+    // meta-labelling: a forest learns, in sample, which signals to skip; whether it is kept is decided on the
+    // last part of the training bars, never on the unseen ones
     let meta: MetaInfo | null = null;
     if (cfg.meta) {
-      const isRun = runAll(ctxs, spec, 'is', cfg.costs);
-      const X: number[][] = [];
-      const y: number[] = [];
-      for (const { c, bt } of isRun.per) {
-        const F = features(c);
-        for (const tr of bt.trades) {
-          const row = [...F[tr.sig], tr.side];
-          if (!row.every(Number.isFinite)) continue;
-          X.push(row);
-          y.push(tr.r > 0 ? 1 : 0);
-        }
-      }
-      if (X.length >= 40) {
-        const model = fitForest(X, y, { trees: 60, maxDepth: 4, minLeaf: Math.max(5, Math.floor(X.length / 40)), seed: cfg.seed });
-        const threshold = 0.5;
-        const gate = (c: Ctx, i: number, side: 1 | -1) => {
-          const row = [...features(c)[i], side];
-          return !row.every(Number.isFinite) || predictForest(model, row) >= threshold;
-        };
-        const gated = runAll(ctxs, spec, 'oos', cfg.costs, gate);
+      const d = trainDeciders(ctxs, spec, cfg.costs, bpy, cfg.seed, ['forest']);
+      const mm = d.models.forest;
+      if (mm && d.forest) {
+        const model = d.forest;
+        const gated = runAll(ctxs, spec, 'oos', cfg.costs, gateOf(mm));
         const after = perf(gated.rets, gated.trades, bpy, gated.exposure);
-        const used = after.sharpe > oos.sharpe + 0.1 && after.trades >= Math.max(10, oos.trades * 0.3);
+        const v = d.val.forest ?? null;
+        const used = !!v?.kept;
         meta = {
           used,
-          threshold,
+          threshold: mm.threshold,
           oosSharpeBefore: oos.sharpe,
           oosSharpeAfter: after.sharpe,
           tradesAfter: after.trades,
+          valBefore: v ? v.before : null,
+          valAfter: v ? v.after : null,
           oob: model.oob,
           base: model.base,
           importance: [...FEATURES, 'side'].map((f, k) => [f, model.importance[k]] as [string, number]).sort((a, b) => b[1] - a[1]).slice(0, 6),
@@ -746,9 +809,12 @@ export interface Parts {
 }
 export interface DeciderTest {
   kind: 'forest' | 'nn' | 'both';
+  /** the unseen-data Sharpe without and with it (a read-out; it does not decide anything) */
   before: number;
   after: number;
   trades: number;
+  /** the check that decides: the Sharpe on the last 30 % of the training bars without and with it (null: too few trades to check) */
+  val?: { before: number; after: number } | null;
 }
 
 function pairFit(xs: Int8Array[], ys: Int8Array[]): Omit<PairFit, 'a' | 'b' | 'verdict'> {
@@ -854,50 +920,32 @@ export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, 
   // the "AI trade filter": a forest, a neural network or both learn, in sample, which of the strategy's
   // signals tend to fail; it is kept only if it lifts the out-of-sample Sharpe (as in the research run)
   let gate: ((c: Ctx, i: number, side: 1 | -1) => boolean) | undefined;
-  let meta: { used: boolean; before: number; after: number; trainedOn: number; kind: 'forest' | 'nn' | 'both' } | null = null;
+  let meta: { used: boolean; before: number; after: number; trainedOn: number; kind: 'forest' | 'nn' | 'both'; val: { before: number; after: number; trades: number } | null } | null = null;
   const deciders: DeciderTest[] = [];
   if (autoMeta) {
-    const kind: 'forest' | 'nn' | 'both' = autoMeta === true ? 'forest' : autoMeta;
-    const isRun = runAll(ctxs, spec, 'is', costs);
-    const X: number[][] = [];
-    const y: number[] = [];
-    for (const { c, bt } of isRun.per) {
-      const F = features(c);
-      for (const tr of bt.trades) {
-        const row = [...F[tr.sig], tr.side];
-        if (!row.every(Number.isFinite)) continue;
-        X.push(row);
-        y.push(tr.r > 0 ? 1 : 0);
-      }
-    }
-    if (X.length >= 40) {
-      const forest = fitForest(X, y, { trees: 60, maxDepth: 4, minLeaf: Math.max(5, Math.floor(X.length / 40)), seed: 42 });
-      const nn = fitMLP(X, y, { hidden: [8, 4], epochs: 80, l2: 1e-3, seed: 42, patience: 10 });
-      const models: Record<'forest' | 'nn' | 'both', MetaModel> = {
-        forest: { model: forest, threshold: 0.5, nf: FEATURES.length + 1 },
-        nn: { nn, threshold: 0.5, nf: FEATURES.length + 1 },
-        both: { model: forest, nn, threshold: 0.5, nf: FEATURES.length + 1 },
-      };
-      const gateOf = (mm: MetaModel) => (c: Ctx, i: number, side: 1 | -1) => {
-        const row = [...features(c)[i], side];
-        return !row.every(Number.isFinite) || metaOdds(mm, row) >= mm.threshold;
-      };
+    const kind: DeciderKind = autoMeta === true ? 'forest' : autoMeta;
+    const d = trainDeciders(ctxs, spec, costs, bpy, 42, ['forest', 'nn', 'both']);
+    if (d.models[kind]) {
       const plain = runAll(ctxs, spec, 'oos', costs);
       const before = perf(plain.rets, plain.trades, bpy, plain.exposure);
-      // every decision maker is measured (for the read-out); only the one chosen can be kept
+      // every decision maker is measured on the unseen data (for the read-out); whether the chosen one is
+      // kept was already decided on the training data
       for (const k of ['forest', 'nn', 'both'] as const) {
-        const g = runAll(ctxs, spec, 'oos', costs, gateOf(models[k]));
+        const mm = d.models[k];
+        if (!mm) continue;
+        const g = runAll(ctxs, spec, 'oos', costs, gateOf(mm));
         const a = perf(g.rets, g.trades, bpy, g.exposure);
-        deciders.push({ kind: k, before: before.sharpe, after: a.sharpe, trades: a.trades });
+        deciders.push({ kind: k, before: before.sharpe, after: a.sharpe, trades: a.trades, val: d.val[k] ? { before: d.val[k]!.before, after: d.val[k]!.after } : null });
       }
-      const mine = deciders.find((d) => d.kind === kind)!;
-      const used = mine.after > before.sharpe + 0.1 && mine.trades >= Math.max(10, before.trades * 0.3);
-      meta = { used, before: before.sharpe, after: mine.after, trainedOn: X.length, kind };
+      const mine = deciders.find((x) => x.kind === kind)!;
+      const v = d.val[kind] ?? null;
+      const used = !!v?.kept;
+      meta = { used, before: before.sharpe, after: mine.after, trainedOn: d.trainedOn, kind, val: v ? { before: v.before, after: v.after, trades: v.trades } : null };
       if (used) {
-        gate = gateOf(models[kind]);
-        spec = { ...spec, meta: models[kind] };
+        gate = gateOf(d.models[kind]!);
+        spec = { ...spec, meta: d.models[kind] };
       }
-    } else meta = { used: false, before: NaN, after: NaN, trainedOn: X.length, kind };
+    } else meta = { used: false, before: NaN, after: NaN, trainedOn: d.trainedOn, kind, val: null };
   }
   const is = runAll(ctxs, spec, 'is', costs, gate);
   const oos = runAll(ctxs, spec, 'oos', costs, gate);
@@ -937,6 +985,8 @@ export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, 
     curve: equityCurve(full, bhAll),
     trades: oos.trades.length,
     mc: monteCarlo(oos.trades.map((t) => t.r)),
+    /** the unseen trades' results in R, oldest first (the Quant desk's Monte Carlo panel resamples them) */
+    rs: oos.trades.slice().sort((a, b) => a.exitI - b.exitI).map((t) => Math.round(t.r * 1000) / 1000),
     /** buy-and-hold over the same unseen period, for comparison */
     bh: perf(bhOos.rets, [], bpy, 1),
     perCoin: oos.per.map((x) => ({ coin: x.m.coin, oos: perf(x.bt.rets, x.bt.trades, bpy, x.bt.exposure) })),

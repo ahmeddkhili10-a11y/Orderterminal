@@ -50,12 +50,14 @@ export interface LabTest {
   curve: { t: number; eq: number; bh: number }[];
   trades: number;
   mc: MonteCarlo | null;
+  /** the unseen trades' results in R */
+  rs?: number[];
   /** buy-and-hold over the unseen period */
   bh?: Perf;
   perCoin?: { coin: string; oos: Perf }[];
   /** the spec as tested (with the AI trade filter's model when it was kept) */
   spec?: StrategySpec;
-  meta?: { used: boolean; before: number; after: number; trainedOn: number; kind?: 'forest' | 'nn' | 'both' } | null;
+  meta?: { used: boolean; before: number; after: number; trainedOn: number; kind?: 'forest' | 'nn' | 'both'; val?: { before: number; after: number; trades: number } | null } | null;
   /** each decision maker (forest, neural network, both) measured on the unseen data */
   deciders?: DeciderTest[];
   /** the parts of a combined strategy: each rule alone, how the rules relate, what each filter adds */

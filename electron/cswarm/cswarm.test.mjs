@@ -45,6 +45,50 @@ afterEach(async () => {
   sw = null;
 });
 
+describe('the Lab agent, live', () => {
+  it('gives a deployed strategy bitcoin\'s candles and the funding history when its rules read them', async () => {
+    const now = Date.UTC(2026, 10, 5, 12);
+    const ex = fakeExchange(now);
+    const bars = (base) => Array.from({ length: 400 }, (_, i) => ({ time: now - (400 - i) * HOUR, open: base + i * 0.01, high: base + i * 0.01 + 0.2, low: base + i * 0.01 - 0.2, close: base + i * 0.01, volume: 5 + (i % 7) }));
+    ex.ccxt.history = vi.fn(async (_ex, symbol) => bars(symbol.startsWith('BTC') ? 60_000 : 3000));
+    // funding is flat until the last closed hour, when longs suddenly pay 0.1 % an hour
+    ex.ccxt.fundingHistory = vi.fn(async () => Array.from({ length: 300 }, (_, i) => ({ time: now - (300 - i) * HOUR, rate: i === 299 ? 0.001 : 0 })));
+    const exit = { stopAtr: 2, targetR: 1.5, trailAtr: 0, maxBars: 24, onFlip: false, stopVol: 0 };
+    const deployed = [
+      { id: 'p', on: true, tfH: 1, coins: ['ETH'], spec: { name: 'pairs', signal: { id: 'pairs', p: { window: 168, k: 2 } }, filters: [], exit, sides: 'both' } },
+      { id: 'c', on: true, tfH: 1, coins: ['ETH'], spec: { name: 'carry', signal: { id: 'carry', p: { lookback: 24, band: 0.1 } }, filters: [], exit, sides: 'both' } },
+    ];
+    sw = new CryptoSwarm({ ccxt: ex.ccxt, db: memDb(), now: () => now, labDeployed: () => deployed });
+    sw.setConfig({ coins: ['ETH'], agents: { auction: false, trend: false, lab: true } });
+    await sw.start();
+    await sw.slow();
+    const asked = ex.ccxt.history.mock.calls.map((c) => c[1]);
+    expect(asked).toContain('ETH/USDC:USDC');
+    expect(asked).toContain('BTC/USDC:USDC');
+    expect(ex.ccxt.fundingHistory).toHaveBeenCalledTimes(1);
+    expect(ex.ccxt.fundingHistory.mock.calls[0][1]).toBe('ETH/USDC:USDC');
+    // the carry rule sees the funding (a day's average far above 10 % a year) and proposes a short — it could not before
+    expect(sw.lines.map((l) => l.text).filter((t) => /proposes a SHORT/.test(t)).join(' | ')).toMatch(/carry/i);
+    // a second look within the hour does not download the funding again
+    await sw.slow();
+    expect(ex.ccxt.fundingHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('a strategy that reads neither is not given them (no extra downloads)', async () => {
+    const now = Date.UTC(2026, 10, 5, 12);
+    const ex = fakeExchange(now);
+    ex.ccxt.history = vi.fn(async () => Array.from({ length: 400 }, (_, i) => ({ time: now - (400 - i) * HOUR, open: 100, high: 101, low: 99, close: 100 + (i % 5), volume: 5 })));
+    ex.ccxt.fundingHistory = vi.fn(async () => []);
+    const deployed = [{ id: 't', on: true, tfH: 1, coins: ['ETH'], spec: { name: 'mom', signal: { id: 'tsmom', p: { lookback: 24 } }, filters: [], exit: { stopAtr: 2, targetR: 0, trailAtr: 0, maxBars: 24, onFlip: true, stopVol: 0 }, sides: 'both' } }];
+    sw = new CryptoSwarm({ ccxt: ex.ccxt, db: memDb(), now: () => now, labDeployed: () => deployed });
+    sw.setConfig({ coins: ['ETH'], agents: { auction: false, trend: false, lab: true } });
+    await sw.start();
+    await sw.slow();
+    expect(ex.ccxt.history.mock.calls.map((c) => c[1])).toEqual(['ETH/USDC:USDC']);
+    expect(ex.ccxt.fundingHistory).not.toHaveBeenCalled();
+  });
+});
+
 describe('crypto swarm', () => {
   it('keeps settings within bounds', () => {
     const c = mergeCfg({ coins: ['btc', ' eth '], risk: { riskPct: 2 } });

@@ -39,6 +39,9 @@ import {
   type Flow,
   type Option,
 } from '../lab/flow';
+import { applySend, takeSends, tuneWords, useLabInbox } from '../lab/bridge';
+import type { Params } from '../lab/library';
+import { specNeeds } from '../lab/live';
 import { ncdf } from '../lab/stats';
 import { startLabLink, useLab, type LabTest } from '../lab/store';
 import { Check, type PanelProps } from '../ui/controls';
@@ -86,6 +89,19 @@ const BLOCKS: BlockDef[] = [
   { id: 'deploy', title: 'Deploy', color: '#a0d468', icon: I('M5 12h14M13 6l6 6-6 6'), role: 'Only after a backtest. Sends the bot to the crypto swarm, and sets who decides its trades there.' },
 ];
 
+const NET_SIZES = [
+  { h1: 8, h2: 4, name: 'Small' },
+  { h1: 16, h2: 8, name: 'Medium' },
+  { h1: 32, h2: 16, name: 'Large' },
+];
+const NET_HORIZONS = [
+  { h: 1, name: '1 h' },
+  { h: 4, name: '4 h' },
+  { h: 12, name: '12 h' },
+  { h: 24, name: '1 day' },
+  { h: 72, name: '3 days' },
+  { h: 168, name: '1 week' },
+];
 const TONE_MARK: Record<Finding['tone'], string> = { clash: '✕', overlap: '≈', pair: '+', info: 'i' };
 const TONE_WORD: Record<Finding['tone'], string> = { clash: 'Clash', overlap: 'Overlap', pair: 'Pairs well', info: 'Note' };
 const RANK: Record<Finding['tone'], number> = { clash: 3, overlap: 2, pair: 1, info: 0 };
@@ -158,6 +174,10 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
   const [sel, setSel] = useState<BlockId>('strategy');
   const [q, setQ] = useState('');
   const [coinsText, setCoinsText] = useState(c.coins);
+  useEffect(() => setCoinsText(c.coins), [c.coins]);
+  // what has arrived from the Quant desk (lab/bridge.ts), in words
+  const [arrived, setArrived] = useState<string[]>([]);
+  const pending = useLabInbox((st) => st.queue.length);
   const [wrapRef, wrapW] = useWidth<HTMLDivElement>();
   const style = STYLE_MAP[c.style] ?? STYLES[2];
   const built = useMemo(() => buildSpec(c), [c]);
@@ -176,9 +196,64 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
     set({ [key]: next } as Partial<Flow>);
   };
   useEffect(() => setQ(''), [sel]);
+  // models sent from the Quant desk join the bot, each with the settings it was studied with
+  useEffect(() => {
+    if (!pending) return;
+    let f: Flow = c;
+    const texts: string[] = [];
+    let block: BlockId | null = null;
+    for (const snd of takeSends()) {
+      const r = applySend(f, snd);
+      f = r.flow;
+      texts.push(r.text);
+      if (r.ok) block = r.block;
+    }
+    set({ ...f, tunes: f.tunes });
+    setArrived((a) => [...texts, ...a].slice(0, 4));
+    if (block) setSel(block);
+  }, [pending]);
+  const tuneOf = (key: string): Params => c.tunes?.[key] ?? {};
+  const setTune = (key: string, p: Params | null) => {
+    const t = { ...(c.tunes ?? {}) };
+    if (p) t[key] = { ...(t[key] ?? {}), ...p };
+    else delete t[key];
+    set({ tunes: Object.keys(t).length ? t : undefined });
+  };
+  /** the neural network's own settings, wherever a network is picked: its size, and how far ahead it looks */
+  const netTune = (key: string, horizon: boolean, defaults: { h1: number; horizon?: number }) => {
+    const t = tuneOf(key);
+    const h1 = t.h1 > 0 ? t.h1 : defaults.h1;
+    const hz = t.horizon > 0 ? t.horizon : defaults.horizon;
+    return (
+      <div className="bb2-tune" data-tune={key}>
+        <span>network</span>
+        {NET_SIZES.map((z) => (
+          <button key={z.h1} className={`chip${h1 === z.h1 ? ' active' : ''}`} onClick={() => setTune(key, { h1: z.h1, h2: z.h2 })} title={`${z.h1} and ${z.h2} hidden units`}>
+            {z.name}
+          </button>
+        ))}
+        {horizon && (
+          <>
+            <span>looks ahead</span>
+            {NET_HORIZONS.filter((x) => x.h >= style.tfH).map((x) => (
+              <button key={x.h} className={`chip${hz === x.h ? ' active' : ''}`} onClick={() => setTune(key, { horizon: x.h })}>
+                {x.name}
+              </button>
+            ))}
+          </>
+        )}
+        {c.tunes?.[key] && (
+          <button className="chip" onClick={() => setTune(key, null)} title="Back to the style’s usual settings">
+            reset
+          </button>
+        )}
+      </div>
+    );
+  };
+  const KEY_OF = { strategies: 'strategy', models: 'model', forecasts: 'forecast', risks: 'risk' } as const;
   if (!desktop?.lab) return <div className="pro-empty">The bot builder runs in the desktop app (it backtests on years of history).</div>;
 
-  const needsFunding = [built.spec.signal, ...(built.spec.also ?? [])].some((r) => r.id === 'carry') || built.spec.filters.some((f) => f.id === 'crowd');
+  const needsFunding = specNeeds(built.spec).funding;
   const run = () => {
     setBusy(true);
     setErr('');
@@ -189,6 +264,12 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
       .then((r) => {
         setRes(r);
         setSel('test');
+        // the unseen trades, for the Monte Carlo panel (MC) on the Quant desk
+        try {
+          if (r.rs?.length) localStorage.setItem('novus-lab-last-trades', JSON.stringify({ name: built.spec.name, rs: r.rs, at: Date.now() }));
+        } catch {
+          /* no storage: the panel just has nothing to load */
+        }
       })
       .catch((e) => setErr(String(e?.message ?? e)))
       .finally(() => setBusy(false));
@@ -254,9 +335,25 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
       <Group key={g} title={g}>
         {list
           .filter((o) => o.group === g)
-          .map((o) => (
-            <OptionRow key={o.id} id={o.id} on={c[key].includes(o.id)} name={o.name} plain={o.plain} explain={c.explain} badges={badges(o.suits ? o.fits : undefined, preview(key, o.id))} onClick={() => toggle(key, o.id)} />
-          ))}
+          .map((o) => {
+            const on = c[key].includes(o.id);
+            const tk = `${KEY_OF[key]}:${o.id}`;
+            const isNet = o.id === 'nn' && (key === 'strategies' || key === 'forecasts');
+            return (
+              <div key={o.id}>
+                <OptionRow id={o.id} on={on} name={o.name} plain={o.plain} explain={c.explain} badges={badges(o.suits ? o.fits : undefined, preview(key, o.id))} onClick={() => toggle(key, o.id)} />
+                {on && isNet && netTune(tk, true, { h1: 16, horizon: key === 'strategies' ? (style.L <= 24 ? 4 : 24) : 24 })}
+                {on && !isNet && c.tunes?.[tk] && (
+                  <div className="bb2-tune" data-tune={tk}>
+                    <em>set on the Quant desk:</em> {tuneWords(c.tunes[tk]) || 'custom settings'}
+                    <button className="chip" onClick={() => setTune(tk, null)} title="Back to the style’s usual settings">
+                      reset
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
       </Group>
     ));
   };
@@ -293,6 +390,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
         return (
           <>
             {radio('AI decision maker (learns which signals to skip)', DECIDERS, c.decider, (id) => set({ decider: id as Flow['decider'] }))}
+            {(c.decider === 'nn' || c.decider === 'both') && netTune('decider', false, { h1: 8 })}
             <div className="bb2-group-title">Second opinions (each must agree)</div>
             {multi('forecasts', FORECASTS)}
           </>
@@ -368,7 +466,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
         <Check checked={c.explain} onChange={(explain) => setConfig({ explain })}>
           Explain
         </Check>
-        <button className="btn ghost" onClick={() => confirm('Start again from the default bot?') && set({ ...FLOW_DEFAULT })} title="Back to the default bot">
+        <button className="btn ghost" onClick={() => confirm('Start again from the default bot?') && set({ ...FLOW_DEFAULT, tunes: undefined })} title="Back to the default bot">
           Reset
         </button>
         <button className="btn bb2-primary" disabled={busy || blocked} onClick={run}>
@@ -452,6 +550,18 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
           </aside>
         </div>
 
+        {arrived.length > 0 && (
+          <div className="bb2-arrived" role="status">
+            <ul>
+              {arrived.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+            <button className="btn ghost" onClick={() => setArrived([])}>
+              OK
+            </button>
+          </div>
+        )}
         {err && <div className="lab-error">{err}</div>}
         {msg && <div className="lab-note">{msg}</div>}
 
@@ -649,7 +759,8 @@ function Measured({ res, c }: { res: LabTest; c: BotConfig }) {
             <thead>
               <tr>
                 <th className="l">AI DECISION MAKER</th>
-                <th>SHARPE WITHOUT</th>
+                <th title="The check that decides: the last 30 % of the training years, with the decision maker fitted on the trades before them">TRAINING CHECK</th>
+                <th title="On the data it never saw — a read-out, it decides nothing">UNSEEN: WITHOUT</th>
                 <th>WITH IT</th>
                 <th>TRADES KEPT</th>
                 <th className="l" />
@@ -659,15 +770,16 @@ function Measured({ res, c }: { res: LabTest; c: BotConfig }) {
               {ds.map((d) => (
                 <tr key={d.kind} className={d.kind === res.meta!.kind ? 'bb2-together' : ''}>
                   <td className="l">{d.kind === 'forest' ? 'Decision forest' : d.kind === 'nn' ? 'Neural network' : 'Both paired'}</td>
+                  <td className={`mono ${d.val && d.val.after > d.val.before ? 'up' : d.val ? 'down' : 'muted'}`}>{d.val ? `${num(d.val.before)} → ${num(d.val.after)}` : 'too few trades'}</td>
                   <td className="mono">{num(d.before)}</td>
                   <td className={`mono ${d.after > d.before ? 'up' : 'down'}`}>{num(d.after)}</td>
                   <td className="mono">{d.trades}</td>
-                  <td className="l">{d.kind === res.meta!.kind ? (res.meta!.used ? '✓ your pick — kept' : 'your pick — dropped (did not help)') : 'for comparison'}</td>
+                  <td className="l">{d.kind === res.meta!.kind ? (res.meta!.used ? '✓ your pick — kept' : res.meta!.val ? 'your pick — dropped (did not help in the training check)' : 'your pick — dropped (too few trades to check)') : 'for comparison'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="lab-line muted">The decision makers learned from {res.meta.trainedOn} trades in the first 70 %. Only your pick can be kept, and only if it lifted the unseen-data Sharpe — the others are shown for comparison, not chosen after the fact.</div>
+          <div className="lab-line muted">The decision makers learned from {res.meta.trainedOn} trades in the training years. Your pick is kept only if it helped in the training check: fitted on the earlier training trades, it must lift the Sharpe ratio on the last 30 % of the training years. The unseen data plays no part in that choice, so the result above is not flattered by it; the unseen columns show how each one then did.</div>
         </>
       )}
       {res.meta && !ds.length && <div className="lab-line">AI decision maker: not enough past trades to learn from ({res.meta.trainedOn} — it needs 40).</div>}

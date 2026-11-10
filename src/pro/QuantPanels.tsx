@@ -50,6 +50,8 @@ import {
 import { useSettings } from '../store/settings';
 import { NumberInput, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { AreaChart, Bars, LineChart } from './charts';
+import { USES } from './botUses';
+import { UseInBot } from './UseInBot';
 import { alignedReturns, BOARD_VENUES, useBoardVenue, useKlines } from './data';
 
 const venueOpts = () => [{ value: 'auto' as const, label: 'Primary venue' }, ...BOARD_VENUES.map((v) => ({ value: v, label: ADAPTERS[v].name }))];
@@ -170,6 +172,7 @@ export function VarPanel({ config: c, setConfig }: PanelProps<VarConfig>) {
         <Select value={c.horizon} options={[1, 24, 168].map((v) => ({ value: v, label: v === 1 ? '1 hour' : v === 24 ? '1 day' : '1 week' }))} onChange={(horizon) => setConfig({ horizon })} />
         <NumberInput value={c.position} step={1000} min={100} width={90} onChange={(position) => setConfig({ position })} title="Position size in dollars" suffix="$" />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="VAR" options={USES.var()} />
         <Spacer />
         <span className="pro-status">{k.loading ? 'loading…' : `1000 hourly bars · loss over ${hz} not exceeded ${(c.conf * 100).toFixed(1).replace('.0', '')} % of the time`}</span>
       </Toolbar>
@@ -365,6 +368,7 @@ export function DeltaHedgePanel({ config: c, setConfig }: PanelProps<DeltaConfig
         {c.vol === 'manual' && <NumberInput value={c.iv} step={5} min={5} width={60} onChange={(iv) => setConfig({ iv })} title="Implied volatility, % a year (e.g. Deribit's, from OMON)" suffix="%" />}
         <NumberInput value={c.contracts} step={1} min={0.01} width={60} onChange={(contracts) => setConfig({ contracts })} title="Contracts (1 = one coin)" />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="DHG" options={USES.delta()} />
       </Toolbar>
       <div className="pro-scroll">
         {!model || !Number.isFinite(S) ? (
@@ -554,6 +558,7 @@ export function VolTargetPanel({ config: c, setConfig }: PanelProps<VolTargetCon
         <NumberInput value={c.account} step={1000} min={100} width={90} onChange={(account) => setConfig({ account })} title="Account, dollars" suffix="$" />
         <NumberInput value={c.cap} step={0.5} min={0.5} width={56} onChange={(cap) => setConfig({ cap })} title="Leverage cap" suffix="×" />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="VTGT" options={USES.voltarget({ target: c.target })} />
       </Toolbar>
       <div className="pro-scroll">
         {!res ? (
@@ -732,6 +737,7 @@ export function MomentumPanel({ config: c, setConfig }: PanelProps<MomConfig>) {
       <Toolbar>
         <CoinsInput value={c.coins} onCommit={(coins) => setConfig({ coins })} />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="MOM" options={USES.momentum()} />
         <Spacer />
         <span className="pro-status">{k.loading ? 'loading…' : 'daily candles · Moskowitz, Ooi & Pedersen (2012); Kalman (1960)'}</span>
       </Toolbar>
@@ -867,6 +873,7 @@ export function RegimePanel({ config: c, setConfig }: PanelProps<RegimeConfig>) 
       <Toolbar>
         <CoinsInput value={c.coins} onCommit={(coins) => setConfig({ coins })} />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="REGM" options={USES.regimes()} />
         <Spacer />
         <span className="pro-status">{k.loading ? 'fitting…' : '1000 hourly bars · Lo & MacKinlay (1988); Hurst (1951); Hamilton (1989)'}</span>
       </Toolbar>

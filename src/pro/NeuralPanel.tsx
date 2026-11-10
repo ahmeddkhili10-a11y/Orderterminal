@@ -15,6 +15,8 @@ import { fitForest, mlpImportance, mlpTrainer, predictForest, predictMLP, type F
 import { useSettings } from '../store/settings';
 import { Check, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { Bars, LineChart } from './charts';
+import { USES } from './botUses';
+import { UseInBot } from './UseInBot';
 import { BOARD_VENUES, useBoardVenue, useKlines } from './data';
 
 export interface NeuralConfig {
@@ -239,6 +241,7 @@ export function NeuralPanel({ config: c, setConfig }: PanelProps<NeuralConfig>) 
         <button className="btn nn-train" disabled={!data || training} onClick={train}>
           {training ? `Training… epoch ${epoch}` : model ? '↻ Retrain' : '▶ Train the network'}
         </button>
+        <UseInBot from="NNET" options={USES.nnet({ coin, tfH: TF_H[c.tf], ahead: c.ahead, hidden: SIZES[c.size].hidden })} title="Run this network inside a strategy: as the bot’s strategy, a second opinion, or its decision maker — with this size, horizon and candle" />
         <Spacer />
         <Check checked={c.explain} onChange={(explain) => setConfig({ explain })}>
           Explain
@@ -365,7 +368,7 @@ export function NeuralPanel({ config: c, setConfig }: PanelProps<NeuralConfig>) 
                   </div>
                 </div>
                 <div className="lab-line muted">
-                  Network: {FEATURES.length} inputs → {SIZES[c.size].hidden.join(' → ')} hidden units (tanh) → odds (sigmoid); Adam, L2 penalty, early stopping on the latest training data; kept epoch {model.best} of {model.trainLoss.length}. In the Lab: the “Neural-network direction” rule, “the neural network must agree”, and the AI trade filter (forest, network, or both).
+                  Network: {FEATURES.length} inputs → {SIZES[c.size].hidden.join(' → ')} hidden units (tanh) → odds (sigmoid); Adam, L2 penalty, early stopping on the latest training data; kept epoch {model.best} of {model.trainLoss.length}. To run this network inside a strategy, press “⇢ Use in a bot” above: it goes into the bot builder with this size, horizon and candle — as the bot’s strategy, a second opinion, or its decision maker. The Lab then fits it on the training years only and judges the whole bot on data it never saw.
                 </div>
               </>
             )}

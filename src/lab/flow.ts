@@ -44,7 +44,7 @@ export interface Style {
 }
 
 export const STYLES: Style[] = [
-  { id: 'scalp', name: 'Scalping — quick trades, hours', plain: 'Many quick trades, in and out within a few hours, small moves.', timeframe: '1h', tfH: 1, years: 1, L: 12, holdH: 6, stop: 1.5, note: 'The Lab tests on 1-hour candles (the shortest with years of history). Seconds-to-minutes scalping on the live order book is the crypto swarm’s own Scalper agent.' },
+  { id: 'scalp', name: 'Scalping — quick trades, hours', plain: 'Many quick trades, in and out within a few hours, small moves.', timeframe: '1h', tfH: 1, years: 1, L: 12, holdH: 6, stop: 1.5, note: 'The Lab tests on 1-hour candles — the shortest with years of history — so this is scalping over hours, not seconds.' },
   { id: 'intraday', name: 'Intraday — closed within a day', plain: 'Trades that open and close the same day.', timeframe: '1h', tfH: 1, years: 2, L: 24, holdH: 24, stop: 2 },
   { id: 'swing', name: 'Swing — a few days', plain: 'Catch a move that lasts two to five days.', timeframe: '4h', tfH: 4, years: 3, L: 72, holdH: 96, stop: 2.5 },
   { id: 'week', name: 'One-week trades', plain: 'Hold for about a week, riding the week’s direction.', timeframe: '4h', tfH: 4, years: 3, L: 168, holdH: 168, stop: 3 },
@@ -74,6 +74,14 @@ export interface StrategyOption extends Option {
   params: (s: Style) => Params;
   /** state: it always has a view (long or short); event: it fires now and then */
   nature: 'state' | 'event';
+  /** the rule's own holding time in hours, when it has one (a two-hour window, a day): the style's hold never stretches it */
+  holdH?: number;
+  /** it only ever buys */
+  longOnly?: boolean;
+  /** it reads bitcoin beside the coin: BTC joins the coins, and it never trades BTC itself */
+  needsBtc?: boolean;
+  /** part trend, part dip-buying: the family rules of thumb do not apply to it */
+  mixed?: boolean;
 }
 
 export const STRATEGIES: StrategyOption[] = [
@@ -85,19 +93,27 @@ export const STRATEGIES: StrategyOption[] = [
   { id: 'kalman', group: 'Trend following', name: 'Smart trend line (Kalman filter)', plain: 'A noise-filtering trend line that also says how sure it is; trades only when the trend is clear.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'kalman', nature: 'state', params: (s) => ({ smooth: fast(s) ? 2 : slow(s) ? 0 : 1, k: 2 }) },
   { id: 'macd', group: 'Trend following', name: 'MACD trend', plain: 'The popular MACD indicator: long while it is above its signal line, short while below.', suits: ['intraday', 'swing', 'week'], signal: 'macd', nature: 'state', params: (s) => ({ scale: fast(s) ? 1 : slow(s) ? 24 : 4 }) },
   { id: 'vsmom', group: 'Trend following', name: 'Momentum that adjusts for volatility', plain: 'Momentum, but a move only counts if it is big for how jumpy the coin is right now (GARCH volatility).', suits: ['intraday', 'swing', 'week'], signal: 'vsmom', nature: 'state', params: (s) => ({ lookback: s.L, k: 1 }) },
+  { id: 'vwmom', group: 'Trend following', name: 'Momentum weighted by volume', plain: 'Momentum where each candle counts by how much was traded: moves made on heavy volume decide the direction. In crypto studies this beat plain momentum.', suits: ['swing', 'week', 'position'], signal: 'vwmom', nature: 'state', params: (s) => ({ lookback: s.L }) },
+  { id: 'ctrend', group: 'Trend following', name: 'Trend composite (17 indicators vote)', plain: 'RSI, stochastic, CCI, seven moving averages, MACD, volume trends, money flow and Bollinger bands each cast a vote; trades when most agree. Based on the crypto trend factor published in 2025.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'ctrend', nature: 'state', params: (s) => ({ unit: fast(s) ? 4 : 24, k: 0.3 }) },
   // breakouts
   { id: 'donchian', group: 'Breakouts', name: 'Break of the recent high or low', plain: 'Buys when price closes above its highest high of the period, sells below the lowest low. Catches new trends early.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'donchian', nature: 'event', params: (s) => ({ n: Math.max(20, s.L) }) },
   { id: 'bbreak', group: 'Breakouts', name: 'Bollinger band breakout', plain: 'Trades a close outside the Bollinger bands — a move bigger than normal for the coin.', suits: ['scalp', 'intraday', 'swing'], signal: 'bbreak', nature: 'event', params: (s) => ({ lookback: Math.max(20, s.L), k: 2 }) },
   { id: 'pivot', group: 'Breakouts', name: 'Support and resistance (pivots)', plain: 'Buys a close above yesterday’s resistance, sells a close below support. A day trader’s classic.', suits: ['scalp', 'intraday'], signal: 'pivot', nature: 'event', params: () => ({ level: 1 }) },
   { id: 'volbrk', group: 'Breakouts', name: 'Big move on heavy volume', plain: 'Follows a sharp move only when volume is unusually heavy — a sign big players are behind it.', suits: ['scalp', 'intraday'], signal: 'volbrk', nature: 'event', params: (s) => ({ n: clamp(Math.round(s.L / 6), 1, 24), k: 2 }) },
+  { id: 'maxmin', group: 'Breakouts', name: 'New 10-day high or low (buy both)', plain: 'Buys when price closes at a new 10-day high (the trend continues) and when it closes at a new 10-day low (the bounce after panic), and holds a day. A documented bitcoin pattern; it never shorts.', suits: ['swing', 'week', 'position'], signal: 'maxmin', nature: 'event', holdH: 24, longOnly: true, mixed: true, params: () => ({ n: 240, mode: 0 }) },
+  { id: 'jump', group: 'Breakouts', name: 'Follow a big day', plain: 'After a day with an unusually big move (2.5 times its normal size), trades in the same direction for a day. In crypto, extreme days were followed more often than faded — but the published edge was thin.', suits: ['intraday', 'swing'], signal: 'jump', nature: 'event', holdH: 24, params: () => ({ k: 2.5 }) },
   // mean reversion
   { id: 'zrev', group: 'Buy the dip / sell the rip', name: 'Stretched from the average (z-score)', plain: 'Buys when price has fallen unusually far below its average, sells when it has risen unusually far — betting it snaps back.', suits: ['scalp', 'intraday', 'swing'], signal: 'zrev', nature: 'event', params: (s) => ({ lookback: Math.max(24, s.L), k: 2 }) },
   { id: 'rsi2', group: 'Buy the dip / sell the rip', name: 'RSI oversold / overbought', plain: 'Buys when the RSI says oversold, sells when overbought. Short, sharp bounces.', suits: ['scalp', 'intraday', 'swing'], signal: 'rsi2', nature: 'event', params: (s) => (fast(s) ? { n: 2, band: 10 } : { n: 14, band: 30 }) },
   { id: 'ou', group: 'Buy the dip / sell the rip', name: 'Snap-back to fair value (Ornstein–Uhlenbeck)', plain: 'Fits a “rubber band” model to the price and trades when it is stretched far — only when it has been snapping back fast.', suits: ['intraday', 'swing'], signal: 'ou', nature: 'event', params: (s) => ({ window: clamp(s.L * 2, 72, 336), k: 2 }) },
   { id: 'wrev', group: 'Buy the dip / sell the rip', name: 'Fade a big weekly move', plain: 'After a week with a very big rise or fall, bets on part of it coming back.', suits: ['swing', 'week'], signal: 'wrev', nature: 'event', params: () => ({ band: 0.1 }) },
   // timing
-  { id: 'itsm', group: 'Timing and seasons', name: 'End-of-day momentum', plain: 'Late in the US session, trades the direction the day has taken so far into the close.', suits: ['intraday'], signal: 'itsm', nature: 'event', params: () => ({ hour: 21 }) },
-  { id: 'dow', group: 'Timing and seasons', name: 'Monday effect', plain: 'Buys at the start of Monday and holds for the day (a documented weekday pattern in bitcoin).', suits: ['intraday'], signal: 'dow', nature: 'event', params: () => ({ day: 1 }) },
+  { id: 'itsm', group: 'Timing and seasons', name: 'End-of-day momentum', plain: 'Late in the US session, trades the direction the day has taken so far into the close.', suits: ['intraday'], signal: 'itsm', nature: 'event', holdH: 3, params: () => ({ hour: 21 }) },
+  { id: 'night', group: 'Timing and seasons', name: 'Late-evening hours (21:00–23:00 UTC)', plain: 'Buys at 21:00 UTC and sells at 23:00 UTC every day: the two hours where bitcoin’s gains were concentrated in 2015–2021. The pattern weakened after — test before trusting it.', suits: ['scalp', 'intraday'], signal: 'night', nature: 'event', holdH: 2, longOnly: true, params: () => ({ hour: 21 }) },
+  { id: 'dow', group: 'Timing and seasons', name: 'Monday effect', plain: 'Buys at the start of Monday and holds for the day (a documented weekday pattern in bitcoin).', suits: ['intraday'], signal: 'dow', nature: 'event', holdH: 24, longOnly: true, params: () => ({ day: 1 }) },
+  // against bitcoin
+  { id: 'pairs', group: 'Against bitcoin (relative value)', name: 'Pairs trade: the coin against bitcoin', plain: 'Coins move with bitcoin. When a coin gets unusually cheap against bitcoin it buys the coin, when unusually rich it sells — betting the gap closes. Add the bitcoin hedge (Risk) to make it a true market-neutral pairs trade.', suits: ['scalp', 'intraday', 'swing'], signal: 'pairs', nature: 'event', needsBtc: true, params: (s) => ({ window: clamp(s.L * 7, 168, 720), k: 2 }) },
+  { id: 'btclead', group: 'Against bitcoin (relative value)', name: 'Bitcoin leads, the coin catches up', plain: 'When bitcoin has moved and a coin has not yet followed by its usual amount, trades the coin in bitcoin’s direction. News reaches bitcoin first; the published effect is fastest over minutes.', suits: ['scalp', 'intraday'], signal: 'btclead', nature: 'event', needsBtc: true, params: (s) => ({ n: clamp(Math.round(s.L / 12), 1, 24), k: 1 }) },
   // carry
   { id: 'carry', group: 'Funding (carry)', name: 'Get paid funding', plain: 'Takes the side the crowd is paying for: short when longs pay heavy funding, long when shorts do.', suits: ['swing', 'week'], signal: 'carry', nature: 'state', params: () => ({ lookback: 72, band: 0.25 }) },
   // machine learning
@@ -115,7 +131,7 @@ export const COMBINES: { id: Combine; name: string; plain: string }[] = [
 
 // ---------- 2. the market models (filters: when the strategies are allowed to trade) ----------
 
-export type Lean = 'trend' | 'range' | 'calm' | 'storm' | 'session' | 'volume' | 'crowd';
+export type Lean = 'trend' | 'range' | 'calm' | 'storm' | 'session' | 'volume' | 'crowd' | 'market' | 'weekdays' | 'weekends';
 export interface ModelOption extends Option {
   filter: RuleRef | ((s: Style) => RuleRef);
   /** what market it asks for */
@@ -124,6 +140,7 @@ export interface ModelOption extends Option {
 
 export const MODELS: ModelOption[] = [
   { id: 'trend', group: 'Trend', name: 'Only with the big trend', plain: 'Longs only above the long-term average, shorts only below — trade with the tide, not against it.', suits: ['intraday', 'swing', 'week', 'position', 'hold'], lean: 'trend', filter: (s) => ({ id: 'trend', p: { lookback: Math.max(200, s.L * 8) } }) },
+  { id: 'btc-trend', group: 'Trend', name: 'Only with bitcoin’s trend (the market)', plain: 'Bitcoin is the crypto market: longs only while bitcoin is above its long-term average, shorts only while below. Keeps a coin’s trades on the side of the whole market.', suits: ['intraday', 'swing', 'week', 'position'], lean: 'market', filter: (s) => ({ id: 'btctrend', p: { lookback: s.L >= 720 ? 4800 : 1200 } }) },
   { id: 'adx-trend', group: 'Trend', name: 'Only when the market is trending (ADX)', plain: 'The ADX indicator measures trend strength; trade only when it says the market is trending.', suits: ['intraday', 'swing', 'week'], lean: 'trend', filter: { id: 'adx', p: { mode: 0, level: 25 } } },
   { id: 'adx-range', group: 'Trend', name: 'Only when the market is ranging (ADX)', plain: 'Trade only when ADX says there is no strong trend — the place for buy-the-dip strategies.', suits: ['scalp', 'intraday'], lean: 'range', filter: { id: 'adx', p: { mode: 1, level: 20 } } },
   { id: 'vr-trend', group: 'Statistical regime', name: 'Only when moves keep going (variance ratio)', plain: 'A statistical test (Lo & MacKinlay) of whether moves have been continuing; trade trend strategies only then.', suits: ['swing', 'week', 'position'], lean: 'trend', filter: { id: 'vratio', p: { mode: 0, window: 720 } } },
@@ -139,6 +156,8 @@ export const MODELS: ModelOption[] = [
   { id: 'volume', group: 'Activity', name: 'Only on above-normal volume', plain: 'Trades only when volume is above its usual level — more participants, more follow-through.', suits: ['scalp', 'intraday'], lean: 'volume', filter: { id: 'volume', p: { k: 0.5 } } },
   { id: 'us', group: 'Activity', name: 'Only in US trading hours', plain: 'Trades only from 13:00 to 21:00 UTC, when the most money is moving.', suits: ['scalp', 'intraday'], lean: 'session', filter: { id: 'session', p: { s: 0 } } },
   { id: 'eu', group: 'Activity', name: 'Only in European trading hours', plain: 'Trades only from 07:00 to 16:00 UTC.', suits: ['scalp', 'intraday'], lean: 'session', filter: { id: 'session', p: { s: 1 } } },
+  { id: 'weekdays', group: 'Activity', name: 'Only on weekdays', plain: 'Trades only Monday to Friday (UTC), when volume is full and moves follow through.', lean: 'weekdays', filter: { id: 'weekday', p: { mode: 0 } } },
+  { id: 'weekends', group: 'Activity', name: 'Only at weekends', plain: 'Trades only Saturday and Sunday (UTC): thinner, quieter markets where moves fade more often — dip-buying’s ground.', suits: ['scalp', 'intraday'], lean: 'weekends', filter: { id: 'weekday', p: { mode: 1 } } },
   { id: 'crowd', group: 'Funding', name: 'Avoid crowded trades (funding)', plain: 'No longs when longs are paying heavy funding, no shorts when shorts are — do not join an overcrowded side.', lean: 'crowd', filter: { id: 'crowd', p: { band: 0.2 } } },
 ];
 
@@ -162,8 +181,8 @@ export const FORECASTS: ForecastOption[] = [
 export type Decider = 'none' | 'forest' | 'nn' | 'both';
 export const DECIDERS: { id: Decider; name: string; plain: string }[] = [
   { id: 'none', name: 'No AI decision maker', plain: 'Every signal that passes the filters is taken.' },
-  { id: 'forest', name: 'Decision forest', plain: 'A random forest studies the bot’s own past trades and learns which of its signals tend to lose; it skips those. Kept only if it improves results on data it never saw.' },
-  { id: 'nn', name: 'Neural network', plain: 'A neural network does the same job: it learns from the bot’s past trades which signals to skip. Kept only if it helps on unseen data.' },
+  { id: 'forest', name: 'Decision forest', plain: 'A random forest studies the bot’s own past trades and learns which of its signals tend to lose; it skips those. Kept only if it passes a check inside the training years — the unseen data is never used to choose it.' },
+  { id: 'nn', name: 'Neural network', plain: 'A neural network does the same job: it learns from the bot’s past trades which signals to skip. Kept only if it passes the same check inside the training years.' },
   { id: 'both', name: 'Neural network + decision forest, paired', plain: 'Both learn from the bot’s past trades; their odds are averaged, so a trade needs the pair to lean yes. Two different learners usually make steadier calls than either alone.' },
 ];
 
@@ -237,6 +256,12 @@ export interface Flow {
   coins: string;
   /** who decides its trades once deployed: the swarm's council, or the bot as tested (only Guardian and Risk can stop it) */
   authority: 'council' | 'tested';
+  /**
+   * settings carried by a pick, over the style's defaults — keyed `block:id`
+   * ('strategy:nn', 'forecast:nn', 'risk:var', 'decider'). The Quant desk
+   * sends a model in with the settings it was studied with (lab/bridge.ts).
+   */
+  tunes?: Record<string, Params>;
 }
 
 export const FLOW_DEFAULT: Flow = { style: 'swing', strategies: ['tsmom'], combine: 'all', models: ['trend'], forecasts: [], decider: 'none', risks: ['voltarget'], portfolio: 'equal', stopWidth: 'normal', sides: 'both', takeProfit: 'trail', hold: 'normal', flip: true, coins: 'BTC ETH SOL', authority: 'council' };
@@ -258,6 +283,17 @@ export function migrateFlow(f: Partial<Flow> & Record<string, unknown>): Flow {
   out.forecasts = out.forecasts.filter((id) => FORECASTS.some((s) => s.id === id));
   out.risks = out.risks.filter((id) => RISKS.some((s) => s.id === id));
   for (const k of ['strategy', 'model', 'model2', 'forecast', 'risk']) delete out[k];
+  // settings only for picks that are still made, numbers only
+  const live = new Set([...out.strategies.map((id) => `strategy:${id}`), ...out.models.map((id) => `model:${id}`), ...out.forecasts.map((id) => `forecast:${id}`), ...out.risks.map((id) => `risk:${id}`), ...(out.decider === 'nn' || out.decider === 'both' ? ['decider'] : [])]);
+  const tunes: Record<string, Params> = {};
+  if (f.tunes && typeof f.tunes === 'object')
+    for (const [k, v] of Object.entries(f.tunes as Record<string, unknown>)) {
+      if (!live.has(k) || !v || typeof v !== 'object') continue;
+      const nums = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => typeof x === 'number' && Number.isFinite(x))) as Params;
+      if (Object.keys(nums).length) tunes[k] = nums;
+    }
+  if (Object.keys(tunes).length) out.tunes = tunes;
+  else delete out.tunes;
   return out;
 }
 
@@ -270,25 +306,40 @@ export function buildSpec(f0: Flow): { spec: StrategySpec; style: Style; timefra
   const f = migrateFlow(f0 as Flow & Record<string, unknown>);
   const style = STYLE_MAP[f.style] ?? STYLES[2];
   const strats = f.strategies.map((id) => find(STRATEGIES, id));
-  const rules = strats.map((s) => ({ id: s.signal, p: s.params(style) }));
+  const tune = (key: string): Params => f.tunes?.[key] ?? {};
+  const rules = strats.map((s) => ({ id: s.signal, p: { ...s.params(style), ...tune(`strategy:${s.id}`) } }));
   const filters: RuleRef[] = [];
   const add = (r: RuleRef) => !filters.some((x) => sameRule(x, r)) && filters.push(r);
   for (const id of f.models) {
     const m = find(MODELS, id);
-    add(typeof m.filter === 'function' ? m.filter(style) : m.filter);
+    const r = typeof m.filter === 'function' ? m.filter(style) : m.filter;
+    add({ id: r.id, p: { ...r.p, ...tune(`model:${id}`) } });
   }
-  for (const id of f.forecasts) add(find(FORECASTS, id).filter);
+  for (const id of f.forecasts) {
+    const r = find(FORECASTS, id).filter;
+    add({ id: r.id, p: { ...r.p, ...tune(`forecast:${id}`) } });
+  }
   const risks = f.risks.map((id) => find(RISKS, id));
-  const sizings = risks.filter((r) => r.sizing).map((r) => r.sizing!(style));
+  const sizings = risks
+    .filter((r) => r.sizing)
+    .map((r) => {
+      const z = r.sizing!(style);
+      const t = tune(`risk:${r.id}`).target;
+      return t > 0 ? { ...z, target: t } : z;
+    });
   const garchStop = risks.some((r) => r.garchStop);
   const hedge = risks.some((r) => r.hedge);
   const width = find(STOP_WIDTHS, f.stopWidth);
   const tp = find(TAKE_PROFIT, f.takeProfit);
   const hold = find(HOLDS, f.hold);
   const stop = Math.round(style.stop * width.k * 10) / 10;
-  const maxBars = Math.max(1, Math.round((style.holdH * hold.k) / style.tfH));
+  // a rule with a holding time of its own (a two-hour window, one day) is never held longer than that
+  const own = Math.min(...strats.map((s) => s.holdH ?? Infinity));
+  const holdH = Math.min(style.holdH * hold.k, own);
+  const maxBars = Math.max(1, Math.round(holdH / style.tfH));
   let coins = f.coins.toUpperCase().split(/[\s,]+/).filter(Boolean).slice(0, 8);
-  if (hedge && !coins.includes('BTC')) coins = ['BTC', ...coins];
+  if ((hedge || strats.some((s) => s.needsBtc)) && !coins.includes('BTC')) coins = ['BTC', ...coins];
+  const net = tune('decider');
   const spec: StrategySpec = {
     name: '',
     signal: rules[0],
@@ -300,19 +351,20 @@ export function buildSpec(f0: Flow): { spec: StrategySpec; style: Style; timefra
     ...(sizings[1] ? { sizing2: sizings[1] } : {}),
     ...(hedge ? { hedge: 'btc' as const } : {}),
     ...(f.decider !== 'none' ? { autoMeta: f.decider } : {}),
+    ...(f.decider !== 'none' && f.decider !== 'forest' && net.h1 > 0 ? { metaNet: [Math.round(net.h1), Math.round(net.h2 > 0 ? net.h2 : Math.max(2, net.h1 / 2))] as [number, number] } : {}),
     ...(f.portfolio !== 'equal' && coins.length > 1 ? { weights: f.portfolio } : {}),
   };
   const joined = f.combine === 'all' ? ' + ' : f.combine === 'majority' ? ' ⋅maj⋅ ' : ' | ';
   spec.name = [strats.map((s) => s.name).join(joined), ...filters.map((x) => FILTER_MAP[x.id]?.name).filter(Boolean), style.name.split(' — ')[0]].join(' · ');
   const comb = COMBINES.find((c) => c.id === f.combine)!;
   const summary = [
-    `${style.name}: ${style.timeframe} candles, up to ${holdText(style.holdH * hold.k)} a trade`,
+    `${style.name}: ${style.timeframe} candles, up to ${holdText(holdH)} a trade`,
     rules.length > 1 ? `Enters (${comb.name.toLowerCase()}): ${rules.map((r) => SIGNAL_MAP[r.id].describe(r.p)).join('; ')}` : `Enters: ${SIGNAL_MAP[rules[0].id].describe(rules[0].p)}`,
     ...filters.map((x) => `Only: ${FILTER_MAP[x.id].describe(x.p)}`),
-    ...(f.decider !== 'none' ? [`Decides: ${DECIDERS.find((d) => d.id === f.decider)!.name.toLowerCase()} learns which signals to skip (kept only if it helps on unseen data)`] : []),
+    ...(f.decider !== 'none' ? [`Decides: ${DECIDERS.find((d) => d.id === f.decider)!.name.toLowerCase()} learns which signals to skip (kept only if it helps in a check inside the training years)`] : []),
     `Risk: ${risks.length ? risks.map((r) => r.name.toLowerCase()).join(' + ') : 'fixed size'}${sizings.length > 1 ? ' (the smaller size wins)' : ''} — stop ${garchStop ? `${spec.exit.stopVol} GARCH σ` : `${stop} ATR`}`,
     ...(spec.weights ? [`Split: ${PORTFOLIOS.find((p) => p.id === f.portfolio)!.name.toLowerCase()}, fitted on the training years`] : []),
-    `Exits: ${tp.name.toLowerCase()}${f.flip ? ', or on an opposite signal' : ''}, at most ${holdText(style.holdH * hold.k)}`,
+    `Exits: ${tp.name.toLowerCase()}${f.flip ? ', or on an opposite signal' : ''}, at most ${holdText(holdH)}`,
     `${f.sides === 'both' ? 'Long and short' : f.sides === 'long' ? 'Long only' : 'Short only'} on ${coins.join(', ')}`,
   ];
   return { spec, style, timeframe: style.timeframe, years: style.years, coins, summary };
@@ -373,6 +425,14 @@ export function checkFlow(f0: Flow): Finding[] {
       const fb = famOf(b.id);
       const pair = [a.id, b.id];
       const both = `${sq(a.name)} and ${sq(b.name)}`;
+      if (a.mixed || b.mixed) {
+        if (f.combine === 'all' && a.nature === 'event' && b.nature === 'event') push('info', ['strategy'], pair, `${both} each fire only now and then; with “all must agree” both must fire on the same candle — expect very few trades (or choose “any one”).`);
+        continue;
+      }
+      if (fa === 'relative' && fb === 'relative') {
+        push('overlap', ['strategy'], pair, `${both} both trade the coin’s gap to bitcoin — much the same idea, read two ways.`);
+        continue;
+      }
       const trendRev = (isTrend(fa) && fb === 'reversion') || (isTrend(fb) && fa === 'reversion');
       const breakRev = (fa === 'breakout' && fb === 'reversion') || (fb === 'breakout' && fa === 'reversion');
       if (trendRev) {
@@ -380,7 +440,7 @@ export function checkFlow(f0: Flow): Finding[] {
         if (f.combine === 'all' && st.nature === 'state') push('pair', ['strategy'], pair, `${both} pair well with “all must agree”: the trend rule picks the side, the dip rule picks the moment — buy the dips in an uptrend, sell the rallies in a downtrend.`);
         else push('clash', ['strategy'], pair, `${both} pull opposite ways: one follows moves, the other bets they reverse. With “${COMBINES.find((c) => c.id === f.combine)!.name.toLowerCase()}” they will cancel out or flip-flop — use “all must agree” so the trend picks the side and the dip the moment.`);
       } else if (breakRev) push('clash', ['strategy'], pair, `${both} fight by design: one buys strength, the other sells it. They will rarely agree — pick one, or expect very few trades.`);
-      else if (fa === fb && fa !== 'ml') push('overlap', ['strategy'], pair, `${both} are both ${fa === 'reversion' ? 'dip-buying' : fa === 'breakout' ? 'breakout' : fa === 'seasonal' ? 'calendar' : 'trend'} rules — they will mostly say the same thing. Together they confirm each other; they do not add a new idea.`);
+      else if (fa === fb && fa !== 'ml') push('overlap', ['strategy'], pair, `${both} are both ${fa === 'reversion' ? 'dip-buying' : fa === 'breakout' ? 'breakout' : fa === 'seasonal' ? 'calendar' : fa === 'carry' ? 'funding' : fa === 'volume' ? 'volume' : 'trend'} rules — they will mostly say the same thing. Together they confirm each other; they do not add a new idea.`);
       else if (isTrend(fa) && isTrend(fb)) push('overlap', ['strategy'], pair, `${both} both follow the trend — mostly the same signal; together they act as confirmation.`);
       else if (fa === 'ml' && fb === 'ml') push('pair', ['strategy'], pair, `${both} are two different AI models — when both point the same way, the call is stronger than either alone.`);
       else if (fa === 'ml' || fb === 'ml') push('pair', ['strategy'], pair, `${both}: an AI model alongside a rule — a learned view checks a simple one.`);
@@ -401,6 +461,11 @@ export function checkFlow(f0: Flow): Finding[] {
       else if (fam === 'breakout' && m.lean === 'calm') push('clash', ['strategy', 'model'], [s.id, m.id], `${both}: breakouts need movement, and this filter only trades when it is quiet.`);
       else if (fam === 'breakout' && m.lean === 'storm') push('pair', ['strategy', 'model'], [s.id, m.id], `${both}: breakouts with fuel behind them.`);
       else if (isTrend(fam) && m.lean === 'trend') push('pair', ['strategy', 'model'], [s.id, m.id], `${both}: the trend rule trades only when the market is really trending.`);
+      else if (m.lean === 'market' && fam === 'relative') push('info', ['strategy', 'model'], [s.id, m.id], `${both}: a trade against bitcoin does not depend on which way bitcoin is going — this filter mostly just removes trades.`);
+      else if (m.lean === 'market' && isTrend(fam)) push('pair', ['strategy', 'model'], [s.id, m.id], `${both}: the coin’s trend with the whole market behind it.`);
+      else if (m.lean === 'market' && fam === 'reversion') push('pair', ['strategy', 'model'], [s.id, m.id], `${both}: buy dips only while bitcoin is in an uptrend, sell rallies only in a downtrend.`);
+      else if (m.lean === 'weekends' && isTrend(fam)) push('info', ['strategy', 'model'], [s.id, m.id], `${both}: weekend moves follow through less — trend rules usually want the weekdays.`);
+      else if (m.lean === 'weekends' && fam === 'reversion') push('pair', ['strategy', 'model'], [s.id, m.id], `${both}: dip-buying in the thin, quiet weekend market, where moves fade more often.`);
       else if (isTrend(fam) && m.lean === 'calm') push('pair', ['strategy', 'model'], [s.id, m.id], `${both}: trend rules suffer most in storms — stepping aside then usually helps.`);
       else if (fam === 'reversion' && m.lean === 'range') push('pair', ['strategy', 'model'], [s.id, m.id], `${both}: dip-buying where prices have been snapping back.`);
     }
@@ -421,6 +486,11 @@ export function checkFlow(f0: Flow): Finding[] {
     const g = leans(l);
     if (g.length > 1) push('overlap', ['model'], g.map((m) => m.id), `${g.map((m) => sq(m.name)).join(' and ')} measure much the same thing (${l === 'trend' ? 'a trending market' : l === 'range' ? 'a ranging market' : l === 'calm' ? 'a calm market' : 'a stormy market'}) — together they are stricter, not smarter.`);
   }
+  if (leans('weekdays').length && leans('weekends').length) push('clash', ['model'], [...leans('weekdays'), ...leans('weekends')].map((m) => m.id), '“Only on weekdays” and “Only at weekends” are opposites — never both true, so the bot would never trade.');
+  for (const m of [...leans('weekdays'), ...leans('weekends')]) {
+    const timed = S.find((s) => s.id === 'dow');
+    if (timed && m.lean === 'weekends') push('clash', ['strategy', 'model'], [timed.id, m.id], `${sq(timed.name)} trades on Mondays — with ${sq(m.name)} it never trades.`);
+  }
   const sess = leans('session');
   if (sess.length > 1) push('info', ['model'], sess.map((m) => m.id), `Both sessions together leave only the hours they share (13:00–16:00 UTC).`);
 
@@ -437,8 +507,18 @@ export function checkFlow(f0: Flow): Finding[] {
     if (ai.length > 1) push('pair', ['forecast'], ai.map((x) => x.id), `${ai.map((x) => sq(x.name)).join(' and ')}: different AI models must all agree — fewer trades, each better confirmed.`);
   }
   if (f.decider === 'both') push('pair', ['forecast'], ['both'], 'The neural network and the decision forest paired: each gives its odds that a signal wins and their average decides — two different learners usually make steadier calls than either alone.');
-  if (f.decider !== 'none' && S.length + M.length + F.length >= 5) push('info', ['forecast'], [f.decider], 'With this many filters the AI decision maker may have fewer than 40 past trades to learn from — it says so after the test, and is only kept if it helps on unseen data.');
+  if (f.decider !== 'none' && S.length + M.length + F.length >= 5) push('info', ['forecast'], [f.decider], 'With this many filters the AI decision maker may have fewer than 40 past trades to learn from — it says so after the test, and is only kept if it passes the check inside the training years.');
 
+  // the strategies that trade against bitcoin
+  const rel = S.filter((s) => s.needsBtc);
+  if (rel.length) {
+    const cs = f.coins.toUpperCase().split(/[\s,]+/).filter(Boolean);
+    if (!cs.some((x) => x !== 'BTC')) push('clash', ['strategy', 'test'], rel.map((s) => s.id), `${rel.map((s) => sq(s.name)).join(' and ')} need${rel.length > 1 ? '' : 's'} a coin other than bitcoin to trade — add one (ETH, SOL …).`);
+    else if (!cs.includes('BTC')) push('info', ['strategy', 'test'], rel.map((s) => s.id), `${rel.map((s) => sq(s.name)).join(' and ')} read${rel.length > 1 ? '' : 's'} bitcoin’s price: BTC is added to the coins it is tested on (it does not trade BTC itself).`);
+    const pairsPick = S.find((s) => s.id === 'pairs');
+    if (pairsPick && R.some((r) => r.hedge)) push('pair', ['strategy', 'risk'], ['pairs', 'hedged'], `${sq(pairsPick.name)} with the bitcoin hedge is the true pairs trade: long the cheap coin and short bitcoin (or the reverse), so the market’s direction cancels out.`);
+    else if (pairsPick) push('info', ['strategy', 'risk'], ['pairs'], `${sq(pairsPick.name)} trades only the coin’s side of the pair. Add “Market-neutral (hedge with bitcoin)” in Risk to trade the gap itself, without the market’s direction.`);
+  }
   // risk
   const sizes = R.filter((r) => r.sizing);
   if (sizes.length === 2) push('pair', ['risk'], sizes.map((r) => r.id), `${sizes.map((r) => sq(r.name)).join(' and ')} combine: each works out a size and the smaller one is used — ${sizes.some((r) => r.id === 'var') ? 'the value-at-risk budget acts as a ceiling' : 'the stricter rule wins each time'}.`);
@@ -452,7 +532,7 @@ export function checkFlow(f0: Flow): Finding[] {
   if (f.portfolio !== 'equal' && coinN < 2) push('info', ['risk', 'test'], [f.portfolio], 'Splitting money across coins needs two or more coins.');
   if (f.portfolio === 'tangency') push('info', ['risk'], ['tangency'], 'The efficient frontier leans on past returns, the noisiest number in finance — it is fitted on the training years only and judged on the unseen ones; compare it with “more on calmer coins”.');
   // rules
-  if (f.sides === 'short' && S.some((s) => s.id === 'dow')) push('clash', ['rules', 'strategy'], ['dow'], '“Monday effect” only ever buys — with short only, it never trades.');
+  for (const s of S.filter((x) => x.longOnly)) if (f.sides === 'short') push('clash', ['rules', 'strategy'], [s.id], `${sq(s.name)} only ever buys — with short only, it never trades.`);
   if (f.takeProfit !== 'trail' && f.takeProfit !== 'none' && S.some((s) => isTrend(famOf(s.id))) && f.style !== 'scalp') push('info', ['rules', 'strategy'], [f.takeProfit], 'A fixed profit target caps a trend strategy’s big winners — trend rules usually do better letting winners run.');
   return out;
 }

@@ -28,7 +28,8 @@ export interface Market {
   bench?: Float64Array | null;
 }
 export type Params = Record<string, number>;
-export type Family = 'momentum' | 'trend' | 'breakout' | 'reversion' | 'carry' | 'seasonal' | 'volume' | 'ml';
+/** relative: the coin measured against bitcoin (pairs, lead and lag) */
+export type Family = 'momentum' | 'trend' | 'breakout' | 'reversion' | 'carry' | 'seasonal' | 'volume' | 'ml' | 'relative';
 
 export interface ExitSpec {
   /** stop distance in ATR(14) */
@@ -218,6 +219,179 @@ export function benchBeta(c: Ctx): Float64Array | null {
   });
 }
 
+/** the benchmark's (bitcoin's) close with gaps filled forward; null when there is none */
+const benchFilled = (c: Ctx) =>
+  cached(c, 'benchF', () => {
+    const b = c.m.bench;
+    if (!b) return null;
+    const out = new Float64Array(b.length).fill(NaN);
+    let last = NaN;
+    for (let i = 0; i < b.length; i++) {
+      if (Number.isFinite(b[i]) && b[i] > 0) last = b[i];
+      out[i] = last;
+    }
+    return out;
+  });
+
+/** the highest (sign 1) or lowest (sign −1) of the n values BEFORE each one */
+function extremePrev(x: ArrayLike<number>, n: number, sign: 1 | -1): Float64Array {
+  const out = new Float64Array(x.length).fill(NaN);
+  const dq: number[] = [];
+  for (let i = 0; i < x.length; i++) {
+    while (dq.length && dq[0] < i - n) dq.shift();
+    if (i >= n && dq.length) out[i] = x[dq[0]];
+    while (dq.length && (x[dq[dq.length - 1]] - x[i]) * sign <= 0) dq.pop();
+    dq.push(i);
+  }
+  return out;
+}
+
+/**
+ * The coin against bitcoin over a rolling window: regress log price on
+ * bitcoin's log price and read where today's price sits against the line, in
+ * standard deviations of the fit (z), with the fit's R². Each value uses the
+ * window ending at that bar only.
+ */
+export function pairZ(c: Ctx, windowH: number): { z: Float64Array; r2: Float64Array; beta: Float64Array } | null {
+  return cached(c, `pairZ${H(c, windowH)}`, () => {
+    const bm = benchFilled(c);
+    if (!bm) return null;
+    const cl = close(c);
+    const n = cl.length;
+    const w = Math.max(20, H(c, windowH));
+    const z = new Float64Array(n).fill(NaN);
+    const r2 = new Float64Array(n).fill(NaN);
+    const beta = new Float64Array(n).fill(NaN);
+    // centred on the first usable pair, so the rolling sums stay well conditioned
+    let x0 = NaN;
+    let y0 = NaN;
+    const xs = new Float64Array(n);
+    const ys = new Float64Array(n);
+    const ok = new Uint8Array(n);
+    let k = 0;
+    let sx = 0;
+    let sy = 0;
+    let sxx = 0;
+    let sxy = 0;
+    let syy = 0;
+    for (let i = 0; i < n; i++) {
+      if (Number.isFinite(bm[i]) && bm[i] > 0 && cl[i] > 0) {
+        if (!Number.isFinite(x0)) {
+          x0 = Math.log(bm[i]);
+          y0 = Math.log(cl[i]);
+        }
+        xs[i] = Math.log(bm[i]) - x0;
+        ys[i] = Math.log(cl[i]) - y0;
+        ok[i] = 1;
+        k++;
+        sx += xs[i];
+        sy += ys[i];
+        sxx += xs[i] * xs[i];
+        sxy += xs[i] * ys[i];
+        syy += ys[i] * ys[i];
+      }
+      const j = i - w;
+      if (j >= 0 && ok[j]) {
+        k--;
+        sx -= xs[j];
+        sy -= ys[j];
+        sxx -= xs[j] * xs[j];
+        sxy -= xs[j] * ys[j];
+        syy -= ys[j] * ys[j];
+      }
+      if (k < w || !ok[i]) continue;
+      const mx = sx / k;
+      const my = sy / k;
+      const vxx = sxx / k - mx * mx;
+      const vxy = sxy / k - mx * my;
+      const vyy = syy / k - my * my;
+      if (!(vxx > 1e-12) || !(vyy > 1e-12)) continue;
+      const b = vxy / vxx;
+      const sse = Math.max(0, vyy - b * vxy) * k;
+      const sd = Math.sqrt(sse / (k - 2));
+      beta[i] = b;
+      r2[i] = Math.min(1, (vxy * vxy) / (vxx * vyy));
+      if (sd > 1e-9) z[i] = (ys[i] - my - b * (xs[i] - mx)) / sd;
+    }
+    return { z, r2, beta };
+  });
+}
+
+/**
+ * The trend composite's score in −1 … +1: one vote each from price and volume
+ * indicators over several horizons (`unit` hours stand for one "day" of the
+ * published daily indicators).
+ */
+export function trendScore(c: Ctx, unit: number): Float64Array {
+  return cached(c, `ctrend${unit}:${c.m.tfH}`, () => {
+    const b = c.m.bars;
+    const n = b.length;
+    const cl = close(c);
+    const U = (d: number) => Math.max(2, Math.round((d * unit) / c.m.tfH));
+    const votes: (Float64Array | Int8Array)[] = [];
+    const push = (f: (i: number) => number) => {
+      const v = new Float64Array(n);
+      for (let i = 0; i < n; i++) v[i] = f(i);
+      votes.push(v);
+    };
+    // oscillators: RSI, stochastic %K, commodity channel index
+    const rs = rsi(cl, U(14));
+    push((i) => (Number.isFinite(rs[i]) ? sgn(rs[i] - 50) : NaN));
+    const hh = extremePrev(Float64Array.from(b, (x) => x.high), U(14), 1);
+    const ll = extremePrev(Float64Array.from(b, (x) => x.low), U(14), -1);
+    push((i) => {
+      const hi = Math.max(hh[i], b[i].high);
+      const lo = Math.min(ll[i], b[i].low);
+      return Number.isFinite(hi) && Number.isFinite(lo) && hi > lo ? sgn((cl[i] - lo) / (hi - lo) - 0.5) : NaN;
+    });
+    const tp = Float64Array.from(b, (x) => (x.high + x.low + x.close) / 3);
+    const tpm = sma(tp, U(20));
+    push((i) => (Number.isFinite(tpm[i]) ? sgn(tp[i] - tpm[i]) : NaN));
+    // price against its averages over seven horizons
+    for (const d of [3, 5, 10, 20, 50, 100, 200]) {
+      const m = sma(cl, U(d));
+      push((i) => (Number.isFinite(m[i]) ? sgn(cl[i] - m[i]) : NaN));
+    }
+    // MACD and its signal line
+    const ef = ema(cl, U(12));
+    const es = ema(cl, U(26));
+    const macd = Float64Array.from(ef, (x, i) => x - es[i]);
+    const sig = ema(Float64Array.from(macd, (x) => (Number.isFinite(x) ? x : 0)), U(9));
+    push((i) => (Number.isFinite(macd[i]) ? sgn(macd[i]) : NaN));
+    push((i) => (Number.isFinite(macd[i]) && Number.isFinite(sig[i]) ? sgn(macd[i] - sig[i]) : NaN));
+    // volume: rising volume confirms the direction price took over the same stretch
+    const vol = Float64Array.from(b, (x) => x.volume);
+    for (const [a, l] of [[3, 20], [5, 50], [10, 100]] as const) {
+      const va = sma(vol, U(a));
+      const vl = sma(vol, U(l));
+      const r = retN(cl, U(a));
+      push((i) => (Number.isFinite(va[i]) && Number.isFinite(vl[i]) && Number.isFinite(r[i]) ? (va[i] > vl[i] ? sgn(r[i]) : 0) : NaN));
+    }
+    // Chaikin money flow: where closes sit in their ranges, weighted by volume
+    const mfv = Float64Array.from(b, (x) => (x.high > x.low ? ((x.close - x.low - (x.high - x.close)) / (x.high - x.low)) * x.volume : 0));
+    const mfS = sma(mfv, U(20));
+    push((i) => (Number.isFinite(mfS[i]) ? sgn(mfS[i]) : NaN));
+    // Bollinger bands: a close outside them
+    const bm = sma(cl, U(20));
+    const bs = rstd(cl, U(20));
+    push((i) => (Number.isFinite(bm[i]) && Number.isFinite(bs[i]) ? (cl[i] > bm[i] + 2 * bs[i] ? 1 : cl[i] < bm[i] - 2 * bs[i] ? -1 : 0) : NaN));
+    const out = new Float64Array(n).fill(NaN);
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      let k = 0;
+      for (const v of votes)
+        if (Number.isFinite(v[i])) {
+          s += v[i];
+          k++;
+        }
+      // every indicator must have its history: a score from the short ones alone is a different measure
+      if (k === votes.length) out[i] = s / k;
+    }
+    return out;
+  });
+}
+export const TREND_VOTES = 17;
+
 const state = (n: number) => new Int8Array(n);
 const sgn = (x: number) => (x > 0 ? 1 : x < 0 ? -1 : 0);
 
@@ -230,6 +404,8 @@ export interface SignalDef {
   rationale: string;
   grid: Record<string, number[]>;
   needsFunding?: boolean;
+  /** reads bitcoin's price beside the coin's: BTC must be among the coins tested (and it never trades BTC itself) */
+  needsBench?: boolean;
   /** only meaningful on bars shorter than a day */
   intraday?: boolean;
   /** exits that suit the rule (the search varies them) */
@@ -245,6 +421,8 @@ export interface FilterDef {
   rationale: string;
   grid: Record<string, number[]>;
   needsFunding?: boolean;
+  /** it reads bitcoin's price when the market has it (and the coin's own otherwise) */
+  usesBench?: boolean;
   compute: (c: Ctx, p: Params) => { long: Uint8Array; short: Uint8Array };
   describe: (p: Params) => string;
 }
@@ -314,7 +492,9 @@ function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf' | 'nn'): Int8Array 
   const h = H(c, p.horizon);
   const X = features(c);
   const cl = close(c);
-  const model = trainedOnce<{ ols: Ridge; sd: number } | { rf: ForestModel } | { nn: MLP } | null>(c, `${kind}:${h}`, () => {
+  // the network's size can be set (the Quant desk's NNET panel sends its own): two hidden layers
+  const hidden: [number, number] = [p.h1 > 0 ? Math.round(p.h1) : 16, p.h2 > 0 ? Math.round(p.h2) : 8];
+  const model = trainedOnce<{ ols: Ridge; sd: number } | { rf: ForestModel } | { nn: MLP } | null>(c, `${kind}:${h}${kind === 'nn' ? `:${hidden.join('x')}` : ''}`, () => {
     const rows: number[][] = [];
     const ys: number[] = [];
     const step = Math.max(1, Math.floor(c.trainEnd / 4000));
@@ -329,7 +509,7 @@ function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf' | 'nn'): Int8Array 
       const fit = rows.map((r) => predictRidge(m, r));
       return { ols: m, sd: Math.sqrt(fit.reduce((a, b) => a + b * b, 0) / fit.length) || 1e-9 };
     }
-    if (kind === 'nn') return { nn: fitMLP(rows, ys.map((y) => (y > 0 ? 1 : 0)), { hidden: [16, 8], epochs: 40, seed: c.seed, patience: 6 }) };
+    if (kind === 'nn') return { nn: fitMLP(rows, ys.map((y) => (y > 0 ? 1 : 0)), { hidden, epochs: 40, seed: c.seed, patience: 6 }) };
     return { rf: fitForest(rows, ys.map((y) => (y > 0 ? 1 : 0)), { trees: 40, maxDepth: 5, minLeaf: 20, seed: c.seed }) };
   });
   if (!model) return out;
@@ -578,8 +758,8 @@ export const SIGNALS: SignalDef[] = [
       c.m.bars.forEach((b, i) => {
         const h = new Date(b.time).getUTCHours();
         if (h === 0) open = b.open;
-        // the bar that closes at hour p.hour
-        if (h + c.m.tfH === p.hour && Number.isFinite(open)) out[i] = sgn(b.close / open - 1);
+        // the bar that closes at hour p.hour (on 4-hour candles: the last one closing by then)
+        if (h + c.m.tfH === Math.floor(p.hour / c.m.tfH) * c.m.tfH && Number.isFinite(open)) out[i] = sgn(b.close / open - 1);
       });
       return out;
     },
@@ -704,6 +884,157 @@ export const SIGNALS: SignalDef[] = [
     describe: (p) => `fit an Ornstein–Uhlenbeck process over ${hrs(p.window)}; when it reverts fast (half-life under a quarter of the window), long below −${p.k} s-score, short above +${p.k}`,
   },
   {
+    id: 'vwmom',
+    name: 'Volume-weighted momentum',
+    family: 'momentum',
+    papers: ['h24', 'mop12', 'lmsw02'],
+    rationale: 'Momentum where each candle counts by its volume: a move made on heavy trading carries more information than the same move on a quiet market, and in crypto the volume-weighted trend has been the stronger predictor.',
+    grid: { lookback: [24, 72, 168, 336] },
+    exit: { stopAtr: 3, maxBars: 336, onFlip: true },
+    compute: (c, p) => {
+      const n = H(c, p.lookback);
+      const lr = lrets(c);
+      const b = c.m.bars;
+      const out = state(b.length);
+      let sv = 0;
+      let s = 0;
+      const w = (i: number) => (Number.isFinite(lr[i]) && b[i].volume > 0 ? b[i].volume : 0);
+      for (let i = 1; i < b.length; i++) {
+        sv += w(i) * (Number.isFinite(lr[i]) ? lr[i] : 0);
+        s += w(i);
+        if (i > n) {
+          sv -= w(i - n) * (Number.isFinite(lr[i - n]) ? lr[i - n] : 0);
+          s -= w(i - n);
+        }
+        if (i >= n && s > 0) out[i] = sgn(sv / s);
+      }
+      return out;
+    },
+    describe: (p) => `long when the volume-weighted return of the last ${hrs(p.lookback)} is positive, short when negative`,
+  },
+  {
+    id: 'ctrend',
+    name: 'Trend composite (17 indicators)',
+    family: 'trend',
+    papers: ['flpwz25', 'hu21', 'app05'],
+    rationale: 'No single indicator is reliable, but together they are: RSI, stochastic, CCI, price against seven moving averages, MACD, volume trends, money flow and Bollinger bands each cast one vote. The published crypto trend factor weights such indicators by machine learning across thousands of coins; here each gets an equal vote on one coin.',
+    grid: { unit: [24, 4], k: [0.3, 0.6] },
+    exit: { stopAtr: 3, maxBars: 480, onFlip: true },
+    compute: (c, p) => Int8Array.from(trendScore(c, p.unit), (x) => (Number.isFinite(x) ? (x > p.k ? 1 : x < -p.k ? -1 : 0) : 0)),
+    describe: (p) => `${TREND_VOTES} price and volume indicators vote (${p.unit === 24 ? 'daily horizons, 3 to 200 days' : `horizons of ${3 * p.unit} to ${200 * p.unit} hours`}); long when the balance of votes is above ${Math.round(p.k * 100)} %, short below −${Math.round(p.k * 100)} %`,
+  },
+  {
+    id: 'maxmin',
+    name: 'New high / new low',
+    family: 'breakout',
+    papers: ['pv22', 'hu21'],
+    rationale: 'In bitcoin, a close at a new 10-day high tended to be followed by more gains (trend), and a close at a new 10-day low by a bounce (panic selling exhausts itself). Both are buys — the rule never shorts.',
+    grid: { n: [240, 480], mode: [0, 1, 2] },
+    exit: { stopAtr: 3, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const n = H(c, p.n);
+      const cl = close(c);
+      const hi = cached(c, `chi${n}`, () => extremePrev(cl, n, 1));
+      const lo = cached(c, `clo${n}`, () => extremePrev(cl, n, -1));
+      return Int8Array.from(cl, (x, i) => ((p.mode !== 2 && x > hi[i]) || (p.mode !== 1 && x < lo[i]) ? 1 : 0));
+    },
+    describe: (p) => (p.mode === 1 ? `buy a close at a new ${hrs(p.n)} high` : p.mode === 2 ? `buy a close at a new ${hrs(p.n)} low (the bounce)` : `buy a close at a new ${hrs(p.n)} high (trend) or a new ${hrs(p.n)} low (bounce)`),
+  },
+  {
+    id: 'jump',
+    name: 'Big-day follow-through',
+    family: 'momentum',
+    papers: ['luwz21', 'cp19o'],
+    rationale: 'In crypto an extreme day tends to be followed, not faded: coins with the biggest daily jumps went on to earn more, and fading abnormal days lost money. The published profit could not be told from luck after costs, so the Lab tests it on your coins before it is believed.',
+    grid: { k: [2, 2.5, 3] },
+    exit: { stopAtr: 2.5, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const d = H(c, 24);
+      const cl = close(c);
+      const r = retN(cl, d);
+      const sd = cached(c, `jsd${d}`, () => rstd(Float64Array.from(r, (x) => (Number.isFinite(x) ? x : 0)), H(c, 720)));
+      const out = state(cl.length);
+      // the day's move against the spread of daily moves as it stood a day earlier
+      for (let i = d + H(c, 720); i < cl.length; i++) {
+        const z = sd[i - d] > 0 ? r[i] / sd[i - d] : 0;
+        out[i] = z > p.k ? 1 : z < -p.k ? -1 : 0;
+      }
+      return out;
+    },
+    describe: (p) => `after a 1-day move of more than ${p.k} standard deviations (of the last 30 days), trade in its direction for a day`,
+  },
+  {
+    id: 'night',
+    name: 'Late-evening hours (21:00–23:00 UTC)',
+    family: 'seasonal',
+    papers: ['pv22', 'bcgl19'],
+    rationale: "Bitcoin's returns were concentrated in two hours late in the US day, 21:00 to 23:00 UTC, in 2015–2021 — and the pattern weakened afterwards. A calendar effect with no clear cause: the Lab tests whether it still holds.",
+    grid: { hour: [21, 22] },
+    intraday: true,
+    exit: { stopAtr: 3, maxBars: 2, onFlip: false },
+    compute: (c, p) => {
+      const out = state(c.m.bars.length);
+      const want = (Math.floor(p.hour / c.m.tfH) * c.m.tfH) % 24;
+      c.m.bars.forEach((b, i) => {
+        if ((new Date(b.time).getUTCHours() + c.m.tfH) % 24 === want) out[i] = 1;
+      });
+      return out;
+    },
+    describe: (p) => `buy at ${p.hour}:00 UTC and hold for two hours`,
+  },
+  {
+    id: 'pairs',
+    name: 'Pairs: the coin against bitcoin',
+    family: 'relative',
+    papers: ['ggr06', 'fk20', 'al10'],
+    rationale: 'Coins move with bitcoin. When a coin drifts unusually far from where bitcoin says it should be, the gap tends to close: buy the coin when it is cheap against bitcoin, sell when rich. With the bitcoin hedge this is a true pairs trade — the market’s direction cancels out. In crypto the effect showed on hourly and 5-minute candles, not daily ones.',
+    grid: { window: [168, 336, 720], k: [1.5, 2] },
+    needsBench: true,
+    exit: { stopAtr: 2.5, targetR: 1.5, maxBars: 96, onFlip: false },
+    compute: (c, p) => {
+      const f = pairZ(c, p.window);
+      if (!f) return state(c.m.bars.length);
+      // only where the coin really tracks bitcoin: a positive slope and a fit that explains half the moves
+      return Int8Array.from(f.z, (z, i) => (Number.isFinite(z) && f.beta[i] > 0 && f.r2[i] >= 0.5 ? (z < -p.k ? 1 : z > p.k ? -1 : 0) : 0));
+    },
+    describe: (p) => `fit the coin against bitcoin over ${hrs(p.window)}; buy when it is more than ${p.k} standard deviations cheap against bitcoin, sell when as rich (only while the two move together)`,
+  },
+  {
+    id: 'btclead',
+    name: 'Bitcoin leads, the coin catches up',
+    family: 'relative',
+    papers: ['gstw24', 'ltw22'],
+    rationale: 'News reaches bitcoin first; with limited attention, other coins react late. When bitcoin has moved and a coin has not yet done its share (its usual beta to bitcoin), trade the coin in bitcoin’s direction. Published at horizons of minutes — on hourly candles most of it may already be gone, which the test shows.',
+    grid: { n: [1, 4, 24], k: [1, 1.5] },
+    needsBench: true,
+    exit: { stopAtr: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const bm = benchFilled(c);
+      const out = state(c.m.bars.length);
+      const beta = benchBeta(c);
+      if (!bm || !beta) return out;
+      // a one-candle look-back is allowed here: the lead is a short-lived thing
+      const n = Math.max(1, Math.round(p.n / c.m.tfH));
+      const cl = close(c);
+      const gap = new Float64Array(cl.length);
+      const lead = new Float64Array(cl.length);
+      for (let i = n; i < cl.length; i++) {
+        const b = Number.isFinite(beta[i - n]) ? beta[i - n] : NaN;
+        lead[i] = Math.log(bm[i] / bm[i - n]);
+        const g = b * lead[i] - Math.log(cl[i] / cl[i - n]);
+        gap[i] = Number.isFinite(g) ? g : 0;
+      }
+      const sd = rstd(gap, H(c, 168));
+      for (let i = n + H(c, 168); i < cl.length; i++) {
+        const z = sd[i - 1] > 0 ? gap[i] / sd[i - 1] : 0;
+        // bitcoin moved and the coin lagged it (not: the coin moved alone)
+        out[i] = z > p.k && lead[i] > 0 ? 1 : z < -p.k && lead[i] < 0 ? -1 : 0;
+      }
+      return out;
+    },
+    describe: (p) => `when bitcoin has moved over ${hrs(p.n)} and the coin is more than ${p.k} standard deviations behind its usual share of that move, trade the coin in bitcoin's direction`,
+  },
+  {
     id: 'candle',
     name: 'Next-candle forecast',
     family: 'ml',
@@ -744,8 +1075,8 @@ export const SIGNALS: SignalDef[] = [
     rationale: 'A small neural network (two hidden layers) learns smooth nonlinear combinations of the same features — the model class Gu, Kelly and Xiu found best for return prediction; early stopping on the latest training data keeps it from memorising.',
     grid: { horizon: [4, 24], edge: [0.03, 0.06] },
     exit: { stopAtr: 2, maxBars: 48, onFlip: true },
-    compute: (c, p) => cached(c, `nn${p.horizon}:${p.edge}:${c.trainEnd}`, () => learnedSignal(c, p, 'nn')),
-    describe: (p) => `a neural network (${FEATURES.length} inputs, 16 and 8 hidden units) forecasting the ${hrs(p.horizon)} direction; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
+    compute: (c, p) => cached(c, `nn${p.horizon}:${p.edge}:${p.h1 ?? 16}:${p.h2 ?? 8}:${c.trainEnd}`, () => learnedSignal(c, p, 'nn')),
+    describe: (p) => `a neural network (${FEATURES.length} inputs, ${p.h1 ?? 16} and ${p.h2 ?? 8} hidden units) forecasting the ${hrs(p.horizon)} direction; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
   },
 ];
 
@@ -879,6 +1210,48 @@ export const FILTERS: FilterDef[] = [
     describe: (p) => `no longs when funding is above ${(p.band * 100).toFixed(0)}% a year, no shorts below −${(p.band * 100).toFixed(0)}%`,
   },
   {
+    id: 'btctrend',
+    name: 'Bitcoin market trend',
+    papers: ['ltw22', 'fab07'],
+    rationale: 'Most of a coin’s move is the crypto market’s move, and bitcoin is the market: longs only while bitcoin is above its long average, shorts only while below. (On bitcoin itself this is its own trend.)',
+    grid: { lookback: [1200, 4800] },
+    usesBench: true,
+    compute: (c, p) => {
+      const px = benchFilled(c) ?? close(c);
+      const m = sma(Float64Array.from(px, (x) => (Number.isFinite(x) ? x : 0)), H(c, p.lookback));
+      const a = allow(px.length);
+      const from = H(c, p.lookback);
+      // the average needs a full window of real prices
+      let seen = 0;
+      for (let i = 0; i < px.length; i++) {
+        seen = Number.isFinite(px[i]) ? seen + 1 : 0;
+        const ok = seen >= from && Number.isFinite(m[i]);
+        a.long[i] = ok && px[i] > m[i] ? 1 : 0;
+        a.short[i] = ok && px[i] < m[i] ? 1 : 0;
+      }
+      return a;
+    },
+    describe: (p) => `longs only while bitcoin is above its ${hrs(p.lookback)} average, shorts only while below`,
+  },
+  {
+    id: 'weekday',
+    name: 'Weekdays or weekends',
+    papers: ['kp21', 'aq19', 'bcgl19'],
+    rationale: 'Crypto trades all week but the money does not: at weekends volume and risk are lower and moves follow through less; at the start of the week volatility returns. Trend rules tend to want weekdays, dip-buying the quiet weekend.',
+    grid: { mode: [0, 1] },
+    compute: (c, p) => {
+      const a = allow(c.m.bars.length);
+      c.m.bars.forEach((b, i) => {
+        // the day the signal's trade would open on: the bar after this one
+        const d = new Date(b.time + c.m.tfH * 3_600_000).getUTCDay();
+        const weekend = d === 0 || d === 6;
+        a.long[i] = a.short[i] = (p.mode === 0 ? !weekend : weekend) ? 1 : 0;
+      });
+      return a;
+    },
+    describe: (p) => (p.mode === 0 ? 'only on weekdays (Monday to Friday, UTC)' : 'only at weekends (Saturday and Sunday, UTC)'),
+  },
+  {
     id: 'vratio',
     name: 'Variance-ratio regime',
     papers: ['lm88', 'hur51'],
@@ -905,7 +1278,7 @@ export const FILTERS: FilterDef[] = [
       const n = c.m.bars.length;
       const a = allow(n);
       let dir: Int8Array;
-      if (p.model === 4) dir = SIGNAL_MAP.nn.compute(c, { horizon: 24, edge: 0 });
+      if (p.model === 4) dir = SIGNAL_MAP.nn.compute(c, { horizon: p.horizon > 0 ? p.horizon : 24, edge: 0, ...(p.h1 > 0 ? { h1: p.h1, h2: p.h2 > 0 ? p.h2 : Math.max(2, Math.round(p.h1 / 2)) } : {}) });
       else if (p.model === 3) {
         const kf = kalmanOf(c, 1);
         dir = Int8Array.from(kf.slope, (s) => sgn(s));
@@ -918,7 +1291,7 @@ export const FILTERS: FilterDef[] = [
       }
       return a;
     },
-    describe: (p) => `only when ${['the next-candle forest', 'the ridge-regression forecast', 'the random-forest forecast', 'the Kalman trend', 'the neural-network forecast'][p.model]} points the same way`,
+    describe: (p) => `only when ${['the next-candle forest', 'the ridge-regression forecast', 'the random-forest forecast', 'the Kalman trend', p.h1 > 0 ? `the neural-network forecast (${p.h1} and ${p.h2 > 0 ? p.h2 : Math.max(2, Math.round(p.h1 / 2))} hidden units${p.horizon > 0 ? `, ${hrs(p.horizon)} ahead` : ''})` : 'the neural-network forecast'][p.model]} points the same way`,
   },
   {
     id: 'hurst',

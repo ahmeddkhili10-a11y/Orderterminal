@@ -85,6 +85,7 @@ export function LabLibrary({ config: c, setConfig }: PanelProps<LibConfig>) {
                 <p className="mono muted">
                   grid: {Object.entries(s.grid).map(([k, v]) => `${k} ∈ {${v.join(', ')}}`).join(' · ')}
                   {s.needsFunding ? ' · needs funding history' : ''}
+                  {s.needsBench ? ' · needs BTC and another coin among the coins' : ''}
                   {s.intraday ? ' · intraday bars only' : ''}
                 </p>
                 {s.papers.map((p) => (
@@ -285,7 +286,8 @@ function Detail({ r, tfH, onDeploy }: { r: Ranked; tfH: number; onDeploy: (targe
           {r.meta ? (
             <>
               <div className="lab-line">
-                {r.meta.used ? 'Kept: it lifted the out-of-sample Sharpe' : 'Not kept: it did not help out of sample'} — {num(r.meta.oosSharpeBefore)} → {num(r.meta.oosSharpeAfter)} on {r.meta.tradesAfter} trades. Out-of-bag accuracy {r.meta.oob !== null ? pct(r.meta.oob) : '—'} against a base rate of {pct(r.meta.base)}.
+                {r.meta.used ? 'Kept: it helped in the training check' : r.meta.valBefore == null ? 'Not kept: too few training trades to check it' : 'Not kept: it did not help in the training check'}
+                {r.meta.valBefore != null && r.meta.valAfter != null ? ` (Sharpe ${num(r.meta.valBefore)} → ${num(r.meta.valAfter)} on the last 30 % of the training years, fitted on the trades before them)` : ''}. Out of sample: {num(r.meta.oosSharpeBefore)} → {num(r.meta.oosSharpeAfter)} on {r.meta.tradesAfter} trades — a read-out; the choice never looks at it. Out-of-bag accuracy {r.meta.oob !== null ? pct(r.meta.oob) : '—'} against a base rate of {pct(r.meta.base)}.
               </div>
               <Bars rows={r.meta.importance.map(([f, w]) => ({ label: f, value: w, tone: 'up' }))} format={(v) => pct(v)} />
             </>

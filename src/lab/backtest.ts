@@ -43,6 +43,8 @@ export interface StrategySpec {
   autoMeta?: boolean | 'forest' | 'nn' | 'both';
   /** how the money is split across the coins: equally, by calm (inverse volatility), minimum variance, or the efficient frontier's best return for the risk (the last three fitted on the training years) */
   weights?: 'equal' | 'invvol' | 'minvar' | 'tangency';
+  /** the size of the neural-network decision maker's two hidden layers (the bot builder sets it; 8 and 4 otherwise) */
+  metaNet?: [number, number];
   /** the split, once tested: coin → share of the money (sums to 1) */
   coinWeights?: Record<string, number>;
 }

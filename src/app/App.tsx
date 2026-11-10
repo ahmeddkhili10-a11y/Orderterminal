@@ -18,6 +18,7 @@ import { CommandBar, openFunction, StatusLine, switchUi } from '../pro/ProBar';
 import { FUNCTIONS, WORKSPACES, type FnHome, type Workspace } from '../pro/functions';
 import { desktop } from '../desktop/bridge';
 import { startLabLink } from '../lab/store';
+import { startLabBridge } from '../lab/bridge';
 import { AddPanelModal, ConnectionModal, LayoutsModal, Modal, SettingsModal, type Placement } from './Modals';
 import { KeysModal } from './KeysModal';
 import { PanelHost } from './PanelHost';
@@ -155,6 +156,8 @@ export function App() {
     startBotAlerts();
     startCryptoSwarmLink();
     startLabLink();
+    // a model sent from the Quant desk (any window) opens the bot builder, which takes it in
+    startLabBridge(() => openFunction('labflow', 'lab'));
   }, []);
 
   // the command line and the function keys open a panel in its workspace

@@ -6547,3 +6547,20 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
 .scr-open-row b { color: var(--pro-head, var(--accent)); font-size: 11px; }
 .scr-open-row em { font-style: normal; font-size: 10px; color: var(--muted); }
 .scr-open-row:not(:has(b)) { grid-template-columns: 0 1fr auto; }
+
+/* "Use in a bot": the Quant desk's bridge into the bot builder */
+.use-bot { display: flex; flex-direction: column; gap: 4px; width: 330px; max-width: 78vw; }
+.use-bot-head { font-size: 10.5px; line-height: 1.4; color: var(--muted); padding: 2px 4px 6px; border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+.use-bot-opt { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 7px 9px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.use-bot-opt:hover { background: color-mix(in srgb, var(--text) 6%, transparent); border-color: var(--border); }
+.use-bot-opt b { font-size: 12px; font-weight: 600; }
+.use-bot-opt span { font-size: 11px; line-height: 1.4; color: var(--muted); }
+.use-bot-opt.sent { border-color: color-mix(in srgb, var(--buy) 55%, transparent); background: color-mix(in srgb, var(--buy) 9%, transparent); }
+.use-bot-opt.sent b { color: var(--buy); }
+.use-bot-foot { font-size: 10.5px; color: var(--buy); padding: 4px 4px 0; }
+.bb2-arrived { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0 0; padding: 8px 11px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--pro-head, var(--accent)) 55%, transparent); background: color-mix(in srgb, var(--pro-head, var(--accent)) 9%, transparent); font-size: 12px; line-height: 1.45; }
+.bb2-arrived ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.bb2-arrived button { flex: none; }
+.bb2-tune { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 1px 0 5px 33px; font-size: 10.5px; color: var(--muted); }
+.bb2-tune .chip { padding: 1px 7px; font-size: 10.5px; }
+.bb2-tune em { font-style: normal; color: var(--pro-head, var(--accent)); }

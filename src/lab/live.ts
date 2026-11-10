@@ -2,7 +2,8 @@
 // and manage its open trade by its own exit rules — the same code paths the
 // backtest used, so what was tested is what trades.
 import { signalOf, sizeWeights, type StrategySpec } from './backtest';
-import { atr14, ctxOf, features, garchOf, garchSigma, type Market } from './library';
+import { atr14, ctxOf, features, FILTER_MAP, garchOf, garchSigma, SIGNAL_MAP, type Market } from './library';
+import type { Bar } from './series';
 import { metaOdds } from './ml';
 import { rulesOf } from './research';
 
@@ -38,6 +39,30 @@ export interface LiveSignal {
    * manager only ever applies it to make a trade smaller — it decides the size)
    */
   sizeMult: number;
+}
+
+/** what a strategy reads beside the coin's own candles: bitcoin's price, the funding history */
+export function specNeeds(spec: StrategySpec): { bench: boolean; funding: boolean } {
+  const rules = [spec.signal, ...(spec.also ?? [])];
+  return {
+    bench: rules.some((r) => SIGNAL_MAP[r.id]?.needsBench) || spec.filters.some((f) => FILTER_MAP[f.id]?.usesBench),
+    funding: rules.some((r) => SIGNAL_MAP[r.id]?.needsFunding) || spec.filters.some((f) => FILTER_MAP[f.id]?.needsFunding),
+  };
+}
+
+/**
+ * The market a deployed strategy reads live: the coin's closed candles, with
+ * bitcoin's closes lined up beside them (for the rules that trade a coin
+ * against bitcoin) and the funding paid per candle (for the funding rules) —
+ * the same shape the backtest gave it.
+ */
+export function liveMarket(coin: string, tfH: number, bars: Bar[], extra: { btc?: Bar[] | null; funding?: ArrayLike<number> | null } = {}): Market {
+  const m: Market = { coin, tfH, bars, funding: extra.funding && extra.funding.length === bars.length ? Float64Array.from(extra.funding) : null };
+  if (extra.btc?.length && !/^BTC/i.test(coin)) {
+    const at = new Map(extra.btc.map((b) => [b.time, b.close]));
+    m.bench = Float64Array.from(bars, (b) => at.get(b.time) ?? NaN);
+  }
+  return m;
 }
 
 /**

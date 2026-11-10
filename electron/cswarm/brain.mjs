@@ -4,9 +4,6 @@
 //
 // Strategy agents propose; the others vote:
 //
-//   Scalper      order-flow scalps on the 1-minute tape: absorption, sweeps,
-//                aggressive delta with the book behind it. Order-flow imbalance
-//                drives short-horizon price changes (Cont, Kukanov & Stoikov 2014).
 //   Auctioneer   intraday auction market theory: value area, initial-balance
 //                breakouts, the 80 % rule back into prior value (Steidlmayer;
 //                Dalton) — intraday momentum and reversal are both documented
@@ -14,6 +11,8 @@
 //   Trend        time-series momentum: the 20/60/120-day trend votes, entries on
 //                hourly Donchian breakouts with ATR stops (Moskowitz, Ooi &
 //                Pedersen 2012; Liu & Tsyvinski 2021; Hurst, Ooi & Pedersen 2017).
+//   Lab          the strategies deployed from the Strategy Lab (they took over
+//                the retired Scalper's job).
 //   Tape         reads the last seconds of aggressive flow and the book.
 //   Crowd        funding on Hyperliquid: when one side pays a lot to hold, it is
 //                crowded (He, Manela, Ross & von Wachter 2022 on perpetuals).

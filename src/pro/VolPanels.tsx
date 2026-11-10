@@ -16,6 +16,8 @@ import { fitModel, forecastPath, garchVar, horizonVol, hourProfile, newsImpact, 
 import { useSettings } from '../store/settings';
 import { Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { AreaChart, Bars, LineChart, useChartWidth } from './charts';
+import { USES } from './botUses';
+import { UseInBot } from './UseInBot';
 import { BOARD_VENUES, useBoardVenue, useKlines } from './data';
 
 const venueOpts = () => [{ value: 'auto' as const, label: 'Primary venue' }, ...BOARD_VENUES.map((v) => ({ value: v, label: ADAPTERS[v].name }))];
@@ -105,6 +107,7 @@ export function GarchPanel({ config: c, setConfig }: PanelProps<GarchConfig>) {
           onChange={(model) => setConfig({ model })}
         />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="GV" options={USES.garch()} />
         <Spacer />
         <span className="pro-status">{k.loading ? 'fitting…' : `${(c.model ?? 'best') === 'best' ? 'GARCH / GJR-GARCH · normal or t · best by BIC' : (c.model === 'gjr' ? 'GJR-GARCH' : 'GARCH') + ' · normal or t by BIC'} · 1000 hourly bars`}</span>
       </Toolbar>
@@ -298,6 +301,7 @@ export function CandleForecastPanel({ config: c, setConfig }: PanelProps<Forecas
         <b className="pro-title">{base} — next candle</b>
         <Select value={c.interval} options={[{ value: '1h', label: '1 hour' }, { value: '4h', label: '4 hours' }, { value: '1d', label: '1 day' }]} onChange={(interval) => setConfig({ interval })} />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="FCST" options={USES.candle()} />
         <Spacer />
         <span className="pro-status">{busy || k.loading ? 'fitting…' : 'forest + ridge on candle shapes, GARCH, momentum · 70/30 split'}</span>
       </Toolbar>

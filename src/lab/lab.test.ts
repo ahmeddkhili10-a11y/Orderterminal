@@ -163,7 +163,8 @@ describe('research', () => {
     const r = await research(ms, { combos: 60, finalists: 10, meta: true });
     const best = r.top[0];
     expect(best.oos.sharpe).toBeGreaterThan(0);
-    expect(['momentum', 'trend', 'breakout', 'ml']).toContain(best.family);
+    // a trend-follower of some kind (a move on heavy volume is one), never a fade, a calendar or a funding rule
+    expect(['momentum', 'trend', 'breakout', 'volume', 'ml']).toContain(best.family);
     expect(best.rules[0]).toMatch(/^Entry: /);
     expect(best.curve.length).toBeGreaterThan(10);
     // live: on the last bar there is either no new signal or a complete one

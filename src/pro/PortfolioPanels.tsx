@@ -21,6 +21,8 @@ import { capm, efficientFrontier, kellyBet, kellyGrowth, kellyPortfolio, meanCov
 import { useSettings } from '../store/settings';
 import { NumberInput, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { Bars, LineChart, ScatterChart } from './charts';
+import { USES } from './botUses';
+import { UseInBot } from './UseInBot';
 import { BOARD_VENUES, useBoardVenue, useKlines } from './data';
 
 const venueOpts = () => [{ value: 'auto' as const, label: 'Primary venue' }, ...BOARD_VENUES.map((v) => ({ value: v, label: ADAPTERS[v].name }))];
@@ -100,6 +102,7 @@ export function CapmPanel({ config: c, setConfig }: PanelProps<CapmConfig>) {
         <NumberInput value={c.rf} step={0.5} min={0} width={56} onChange={(rf) => setConfig({ rf })} title="Risk-free rate, % a year" suffix="%" />
         <Select value={c.days} options={[90, 180, 365].map((d) => ({ value: d, label: `${d} days` }))} onChange={(days) => setConfig({ days })} />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="CAPM" options={USES.capm()} />
         <Spacer />
         <span className="pro-status">{k.loading ? 'loading…' : 'daily returns · Sharpe (1964); Jensen (1968); Treynor (1965)'}</span>
       </Toolbar>
@@ -216,6 +219,7 @@ export function FrontierPanel({ config: c, setConfig }: PanelProps<FrontierConfi
         <Select value={c.days} options={[180, 365].map((d) => ({ value: d, label: `${d} days` }))} onChange={(days) => setConfig({ days })} />
         <Select value={c.shrink} options={[0, 25, 50, 75].map((v) => ({ value: v, label: `shrink means ${v}%` }))} onChange={(shrink) => setConfig({ shrink })} />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="EF" options={USES.frontier()} />
         <Spacer />
         <span className="pro-status">{k.loading ? 'loading…' : 'long-only · Markowitz (1952); Sharpe (1964); Tobin (1958)'}</span>
       </Toolbar>
@@ -335,6 +339,7 @@ export function KellyPanel({ config: c, setConfig }: PanelProps<KellyConfig>) {
         <Select value={c.shrink} options={[0, 25, 50, 75].map((v) => ({ value: v, label: `shrink means ${v}%` }))} onChange={(shrink) => setConfig({ shrink })} />
         <NumberInput value={c.cap} step={0.5} min={0.5} width={56} onChange={(cap) => setConfig({ cap })} title="Leverage cap for the Kelly portfolio" suffix="×" />
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
+        <UseInBot from="KELLY" options={USES.kelly()} />
         <Spacer />
         <span className="pro-status">{k.loading ? 'loading…' : 'Kelly (1956); Thorp (2006); MacLean, Thorp & Ziemba (2011)'}</span>
       </Toolbar>
