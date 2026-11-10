@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('novus', {
     run: (patch) => call('lab:run', patch),
     cancel: () => call('lab:cancel'),
     test: (spec, patch) => call('lab:test', spec, patch),
+    optimize: (specs, patch) => call('lab:optimize', specs, patch),
     bars: (coin, tf, years) => call('lab:bars', coin, tf, years),
     deploy: (args, targets, coins) => call('lab:deploy', args, targets, coins),
     undeploy: (id) => call('lab:undeploy', id),

@@ -356,7 +356,7 @@ export function DeployGate() {
               <div className="cc-dep-main">
                 <b>{d.spec.name}</b>
                 <span className="mono muted">
-                  {d.tfH}h · {d.coins.join(' ')} · tested Sharpe {d.stats.sharpe.toFixed(2)}, t {d.stats.t.toFixed(1)} · {d.stats.verdict}
+                  {d.tfH < 1 ? `${Math.round(d.tfH * 60)}m` : `${d.tfH}h`} · {d.coins.join(' ')} · tested Sharpe {d.stats.sharpe.toFixed(2)}, t {d.stats.t.toFixed(1)} · {d.stats.verdict}
                 </span>
                 <LabBookLine d={d} />
                 {last && <span className="muted cc-dep-last">{fmtTime(last.t)} — {last.text}</span>}

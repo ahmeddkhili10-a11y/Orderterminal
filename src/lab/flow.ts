@@ -22,15 +22,17 @@
 import type { Combine, RuleRef, Sizing, StrategySpec } from './backtest';
 import { EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Family, type Params } from './library';
 
-export type StyleId = 'scalp' | 'intraday' | 'swing' | 'week' | 'position' | 'hold';
+export type StyleId = 'scalp15' | 'intraday15' | 'scalp' | 'intraday' | 'swing' | 'week' | 'position' | 'hold';
 
 export interface Style {
   id: StyleId;
   name: string;
   /** what it means, in one line */
   plain: string;
-  timeframe: '1h' | '4h' | '1d';
+  timeframe: '15m' | '1h' | '4h' | '1d';
   tfH: number;
+  /** the style whose picks suit this one too (the 15-minute styles take the hourly ones' advice) */
+  like?: StyleId;
   /** years of history to test on */
   years: number;
   /** the typical look-back of its signals, in hours */
@@ -44,7 +46,9 @@ export interface Style {
 }
 
 export const STYLES: Style[] = [
-  { id: 'scalp', name: 'Scalping — quick trades, hours', plain: 'Many quick trades, in and out within a few hours, small moves.', timeframe: '1h', tfH: 1, years: 1, L: 12, holdH: 6, stop: 1.5, note: 'The Lab tests on 1-hour candles — the shortest with years of history — so this is scalping over hours, not seconds.' },
+  { id: 'scalp15', name: 'Scalping — 15-minute candles, minutes to hours', plain: 'The fastest the Lab trades: many trades a day on 15-minute candles, each over within a couple of hours.', timeframe: '15m', tfH: 0.25, years: 0.5, L: 3, holdH: 2, stop: 1.5, like: 'scalp', note: 'Six months of history (17,000 candles). At this speed fees and slippage take a large share of every trade — the test counts them, and many ideas that look good on a chart do not survive them.' },
+  { id: 'intraday15', name: 'Intraday — 15-minute candles, closed within a day', plain: 'Several trades a day on 15-minute candles, none held overnight.', timeframe: '15m', tfH: 0.25, years: 1, L: 8, holdH: 12, stop: 2, like: 'intraday', note: 'A year of history (35,000 candles): the first test downloads it, later ones reuse it.' },
+  { id: 'scalp', name: 'Scalping — quick trades, hours', plain: 'Many quick trades, in and out within a few hours, small moves.', timeframe: '1h', tfH: 1, years: 1, L: 12, holdH: 6, stop: 1.5, note: 'On 1-hour candles: scalping over hours. For faster trading choose a 15-minute style.' },
   { id: 'intraday', name: 'Intraday — closed within a day', plain: 'Trades that open and close the same day.', timeframe: '1h', tfH: 1, years: 2, L: 24, holdH: 24, stop: 2 },
   { id: 'swing', name: 'Swing — a few days', plain: 'Catch a move that lasts two to five days.', timeframe: '4h', tfH: 4, years: 3, L: 72, holdH: 96, stop: 2.5 },
   { id: 'week', name: 'One-week trades', plain: 'Hold for about a week, riding the week’s direction.', timeframe: '4h', tfH: 4, years: 3, L: 168, holdH: 168, stop: 3 },
@@ -52,6 +56,8 @@ export const STYLES: Style[] = [
   { id: 'hold', name: 'Long-term hold — up to a year', plain: 'Buy into strength and hold through the year, stepping aside in bear markets.', timeframe: '1d', tfH: 24, years: 6, L: 2160, holdH: 24 * 365, stop: 4 },
 ];
 export const STYLE_MAP = Object.fromEntries(STYLES.map((s) => [s.id, s])) as Record<StyleId, Style>;
+/** a style's history in words: "6 months", "1 year", "3 years" */
+export const historyWords = (s: Style) => (s.years < 1 ? `${Math.round(s.years * 12)} months` : `${s.years} year${s.years > 1 ? 's' : ''}`);
 
 export interface Option {
   id: string;
@@ -64,6 +70,8 @@ export interface Option {
 }
 
 const fast = (s: Style) => s.L <= 24;
+/** a floor on a look-back (written for hourly candles), a quarter as long on 15-minute ones */
+const fl = (s: Style, hours: number) => (s.tfH < 1 ? hours / 4 : hours);
 const slow = (s: Style) => s.L >= 720;
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
@@ -87,7 +95,7 @@ export interface StrategyOption extends Option {
 export const STRATEGIES: StrategyOption[] = [
   // trend following
   { id: 'tsmom', group: 'Trend following', name: 'Ride the trend (momentum)', plain: 'Buys when the price has gone up over the look-back period, sells short when it has gone down. The most studied edge in markets.', suits: ['swing', 'week', 'position', 'hold'], signal: 'tsmom', nature: 'state', params: (s) => ({ lookback: s.L }) },
-  { id: 'mac', group: 'Trend following', name: 'Moving-average crossover', plain: 'Buys when a fast average of price crosses above a slow one, sells when it crosses below. Classic and simple.', suits: ['swing', 'week', 'position', 'hold'], signal: 'mac', nature: 'state', params: (s) => ({ fast: Math.max(12, s.L / 2), slow: Math.max(48, s.L * 3) }) },
+  { id: 'mac', group: 'Trend following', name: 'Moving-average crossover', plain: 'Buys when a fast average of price crosses above a slow one, sells when it crosses below. Classic and simple.', suits: ['swing', 'week', 'position', 'hold'], signal: 'mac', nature: 'state', params: (s) => ({ fast: Math.max(fl(s, 12), s.L / 2), slow: Math.max(fl(s, 48), s.L * 3) }) },
   { id: 'tma', group: 'Trend following', name: 'Three averages lined up', plain: 'Trades only when a fast, a middle and a slow average are stacked in order — a confirmed trend, fewer false starts.', suits: ['intraday', 'swing', 'week'], signal: 'tma', nature: 'state', params: (s) => ({ set: fast(s) ? 0 : slow(s) ? 2 : 1 }) },
   { id: 'maratio', group: 'Trend following', name: 'Price far from its average', plain: 'Buys when the price is clearly above its average (a strong trend), sells when clearly below.', suits: ['week', 'position', 'hold'], signal: 'maratio', nature: 'state', params: (s) => ({ lookback: s.L * 2, band: 0.02 }) },
   { id: 'kalman', group: 'Trend following', name: 'Smart trend line (Kalman filter)', plain: 'A noise-filtering trend line that also says how sure it is; trades only when the trend is clear.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'kalman', nature: 'state', params: (s) => ({ smooth: fast(s) ? 2 : slow(s) ? 0 : 1, k: 2 }) },
@@ -96,24 +104,29 @@ export const STRATEGIES: StrategyOption[] = [
   { id: 'vwmom', group: 'Trend following', name: 'Momentum weighted by volume', plain: 'Momentum where each candle counts by how much was traded: moves made on heavy volume decide the direction. In crypto studies this beat plain momentum.', suits: ['swing', 'week', 'position'], signal: 'vwmom', nature: 'state', params: (s) => ({ lookback: s.L }) },
   { id: 'ctrend', group: 'Trend following', name: 'Trend composite (17 indicators vote)', plain: 'RSI, stochastic, CCI, seven moving averages, MACD, volume trends, money flow and Bollinger bands each cast a vote; trades when most agree. Based on the crypto trend factor published in 2025.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'ctrend', nature: 'state', params: (s) => ({ unit: fast(s) ? 4 : 24, k: 0.3 }) },
   // breakouts
-  { id: 'donchian', group: 'Breakouts', name: 'Break of the recent high or low', plain: 'Buys when price closes above its highest high of the period, sells below the lowest low. Catches new trends early.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'donchian', nature: 'event', params: (s) => ({ n: Math.max(20, s.L) }) },
-  { id: 'bbreak', group: 'Breakouts', name: 'Bollinger band breakout', plain: 'Trades a close outside the Bollinger bands — a move bigger than normal for the coin.', suits: ['scalp', 'intraday', 'swing'], signal: 'bbreak', nature: 'event', params: (s) => ({ lookback: Math.max(20, s.L), k: 2 }) },
+  { id: 'donchian', group: 'Breakouts', name: 'Break of the recent high or low', plain: 'Buys when price closes above its highest high of the period, sells below the lowest low. Catches new trends early.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'donchian', nature: 'event', params: (s) => ({ n: Math.max(fl(s, 20), s.L) }) },
+  { id: 'bbreak', group: 'Breakouts', name: 'Bollinger band breakout', plain: 'Trades a close outside the Bollinger bands — a move bigger than normal for the coin.', suits: ['scalp', 'intraday', 'swing'], signal: 'bbreak', nature: 'event', params: (s) => ({ lookback: Math.max(fl(s, 20), s.L), k: 2 }) },
   { id: 'pivot', group: 'Breakouts', name: 'Support and resistance (pivots)', plain: 'Buys a close above yesterday’s resistance, sells a close below support. A day trader’s classic.', suits: ['scalp', 'intraday'], signal: 'pivot', nature: 'event', params: () => ({ level: 1 }) },
   { id: 'volbrk', group: 'Breakouts', name: 'Big move on heavy volume', plain: 'Follows a sharp move only when volume is unusually heavy — a sign big players are behind it.', suits: ['scalp', 'intraday'], signal: 'volbrk', nature: 'event', params: (s) => ({ n: clamp(Math.round(s.L / 6), 1, 24), k: 2 }) },
   { id: 'maxmin', group: 'Breakouts', name: 'New 10-day high or low (buy both)', plain: 'Buys when price closes at a new 10-day high (the trend continues) and when it closes at a new 10-day low (the bounce after panic), and holds a day. A documented bitcoin pattern; it never shorts.', suits: ['swing', 'week', 'position'], signal: 'maxmin', nature: 'event', holdH: 24, longOnly: true, mixed: true, params: () => ({ n: 240, mode: 0 }) },
   { id: 'jump', group: 'Breakouts', name: 'Follow a big day', plain: 'After a day with an unusually big move (2.5 times its normal size), trades in the same direction for a day. In crypto, extreme days were followed more often than faded — but the published edge was thin.', suits: ['intraday', 'swing'], signal: 'jump', nature: 'event', holdH: 24, params: () => ({ k: 2.5 }) },
   // mean reversion
-  { id: 'zrev', group: 'Buy the dip / sell the rip', name: 'Stretched from the average (z-score)', plain: 'Buys when price has fallen unusually far below its average, sells when it has risen unusually far — betting it snaps back.', suits: ['scalp', 'intraday', 'swing'], signal: 'zrev', nature: 'event', params: (s) => ({ lookback: Math.max(24, s.L), k: 2 }) },
+  { id: 'zrev', group: 'Buy the dip / sell the rip', name: 'Stretched from the average (z-score)', plain: 'Buys when price has fallen unusually far below its average, sells when it has risen unusually far — betting it snaps back.', suits: ['scalp', 'intraday', 'swing'], signal: 'zrev', nature: 'event', params: (s) => ({ lookback: Math.max(fl(s, 24), s.L), k: 2 }) },
   { id: 'rsi2', group: 'Buy the dip / sell the rip', name: 'RSI oversold / overbought', plain: 'Buys when the RSI says oversold, sells when overbought. Short, sharp bounces.', suits: ['scalp', 'intraday', 'swing'], signal: 'rsi2', nature: 'event', params: (s) => (fast(s) ? { n: 2, band: 10 } : { n: 14, band: 30 }) },
-  { id: 'ou', group: 'Buy the dip / sell the rip', name: 'Snap-back to fair value (Ornstein–Uhlenbeck)', plain: 'Fits a “rubber band” model to the price and trades when it is stretched far — only when it has been snapping back fast.', suits: ['intraday', 'swing'], signal: 'ou', nature: 'event', params: (s) => ({ window: clamp(s.L * 2, 72, 336), k: 2 }) },
+  { id: 'ou', group: 'Buy the dip / sell the rip', name: 'Snap-back to fair value (Ornstein–Uhlenbeck)', plain: 'Fits a “rubber band” model to the price and trades when it is stretched far — only when it has been snapping back fast.', suits: ['intraday', 'swing'], signal: 'ou', nature: 'event', params: (s) => ({ window: clamp(s.L * 2, fl(s, 72), 336), k: 2 }) },
   { id: 'wrev', group: 'Buy the dip / sell the rip', name: 'Fade a big weekly move', plain: 'After a week with a very big rise or fall, bets on part of it coming back.', suits: ['swing', 'week'], signal: 'wrev', nature: 'event', params: () => ({ band: 0.1 }) },
+  // intraday
+  { id: 'vwap', group: 'Intraday (the day’s own structure)', name: 'VWAP trend', plain: 'Long while price is above the day’s volume-weighted average price (what the average buyer paid today), short while below. A day trader’s staple, published as a tested system in 2023.', suits: ['scalp', 'intraday'], signal: 'vwap', nature: 'state', holdH: 24, params: () => ({ anchor: 0, band: 0.5 }) },
+  { id: 'orb', group: 'Intraday (the day’s own structure)', name: 'Opening range breakout', plain: 'The first two hours of the day set a range; trades the first close beyond it, in that direction, for the rest of the day. One trade a day.', suits: ['scalp', 'intraday'], signal: 'orb', nature: 'event', holdH: 22, params: () => ({ anchor: 0, range: 2 }) },
+  { id: 'noise', group: 'Intraday (the day’s own structure)', name: 'Intraday momentum beyond the noise', plain: 'Trades when the day’s move is bigger than is normal for that time of day (against the last two weeks) — a move the day has not absorbed tends to run. A 2024 study’s best intraday rule.', suits: ['scalp', 'intraday'], signal: 'noise', nature: 'state', holdH: 24, params: () => ({ anchor: 0, k: 1 }) },
+  { id: 'fade', group: 'Buy the dip / sell the rip', name: 'Fade a stretched candle', plain: 'After one unusually big candle on heavy volume, bets on part of it coming back in the next few. Real on 15-minute crypto candles but small — fees decide whether anything is left.', suits: ['scalp'], signal: 'fade', nature: 'event', holdH: 1, params: () => ({ k: 2, vol: 1 }) },
   // timing
   { id: 'itsm', group: 'Timing and seasons', name: 'End-of-day momentum', plain: 'Late in the US session, trades the direction the day has taken so far into the close.', suits: ['intraday'], signal: 'itsm', nature: 'event', holdH: 3, params: () => ({ hour: 21 }) },
   { id: 'night', group: 'Timing and seasons', name: 'Late-evening hours (21:00–23:00 UTC)', plain: 'Buys at 21:00 UTC and sells at 23:00 UTC every day: the two hours where bitcoin’s gains were concentrated in 2015–2021. The pattern weakened after — test before trusting it.', suits: ['scalp', 'intraday'], signal: 'night', nature: 'event', holdH: 2, longOnly: true, params: () => ({ hour: 21 }) },
   { id: 'dow', group: 'Timing and seasons', name: 'Monday effect', plain: 'Buys at the start of Monday and holds for the day (a documented weekday pattern in bitcoin).', suits: ['intraday'], signal: 'dow', nature: 'event', holdH: 24, longOnly: true, params: () => ({ day: 1 }) },
   // against bitcoin
-  { id: 'pairs', group: 'Against bitcoin (relative value)', name: 'Pairs trade: the coin against bitcoin', plain: 'Coins move with bitcoin. When a coin gets unusually cheap against bitcoin it buys the coin, when unusually rich it sells — betting the gap closes. Add the bitcoin hedge (Risk) to make it a true market-neutral pairs trade.', suits: ['scalp', 'intraday', 'swing'], signal: 'pairs', nature: 'event', needsBtc: true, params: (s) => ({ window: clamp(s.L * 7, 168, 720), k: 2 }) },
-  { id: 'btclead', group: 'Against bitcoin (relative value)', name: 'Bitcoin leads, the coin catches up', plain: 'When bitcoin has moved and a coin has not yet followed by its usual amount, trades the coin in bitcoin’s direction. News reaches bitcoin first; the published effect is fastest over minutes.', suits: ['scalp', 'intraday'], signal: 'btclead', nature: 'event', needsBtc: true, params: (s) => ({ n: clamp(Math.round(s.L / 12), 1, 24), k: 1 }) },
+  { id: 'pairs', group: 'Against bitcoin (relative value)', name: 'Pairs trade: the coin against bitcoin', plain: 'Coins move with bitcoin. When a coin gets unusually cheap against bitcoin it buys the coin, when unusually rich it sells — betting the gap closes. Add the bitcoin hedge (Risk) to make it a true market-neutral pairs trade.', suits: ['scalp', 'intraday', 'swing'], signal: 'pairs', nature: 'event', needsBtc: true, params: (s) => ({ window: clamp(s.L * 7, fl(s, 168), 720), k: 2 }) },
+  { id: 'btclead', group: 'Against bitcoin (relative value)', name: 'Bitcoin leads, the coin catches up', plain: 'When bitcoin has moved and a coin has not yet followed by its usual amount, trades the coin in bitcoin’s direction. News reaches bitcoin first; the published effect is fastest over minutes.', suits: ['scalp', 'intraday'], signal: 'btclead', nature: 'event', needsBtc: true, params: (s) => ({ n: s.tfH < 1 ? 0.25 : clamp(Math.round(s.L / 12), 1, 24), k: 1 }) },
   // carry
   { id: 'carry', group: 'Funding (carry)', name: 'Get paid funding', plain: 'Takes the side the crowd is paying for: short when longs pay heavy funding, long when shorts do.', suits: ['swing', 'week'], signal: 'carry', nature: 'state', params: () => ({ lookback: 72, band: 0.25 }) },
   // machine learning
@@ -304,7 +317,7 @@ const sameRule = (a: RuleRef, b: RuleRef) => a.id === b.id && JSON.stringify(a.p
 /** the chain as the Strategy Lab's strategy, its timeframe and history to test on */
 export function buildSpec(f0: Flow): { spec: StrategySpec; style: Style; timeframe: Style['timeframe']; years: number; coins: string[]; summary: string[] } {
   const f = migrateFlow(f0 as Flow & Record<string, unknown>);
-  const style = STYLE_MAP[f.style] ?? STYLES[2];
+  const style = STYLE_MAP[f.style] ?? STYLE_MAP.swing;
   const strats = f.strategies.map((id) => find(STRATEGIES, id));
   const tune = (key: string): Params => f.tunes?.[key] ?? {};
   const rules = strats.map((s) => ({ id: s.signal, p: { ...s.params(style), ...tune(`strategy:${s.id}`) } }));
@@ -372,7 +385,8 @@ export function buildSpec(f0: Flow): { spec: StrategySpec; style: Style; timefra
 
 /** options sorted with the ones that suit the style first */
 export function forStyle<T extends Option>(xs: T[], style: StyleId): (T & { fits: boolean })[] {
-  return xs.map((x) => ({ ...x, fits: !x.suits || x.suits.includes(style) })).sort((a, b) => Number(b.fits) - Number(a.fits));
+  const as = STYLE_MAP[style]?.like ?? style;
+  return xs.map((x) => ({ ...x, fits: !x.suits || x.suits.includes(as) })).sort((a, b) => Number(b.fits) - Number(a.fits));
 }
 
 // ---------- the compatibility check: clash, overlap, pair ----------
@@ -401,7 +415,7 @@ const sq = (s: string) => `“${s}”`;
 export function checkFlow(f0: Flow): Finding[] {
   const f = migrateFlow(f0 as Flow & Record<string, unknown>);
   const out: Finding[] = [];
-  const style = STYLE_MAP[f.style] ?? STYLES[2];
+  const style = STYLE_MAP[f.style] ?? STYLE_MAP.swing;
   const S = f.strategies.map((id) => find(STRATEGIES, id));
   const M = f.models.map((id) => find(MODELS, id));
   const F = f.forecasts.map((id) => find(FORECASTS, id));
@@ -412,7 +426,8 @@ export function checkFlow(f0: Flow): Finding[] {
   for (const s of S) {
     const sig = SIGNAL_MAP[s.signal];
     if (sig.intraday && style.tfH >= 24) push('clash', ['style', 'strategy'], [s.id], `${sq(s.name)} needs candles shorter than a day — pick scalping, intraday, swing or one-week.`);
-    else if (s.suits && !s.suits.includes(f.style)) push('info', ['style', 'strategy'], [s.id], `${sq(s.name)} is usually traded on ${s.suits.map((x) => STYLE_MAP[x].name.split(' — ')[0].toLowerCase()).join(', ')} — it can still work here; the test will tell.`);
+    if (s.id === 'fade' && style.tfH >= 1) push('info', ['style', 'strategy'], [s.id], `${sq(s.name)} was measured on 15-minute candles — on ${style.timeframe} candles the snap-back it trades is mostly over before the candle closes. Choose a 15-minute style.`);
+    else if (s.suits && !s.suits.includes(style.like ?? f.style)) push('info', ['style', 'strategy'], [s.id], `${sq(s.name)} is usually traded on ${s.suits.map((x) => STYLE_MAP[x].name.split(' — ')[0].toLowerCase()).join(', ')} — it can still work here; the test will tell.`);
   }
   for (const m of M) if (m.lean === 'session' && style.tfH >= 24) push('clash', ['style', 'model'], [m.id], `${sq(m.name)} on daily candles: a day has no trading hours to pick — remove it or choose a shorter style.`);
 

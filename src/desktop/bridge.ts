@@ -1,6 +1,6 @@
 import type { XPost } from '../shared/xapi';
 import type { Authority, LabConfig, LabDeployed, LabStatus, LabTest } from '../lab/store';
-import type { ResearchResult } from '../lab/research';
+import type { ResearchResult, VariantScore } from '../lab/research';
 import type { StrategySpec } from '../lab/backtest';
 import type { Kline } from '../core/types';
 import type { TokenInfo, WalletActivity, WalletBalances } from '../shared/solana';
@@ -769,8 +769,10 @@ export interface NovusApi {
     run(patch?: Partial<LabConfig>): Promise<LabStatus['last']>;
     cancel(): Promise<void>;
     test(spec: StrategySpec, patch?: Partial<LabConfig>): Promise<LabTest>;
+    /** the optimizer: versions of a strategy measured inside the training years (never on the unseen data) */
+    optimize?(specs: { id: string; spec: StrategySpec }[], patch?: Partial<LabConfig>): Promise<VariantScore[]>;
     /** candles from the Lab's history cache (topped up from the exchange): up to three years */
-    bars?(coin: string, tf: '1h' | '4h' | '1d', years: number): Promise<{ bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[]; source: string }>;
+    bars?(coin: string, tf: '15m' | '1h' | '4h' | '1d', years: number): Promise<{ bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[]; source: string }>;
     deploy(args: { rank?: number; spec?: StrategySpec; tfH?: number; stats?: LabDeployed['stats']; authority?: Authority }, targets?: { crypto: boolean; meme: boolean }, coins?: string[]): Promise<string>;
     undeploy(id: string): Promise<void>;
     toggle(id: string, on: boolean): Promise<void>;

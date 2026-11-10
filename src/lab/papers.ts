@@ -599,6 +599,58 @@ export const PAPERS: Record<string, Paper> = {
     venue: 'Finance Research Letters 31',
     finding: 'Day-of-the-week patterns in both the returns and the volatility of bitcoin, 2010–2017.',
   },
+  az23v: {
+    id: 'az23v',
+    cite: 'Aziz & Zarattini (2023)',
+    title: 'Volume Weighted Average Price (VWAP): The Holy Grail for Day Trading Systems',
+    venue: 'SSRN working paper',
+    ssrn: '4631351',
+    finding: 'Long while price is above the day\'s volume-weighted average price and short while below, on 1-minute bars of QQQ and TQQQ (2018–2023), beat buy-and-hold net of commissions. A backtest by authors with a trading business; no slippage modelled.',
+  },
+  za23o: {
+    id: 'za23o',
+    cite: 'Zarattini & Aziz (2023)',
+    title: 'Can Day Trading Really Be Profitable? Evidence of Sustainable Long-Term Profits from Opening Range Breakout Day Trading Strategy vs. Benchmark in the US Stock Market',
+    venue: 'SSRN working paper',
+    ssrn: '4416622',
+    finding: 'Trading the break of the first minutes\' range in the direction of the opening move, out by the close, on QQQ 2016–2023 (with leverage): large returns over the benchmark net of commissions.',
+  },
+  zba24o: {
+    id: 'zba24o',
+    cite: 'Zarattini, Barbon & Aziz (2024)',
+    title: 'A Profitable Day Trading Strategy for the U.S. Equity Market',
+    venue: 'SSRN working paper',
+    ssrn: '4729284',
+    finding: 'The 5-minute opening range breakout pays where there is unusual activity that day (stocks in play): the breakout needs volume behind it.',
+  },
+  zab24n: {
+    id: 'zab24n',
+    cite: 'Zarattini, Aziz & Barbon (2024)',
+    title: 'Beat the Market: An Effective Intraday Momentum Strategy for S&P500 ETF (SPY)',
+    venue: 'Swiss Finance Institute Research Paper 24-97',
+    finding: 'A move from the open bigger than the average move by that time of day over the last 14 days (outside the "noise area") tends to continue to the close; with the VWAP as a trailing stop: 19.6 % a year, Sharpe 1.33 on SPY 2007–2024 net of costs.',
+  },
+  cra90: {
+    id: 'cra90',
+    cite: 'Crabel (1990)',
+    title: 'Day Trading with Short Term Price Patterns and Opening Range Breakout',
+    venue: 'Traders Press',
+    finding: 'The original opening range breakout: a move a set distance from the open early in the session tends to set the day\'s direction.',
+  },
+  kw26: {
+    id: 'kw26',
+    cite: 'Kitron & Wengrowicz (2026)',
+    title: 'Short-horizon mean reversion in cryptocurrency markets: a matched cross-market measurement',
+    venue: 'arXiv preprint 2608.21888 (not peer-reviewed)',
+    finding: 'At 15 minutes, a candle\'s move is partly reversed in the next, far more in crypto than in US stocks, and most after aggressive taker flow. The gross edge is about 1.3 basis points a trade against a 5-point round-trip cost: real, but too small to trade through fees.',
+  },
+  svs23: {
+    id: 'svs23',
+    cite: 'Shanaev, Vasenin & Stepanov (2023)',
+    title: 'Turn-of-the-candle effect in bitcoin returns',
+    venue: 'Heliyon 9(3)',
+    finding: 'Since 2020, bitcoin\'s returns cluster in the minutes around the turns of 15-minute candles — a footprint of algorithms that trade on 15-minute candle closes.',
+  },
 };
 
 export const paper = (id: string): Paper => PAPERS[id];

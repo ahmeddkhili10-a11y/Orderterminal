@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CryptoSwarm } from '../cswarm/cswarm.mjs';
-import { research } from '../../src/lab/research.ts';
+import { evaluate, research, scoreVariants } from '../../src/lab/research.ts';
 import { alignFunding, LabService } from './lab.mjs';
 
 const HOUR = 3_600_000;
@@ -28,7 +28,12 @@ function inlineWorker() {
   w.terminate = async () => {};
   w.postMessage = async (msg) => {
     try {
-      const result = await research(msg.markets, msg.cfg, (progress) => w.emit('message', { type: 'progress', progress }));
+      const result =
+        msg.type === 'score'
+          ? scoreVariants(msg.markets, msg.specs, msg.isShare, msg.costs, (done, total) => w.emit('message', { type: 'progress', progress: { stage: 'Trying changes', done, total } }))
+          : msg.type === 'evaluate'
+            ? evaluate(msg.markets, msg.spec, msg.isShare, msg.costs)
+            : await research(msg.markets, msg.cfg, (progress) => w.emit('message', { type: 'progress', progress }));
       w.emit('message', { type: 'result', result });
     } catch (err) {
       w.emit('message', { type: 'error', error: String(err.message) });
@@ -36,6 +41,41 @@ function inlineWorker() {
   };
   return w;
 }
+
+describe('the optimizer and 15-minute history', () => {
+  it('scores versions of a strategy in the worker and leaves no progress behind', async () => {
+    const now = Date.UTC(2026, 10, 6, 12);
+    const ccxt = { history: vi.fn(async (_id, _sym, _tf, since) => walk(3000, now, 7).filter((b) => b.time >= since)), fundingHistory: vi.fn(async () => []) };
+    const lab = new LabService({ ccxt, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const exit = { stopAtr: 2, targetR: 0, trailAtr: 0, maxBars: 24, onFlip: true, stopVol: 0 };
+    const spec = { name: 'mom', signal: { id: 'tsmom', p: { lookback: 24 } }, filters: [], exit, sides: 'both' };
+    const scores = await lab.optimize([{ id: 'base', spec }, { id: 'side:long', spec: { ...spec, sides: 'long' } }, { id: 'stop:wide', spec: { ...spec, exit: { ...exit, stopAtr: 3 } } }], { coins: ['BTC'], years: 0.33, timeframe: '1h', funding: false });
+    expect(scores.map((s) => s.id)).toEqual(['base', 'side:long', 'stop:wide']);
+    expect(scores[0].trades).toBeGreaterThan(3);
+    expect(Number.isFinite(scores[0].sharpe)).toBe(true);
+    expect(lab.status().progress).toBeNull();
+    await expect(lab.optimize([], {})).rejects.toThrow(/nothing to try/);
+  });
+
+  it('downloads 15-minute candles, a year at most', async () => {
+    const now = Date.UTC(2026, 10, 6, 12);
+    const M15 = HOUR / 4;
+    const ccxt = {
+      history: vi.fn(async (_id, _sym, tf, since) => {
+        const n = Math.floor((now - since) / M15);
+        return Array.from({ length: n }, (_, i) => ({ time: since + i * M15, open: 100, high: 101, low: 99, close: 100 + (i % 7), volume: 5 }));
+      }),
+    };
+    const lab = new LabService({ ccxt, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const { bars } = await lab.candles('BTC', '15m', 3, 'binance');
+    expect(ccxt.history.mock.calls[0][2]).toBe('15m');
+    // asked for three years, given one
+    expect(now - ccxt.history.mock.calls[0][3]).toBe(365 * DAY);
+    expect(bars.length).toBeGreaterThan(34_000);
+    expect(bars.length).toBeLessThanOrEqual(35_040);
+    expect(bars[1].time - bars[0].time).toBe(M15);
+  });
+});
 
 describe('the Strategy Lab service', () => {
   it('turns funding per interval into funding per bar', () => {

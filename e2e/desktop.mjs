@@ -89,6 +89,7 @@ try {
   expect((await page.locator('.bb-node').count()) === 8, 'the bot builder: style, strategy, market model, forecast, risk, rules, backtest, deploy');
   await page.click('.bb-node[data-block="deploy"]');
   expect(await page.locator('.bb-deploy').isDisabled(), 'deploy waits for a backtest');
+  expect((await page.locator('.bb2-deploy-top').count()) === 1 && (await page.locator('.bb2-deploy-top').isDisabled()), 'Deploy sits beside Test bot in the header, and waits for a test');
   await page.click('.bb-node[data-block="style"]');
   await page.click('.bb2-inspector [data-opt="scalp"]');
   expect(/1h candles/.test(await page.locator('.bb').innerText()) && (await page.locator('text=crashed').count()) === 0, 'choosing a style re-plans the bot (scalping: 1-hour candles)');

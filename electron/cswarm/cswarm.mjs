@@ -357,13 +357,15 @@ export class CryptoSwarm {
     const strategies = this.labDeployed().filter((d) => !d.coins?.length || d.coins.includes(cs.coin));
     if (!strategies.length) return;
     for (const tfH of [...new Set(strategies.map((d) => d.tfH))]) {
-      const tf = tfH === 24 ? '1d' : `${tfH}h`;
+      const tf = tfH === 24 ? '1d' : tfH < 1 ? `${Math.round(tfH * 60)}m` : `${tfH}h`;
+      // look again soon enough to catch each candle's close: every minute on 15-minute candles, every ten on daily ones
+      const every = Math.min(10 * MIN, Math.max(MIN, (tfH * HOUR) / 15));
       const L = (cs.lab[tfH] ??= { bars: [], at: 0 });
       try {
         if (!L.bars.length) {
           L.bars = await this.ccxt.history(this.cfg.exchangeId, cs.symbol, tf, now - 3000 * tfH * HOUR, 3000);
           L.at = now;
-        } else if (now - L.at >= 10 * MIN) {
+        } else if (now - L.at >= every) {
           const fresh = await this.ccxt.ohlcv(this.cfg.exchangeId, cs.symbol, tf, 10);
           const last = L.bars[L.bars.length - 1]?.time ?? 0;
           L.bars = [...L.bars.filter((b) => b.time < (fresh[0]?.time ?? Infinity)), ...fresh].filter((b, i, a) => i === 0 || b.time > a[i - 1].time).slice(-3000);
@@ -408,7 +410,7 @@ export class CryptoSwarm {
       if (!B.bars.length) {
         B.bars = await this.ccxt.history(this.cfg.exchangeId, symbol, tf, now - 3000 * tfH * HOUR, 3000);
         B.at = now;
-      } else if (now - B.at >= 10 * MIN) {
+      } else if (now - B.at >= Math.min(10 * MIN, Math.max(MIN, (tfH * HOUR) / 15))) {
         const fresh = await this.ccxt.ohlcv(this.cfg.exchangeId, symbol, tf, 10);
         B.bars = [...B.bars.filter((b) => b.time < (fresh[0]?.time ?? Infinity)), ...fresh].filter((b, i, a) => i === 0 || b.time > a[i - 1].time).slice(-3000);
         B.at = now;

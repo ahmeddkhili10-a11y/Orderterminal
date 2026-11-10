@@ -24,7 +24,9 @@ export const LAB_DEFAULTS = {
   meta: true,
   funding: true,
 };
-export const TF_H = { '1h': 1, '4h': 4, '1d': 24 };
+export const TF_H = { '15m': 0.25, '1h': 1, '4h': 4, '1d': 24 };
+/** the most history worth downloading per timeframe, in years (a year of 15-minute candles is 35,000 of them) */
+export const MAX_YEARS = { '15m': 1 };
 const SOURCES = ['binance', 'okx', 'bybit', 'hyperliquid'];
 const HOUR = 3_600_000;
 
@@ -115,8 +117,9 @@ export class LabService {
   }
 
   /** candles for one coin: from the cache, topped up from the exchange */
-  async candles(coin, tf, years, source) {
+  async candles(coin, tf, years0, source) {
     const tfH = TF_H[tf];
+    const years = Math.min(years0, MAX_YEARS[tf] ?? years0);
     const since = this.now() - years * 365 * 24 * HOUR;
     const need = Math.ceil((years * 365 * 24) / tfH);
     const tried = [];
@@ -216,6 +219,23 @@ export class LabService {
     this.progress = null;
     this.push();
     return this.inWorker({ type: 'evaluate', markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })), spec, isShare: cfg.isShare, costs: { feeBps: cfg.feeBps, slipBps: cfg.slipBps } });
+  }
+
+  /**
+   * The optimizer: measure versions of a strategy (the bot as it is, and each one-step change) on the
+   * validation stretch inside the training years — the unseen data is not read.
+   */
+  async optimize(specs, patch = {}) {
+    if (!Array.isArray(specs) || !specs.length) throw new Error('nothing to try');
+    const cfg = { ...this.cfg, ...patch };
+    const { markets } = await this.markets(cfg);
+    if (!markets.length) throw new Error('no history downloaded');
+    try {
+      return await this.inWorker({ type: 'score', markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })), specs: specs.slice(0, 120), isShare: cfg.isShare, costs: { feeBps: cfg.feeBps, slipBps: cfg.slipBps } });
+    } finally {
+      this.progress = null;
+      this.push();
+    }
   }
 
   inWorker(msg) {

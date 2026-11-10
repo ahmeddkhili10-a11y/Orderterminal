@@ -87,6 +87,23 @@ describe('the Lab agent, live', () => {
     expect(ex.ccxt.history.mock.calls.map((c) => c[1])).toEqual(['ETH/USDC:USDC']);
     expect(ex.ccxt.fundingHistory).not.toHaveBeenCalled();
   });
+
+  it('a strategy tested on 15-minute candles reads 15-minute candles live, and looks every minute', async () => {
+    let now = Date.UTC(2026, 10, 5, 12);
+    const ex = fakeExchange(now);
+    const M15 = HOUR / 4;
+    ex.ccxt.history = vi.fn(async () => Array.from({ length: 400 }, (_, i) => ({ time: now - (400 - i) * M15, open: 100, high: 101, low: 99, close: 100 + (i % 5), volume: 5 })));
+    const deployed = [{ id: 'q', on: true, tfH: 0.25, coins: ['ETH'], spec: { name: 'mom', signal: { id: 'tsmom', p: { lookback: 3 } }, filters: [], exit: { stopAtr: 2, targetR: 0, trailAtr: 0, maxBars: 8, onFlip: true, stopVol: 0 }, sides: 'both' } }];
+    sw = new CryptoSwarm({ ccxt: ex.ccxt, db: memDb(), now: () => now, labDeployed: () => deployed });
+    sw.setConfig({ coins: ['ETH'], agents: { auction: false, trend: false, lab: true } });
+    await sw.start();
+    await sw.slow();
+    expect(ex.ccxt.history.mock.calls[0][2]).toBe('15m');
+    const before = ex.ccxt.ohlcv.mock.calls.filter((c) => c[2] === '15m').length;
+    now += 61_000;
+    await sw.slow();
+    expect(ex.ccxt.ohlcv.mock.calls.filter((c) => c[2] === '15m').length).toBe(before + 1);
+  });
 });
 
 describe('crypto swarm', () => {

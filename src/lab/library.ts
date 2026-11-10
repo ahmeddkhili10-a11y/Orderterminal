@@ -392,6 +392,56 @@ export function trendScore(c: Ctx, unit: number): Float64Array {
 }
 export const TREND_VOTES = 17;
 
+/** the UTC hour a bar closes at, as a number (20.25 = 20:15); 0 at midnight */
+const closeHour = (c: Ctx, time: number) => ((time + c.m.tfH * 3_600_000) % 86_400_000) / 3_600_000;
+/** the hour a rule asks for, moved back to the last candle close at or before it (21:00 on 4-hour candles is 20:00) */
+const onGrid = (c: Ctx, hour: number) => (Math.floor(hour / c.m.tfH + 1e-9) * c.m.tfH) % 24;
+
+/**
+ * The trading "day" a bar belongs to when days start at `anchor` (a UTC hour:
+ * 0 for the daily candle's open, 13 for the US session), and how many bars
+ * into that day it is.
+ */
+function sessionOf(c: Ctx, anchor: number): { day: Int32Array; k: Int32Array } {
+  return cached(c, `sess${anchor}`, () => {
+    const b = c.m.bars;
+    const day = new Int32Array(b.length);
+    const k = new Int32Array(b.length);
+    let last = -1;
+    let n = 0;
+    for (let i = 0; i < b.length; i++) {
+      const d = Math.floor((b[i].time - anchor * 3_600_000) / 86_400_000);
+      n = d === last ? n + 1 : 0;
+      last = d;
+      day[i] = d;
+      k[i] = n;
+    }
+    return { day, k };
+  });
+}
+
+/** the volume-weighted average price since the day's start (`anchor`), known at each bar's close */
+export function sessionVwap(c: Ctx, anchor: number): Float64Array {
+  return cached(c, `vwap${anchor}`, () => {
+    const b = c.m.bars;
+    const { k } = sessionOf(c, anchor);
+    const out = new Float64Array(b.length).fill(NaN);
+    let pv = 0;
+    let v = 0;
+    for (let i = 0; i < b.length; i++) {
+      if (k[i] === 0) {
+        pv = 0;
+        v = 0;
+      }
+      const w = b[i].volume > 0 ? b[i].volume : 0;
+      pv += ((b[i].high + b[i].low + b[i].close) / 3) * w;
+      v += w;
+      if (v > 0) out[i] = pv / v;
+    }
+    return out;
+  });
+}
+
 const state = (n: number) => new Int8Array(n);
 const sgn = (x: number) => (x > 0 ? 1 : x < 0 ? -1 : 0);
 
@@ -756,10 +806,9 @@ export const SIGNALS: SignalDef[] = [
       const out = state(c.m.bars.length);
       let open = NaN;
       c.m.bars.forEach((b, i) => {
-        const h = new Date(b.time).getUTCHours();
-        if (h === 0) open = b.open;
+        if (b.time % 86_400_000 === 0) open = b.open;
         // the bar that closes at hour p.hour (on 4-hour candles: the last one closing by then)
-        if (h + c.m.tfH === Math.floor(p.hour / c.m.tfH) * c.m.tfH && Number.isFinite(open)) out[i] = sgn(b.close / open - 1);
+        if (closeHour(c, b.time) === onGrid(c, p.hour) && Number.isFinite(open)) out[i] = sgn(b.close / open - 1);
       });
       return out;
     },
@@ -777,8 +826,8 @@ export const SIGNALS: SignalDef[] = [
     compute: (c) => {
       const out = state(c.m.bars.length);
       c.m.bars.forEach((b, i) => {
-        const t = new Date(b.time + c.m.tfH * 3_600_000);
-        if (t.getUTCDay() === 1 && t.getUTCHours() === 0) out[i] = 1;
+        const t = b.time + c.m.tfH * 3_600_000;
+        if (t % 86_400_000 === 0 && new Date(t).getUTCDay() === 1) out[i] = 1;
       });
       return out;
     },
@@ -974,13 +1023,146 @@ export const SIGNALS: SignalDef[] = [
     exit: { stopAtr: 3, maxBars: 2, onFlip: false },
     compute: (c, p) => {
       const out = state(c.m.bars.length);
-      const want = (Math.floor(p.hour / c.m.tfH) * c.m.tfH) % 24;
+      const want = onGrid(c, p.hour);
       c.m.bars.forEach((b, i) => {
-        if ((new Date(b.time).getUTCHours() + c.m.tfH) % 24 === want) out[i] = 1;
+        if (closeHour(c, b.time) === want) out[i] = 1;
       });
       return out;
     },
     describe: (p) => `buy at ${p.hour}:00 UTC and hold for two hours`,
+  },
+  {
+    id: 'vwap',
+    name: 'VWAP trend',
+    family: 'trend',
+    papers: ['az23v', 'zab24n'],
+    rationale: 'The day\'s volume-weighted average price is what the average participant paid today. Above it buyers are in profit and in control; below it sellers are. Long above, short below, a fresh start each day. Published on US index funds; crypto has no opening bell, so the day starts at 00:00 UTC or with the US session.',
+    grid: { anchor: [0, 13], band: [0, 0.5] },
+    intraday: true,
+    exit: { stopAtr: 2, maxBars: 24, onFlip: true },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const vw = sessionVwap(c, p.anchor);
+      const { k } = sessionOf(c, p.anchor);
+      const A = atr14(c);
+      const out = state(b.length);
+      // not in the first hour of the day: the average has too little behind it
+      const warm = Math.max(1, Math.round(1 / c.m.tfH));
+      for (let i = 0; i < b.length; i++) {
+        if (k[i] < warm || !Number.isFinite(vw[i]) || !Number.isFinite(A[i])) continue;
+        const d = b[i].close - vw[i];
+        out[i] = d > p.band * A[i] ? 1 : d < -p.band * A[i] ? -1 : 0;
+      }
+      return out;
+    },
+    describe: (p) => `long while price is above the day's volume-weighted average price${p.band > 0 ? ` by more than ${p.band} ATR` : ''}, short while below (the day starts at ${p.anchor}:00 UTC)`,
+  },
+  {
+    id: 'orb',
+    name: 'Opening range breakout',
+    family: 'breakout',
+    papers: ['za23o', 'zba24o', 'cra90'],
+    rationale: 'The first hour or two of the day sets a range; a close beyond it shows which side has won the opening argument, and the day tends to follow. One trade a day, held for the rest of it at most. Published on US stocks, where it needs unusual volume behind it; in crypto the "open" is 00:00 UTC or the US session.',
+    grid: { anchor: [0, 13], range: [1, 2] },
+    intraday: true,
+    exit: { stopAtr: 2, maxBars: 22, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { k } = sessionOf(c, p.anchor);
+      const n = Math.max(1, Math.round(p.range / c.m.tfH));
+      const perDay = Math.round(24 / c.m.tfH);
+      const out = state(b.length);
+      let hi = -Infinity;
+      let lo = Infinity;
+      let side = 0;
+      for (let i = 0; i < b.length; i++) {
+        if (k[i] === 0) {
+          hi = -Infinity;
+          lo = Infinity;
+          side = 0;
+        }
+        if (k[i] < n) {
+          hi = Math.max(hi, b[i].high);
+          lo = Math.min(lo, b[i].low);
+          continue;
+        }
+        // the first close beyond the range decides the day; nothing new in its last hours
+        if (!side && k[i] < perDay - Math.max(1, Math.round(2 / c.m.tfH))) side = b[i].close > hi ? 1 : b[i].close < lo ? -1 : 0;
+        out[i] = side;
+      }
+      return out;
+    },
+    describe: (p) => `the first ${p.range} hour${p.range > 1 ? 's' : ''} from ${p.anchor}:00 UTC set a range; trade the first close beyond it, in its direction, for the rest of the day`,
+  },
+  {
+    id: 'noise',
+    name: 'Intraday momentum beyond the noise',
+    family: 'momentum',
+    papers: ['zab24n', 'suw22'],
+    rationale: 'By each time of day, price has usually moved some distance from the open — that is noise. A move bigger than the average for that time of day over the last two weeks is demand or supply the day has not absorbed, and it tends to run to the close. Exits when price falls back inside.',
+    grid: { anchor: [0, 13], k: [1, 1.5] },
+    intraday: true,
+    exit: { stopAtr: 2.5, maxBars: 24, onFlip: true },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { k } = sessionOf(c, p.anchor);
+      const perDay = Math.round(24 / c.m.tfH);
+      const barMs = c.m.tfH * 3_600_000;
+      const out = state(b.length);
+      // the absolute move from the day's open at each slot, for the last 14 days
+      const hist: number[][] = Array.from({ length: perDay }, () => []);
+      let open = NaN;
+      let pending: [number, number][] = [];
+      for (let i = 0; i < b.length; i++) {
+        // the time of day as a slot (by the clock, so a missing candle does not shift the rest)
+        const since = (((b[i].time - p.anchor * 3_600_000) % 86_400_000) + 86_400_000) % 86_400_000;
+        const slot = Math.min(perDay - 1, Math.floor(since / barMs));
+        if (k[i] === 0) {
+          // yesterday's moves join the history only once the day is over
+          for (const [s, m] of pending) {
+            hist[s].push(m);
+            if (hist[s].length > 14) hist[s].shift();
+          }
+          pending = [];
+          open = b[i].open;
+        }
+        if (!(open > 0)) continue;
+        const move = b[i].close / open - 1;
+        pending.push([slot, Math.abs(move)]);
+        const h = hist[slot];
+        if (h.length < 10) continue;
+        const noise = h.reduce((a, x) => a + x, 0) / h.length;
+        out[i] = move > p.k * noise ? 1 : move < -p.k * noise ? -1 : 0;
+      }
+      return out;
+    },
+    describe: (p) => `long when the move from the day's open (${p.anchor}:00 UTC) is more than ${p.k}× the average move by that time of day over the last 14 days, short when as far below`,
+  },
+  {
+    id: 'fade',
+    name: 'Fade a stretched candle',
+    family: 'reversion',
+    papers: ['kw26', 'wbxz22', 'lm90'],
+    rationale: 'On 15-minute candles a sharp move is partly taken back in the next candle, far more in crypto than in stocks: forced and impatient orders push price further than the news deserves, and those who take the other side are paid as it settles. The measured edge is a point or two before fees — the test shows whether anything is left after them.',
+    grid: { k: [1.5, 2, 3], vol: [0, 1] },
+    intraday: true,
+    exit: { stopAtr: 1.5, targetR: 1, maxBars: 1, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const vz = cached(c, 'vz', () => volZ(c.m.bars, H(c, 168)));
+      const out = state(b.length);
+      for (let i = 1; i < b.length; i++) {
+        const a = A[i - 1];
+        if (!Number.isFinite(a) || a <= 0) continue;
+        const m = (b[i].close - b[i].open) / a;
+        // with vol = 1: only when the candle came on heavy volume (aggressive flow)
+        if (p.vol && !(vz[i] > 1)) continue;
+        out[i] = m > p.k ? -1 : m < -p.k ? 1 : 0;
+      }
+      return out;
+    },
+    describe: (p) => `after a candle that moves more than ${p.k} ATR${p.vol ? ' on heavy volume' : ''}, trade against it for the next candles`,
   },
   {
     id: 'pairs',

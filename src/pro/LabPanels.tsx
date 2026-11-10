@@ -15,6 +15,7 @@ import { nameOf, rulesOf, type ForecastReport, type Learned, type Ranked } from 
 import { startLabLink, useLab, type LabConfig, type LabTest } from '../lab/store';
 import { Check, NumberInput, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { Bars, Fan, LineChart } from './charts';
+import { SpecOptimizer } from './Optimizer';
 
 const pct = (x: number, d = 0) => `${(x * 100).toFixed(d)}%`;
 const num = (x: number, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : '—');
@@ -136,7 +137,7 @@ function ConfigBar({ cfg, running }: { cfg: LabConfig; running: boolean }) {
   return (
     <Toolbar>
       <input className="ctl mono" value={coins} onChange={(e) => setCoins(e.target.value.toUpperCase())} onBlur={() => save({ coins: coins.split(/[\s,]+/).filter(Boolean).slice(0, 8) })} style={{ width: 130 }} title="Coins to research together (the same rules on each)" disabled={running} />
-      <Select value={cfg.timeframe} options={[{ value: '1h', label: '1 hour' }, { value: '4h', label: '4 hours' }, { value: '1d', label: '1 day' }]} onChange={(timeframe) => save({ timeframe })} title="Candle timeframe" />
+      <Select value={cfg.timeframe} options={[{ value: '15m', label: '15 minutes' }, { value: '1h', label: '1 hour' }, { value: '4h', label: '4 hours' }, { value: '1d', label: '1 day' }]} onChange={(timeframe) => save({ timeframe })} title="Candle timeframe (15-minute candles: at most a year of history)" />
       <Select value={cfg.years} options={[1, 2, 3, 5].map((y) => ({ value: y, label: `${y} yr` }))} onChange={(years) => save({ years })} title="Years of history" />
       <Select value={cfg.combos} options={[100, 400, 1000].map((n) => ({ value: n, label: `${n} mixes` }))} onChange={(combos) => save({ combos })} title="How many mixed strategies to try" />
       <Select value={cfg.sides} options={[{ value: 'both', label: 'Long + short' }, { value: 'long', label: 'Long only' }]} onChange={(sides) => save({ sides })} />
@@ -298,9 +299,10 @@ function Detail({ r, tfH, onDeploy }: { r: Ranked; tfH: number; onDeploy: (targe
           {r.papers.map((p) => (
             <PaperCite key={p} p={PAPERS[p]} />
           ))}
-          <div className="lab-line muted mono">timeframe {tfH}h · {r.family}</div>
+          <div className="lab-line muted mono">timeframe {tfH < 1 ? `${Math.round(tfH * 60)}m` : `${tfH}h`} · {r.family}</div>
         </div>
       </div>
+      <SpecOptimizer key={r.rank + r.spec.name} spec={r.spec} tfH={tfH} />
     </div>
   );
 }
@@ -656,7 +658,7 @@ export function LabBuilder({ config: c, setConfig }: PanelProps<BuilderConfig>) 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const s = c.spec;
-  const tfH = status ? ({ '1h': 1, '4h': 4, '1d': 24 } as const)[status.cfg.timeframe] : 1;
+  const tfH = status ? ({ '15m': 0.25, '1h': 1, '4h': 4, '1d': 24 } as const)[status.cfg.timeframe] : 1;
   const set = (patch: Partial<StrategySpec>) => {
     const next = { ...s, ...patch };
     setConfig({ spec: { ...next, name: nameOf(next) } });
@@ -860,7 +862,7 @@ export function LabDeployed() {
                   {d.name}
                 </td>
                 <td className="l">{d.targets.crypto ? 'Crypto swarm' : 'Meme swarm (retired: not trading)'}</td>
-                <td className="mono">{d.tfH}h</td>
+                <td className="mono">{d.tfH < 1 ? `${Math.round(d.tfH * 60)}m` : `${d.tfH}h`}</td>
                 <td className="l mono">{d.coins.join(' ')}</td>
                 <td className="mono">{num(d.stats.sharpe)}</td>
                 <td className="mono">{num(d.stats.t)}</td>

@@ -20,6 +20,7 @@ import {
   FLOW_DEFAULT,
   FORECASTS,
   forStyle,
+  historyWords,
   HOLDS,
   migrateFlow,
   MODELS,
@@ -46,8 +47,9 @@ import { ncdf } from '../lab/stats';
 import { startLabLink, useLab, type LabTest } from '../lab/store';
 import { Check, type PanelProps } from '../ui/controls';
 import { LineChart } from './charts';
+import { Optimizer } from './Optimizer';
 
-export type BotConfig = Flow & { explain: boolean };
+export type BotConfig = Flow & { explain: boolean; /** versions of this bot tested on the same unseen data */ tries?: number };
 export const BOT_DEFAULTS: BotConfig = { ...FLOW_DEFAULT, explain: true };
 
 const pct = (x: number, d = 1) => (Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : '—');
@@ -164,7 +166,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 
 export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
   useEffect(() => startLabLink(), []);
-  const c = useMemo(() => ({ ...migrateFlow(raw as BotConfig & Record<string, unknown>), explain: raw.explain ?? true }), [raw]);
+  const c = useMemo(() => ({ ...migrateFlow(raw as BotConfig & Record<string, unknown>), explain: raw.explain ?? true, tries: raw.tries ?? 0 }), [raw]);
   const status = useLab((s) => s.status);
   const [res, setRes] = useState<LabTest | null>(null);
   const [busy, setBusy] = useState(false);
@@ -180,7 +182,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pending = useLabInbox((st) => st.queue.length);
   const [wrapRef, wrapW] = useWidth<HTMLDivElement>();
-  const style = STYLE_MAP[c.style] ?? STYLES[2];
+  const style = STYLE_MAP[c.style] ?? STYLE_MAP.swing;
   const built = useMemo(() => buildSpec(c), [c]);
   const findings = useMemo(() => checkFlow(c).sort((a, b) => RANK[b.tone] - RANK[a.tone]), [c]);
   const blocked = findings.some((f) => f.tone === 'clash' && f.blocks.includes('style'));
@@ -257,19 +259,23 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
   if (!desktop?.lab) return <div className="pro-empty">The bot builder runs in the desktop app (it backtests on years of history).</div>;
 
   const needsFunding = specNeeds(built.spec).funding;
-  const run = () => {
+  /** test the bot as it is — or a changed version the optimizer is about to make it */
+  const run = (as?: Flow) => {
+    const b = as ? buildSpec(as) : built;
     setBusy(true);
     setErr('');
     setMsg('');
     setDeployed(false);
     desktop!.lab
-      .test(built.spec, { timeframe: built.timeframe, years: built.years, coins: built.coins, funding: needsFunding })
+      .test(b.spec, { timeframe: b.timeframe, years: b.years, coins: b.coins, funding: specNeeds(b.spec).funding })
       .then((r) => {
         setRes(r);
         setSel('test');
+        // every version tested on the same unseen data is counted: the more that are tried, the likelier the best is luck
+        setConfig({ tries: (c.tries ?? 0) + 1 });
         // the unseen trades, for the Monte Carlo panel (MC) on the Quant desk
         try {
-          if (r.rs?.length) localStorage.setItem('novus-lab-last-trades', JSON.stringify({ name: built.spec.name, rs: r.rs, at: Date.now() }));
+          if (r.rs?.length) localStorage.setItem('novus-lab-last-trades', JSON.stringify({ name: b.spec.name, rs: r.rs, at: Date.now() }));
         } catch {
           /* no storage: the panel just has nothing to load */
         }
@@ -300,7 +306,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
   const face = (b: BlockId): { sub: string; chips: string[] } => {
     switch (b) {
       case 'style':
-        return { sub: `${style.timeframe} candles · ${style.years} years`, chips: [style.name.split(' — ')[0]] };
+        return { sub: `${style.timeframe} candles · ${historyWords(style)}`, chips: [style.name.split(' — ')[0]] };
       case 'strategy':
         return { sub: c.strategies.length > 1 ? `${c.strategies.length} joined · ${COMBINES.find((x) => x.id === c.combine)!.name.toLowerCase()}` : '1 strategy', chips: c.strategies.map(pickName.strategy) };
       case 'model':
@@ -376,7 +382,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
         return (
           <Group title="How long trades last">
             {STYLES.map((s) => (
-              <OptionRow key={s.id} id={s.id} radio on={c.style === s.id} name={s.name} plain={`${s.plain} ${s.timeframe} candles, ${s.years} year${s.years > 1 ? 's' : ''} of history.${s.note ? ` ${s.note}` : ''}`} explain={c.explain} onClick={() => set({ style: s.id })} />
+              <OptionRow key={s.id} id={s.id} radio on={c.style === s.id} name={s.name} plain={`${s.plain} ${s.timeframe} candles, ${historyWords(s)} of history.${s.note ? ` ${s.note}` : ''}`} explain={c.explain} onClick={() => set({ style: s.id })} />
             ))}
           </Group>
         );
@@ -425,9 +431,9 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
               <input className="ctl mono bb-coins" value={coinsText} onChange={(e) => setCoinsText(e.target.value.toUpperCase())} onBlur={() => set({ coins: coinsText })} onKeyDown={(e) => e.key === 'Enter' && set({ coins: coinsText })} title="Coins to test on, separated by spaces" />
             </label>
             <div className="bb2-opt-plain">
-              {style.years} year{style.years > 1 ? 's' : ''} of {style.timeframe} candles from the exchange · built on the first 70 %, judged on the last 30 % · fees 4.5 bps and slippage 2 bps a side{needsFunding ? ' · with funding' : ''}.
+              {historyWords(style)} of {style.timeframe} candles from the exchange · built on the first 70 %, judged on the last 30 % · fees 4.5 bps and slippage 2 bps a side{needsFunding ? ' · with funding' : ''}.
             </div>
-            <button className="btn bb-run bb2-primary" disabled={busy || blocked} onClick={run}>
+            <button className="btn bb-run bb2-primary" disabled={busy || blocked} onClick={() => run()}>
               {busy ? 'Testing…' : res ? '↻ Test again' : '▶ Run backtest'}
             </button>
             {blocked && <div className="bb2-opt-plain down">Fix the clash with the trading style first.</div>}
@@ -469,11 +475,14 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
         <Check checked={c.explain} onChange={(explain) => setConfig({ explain })}>
           Explain
         </Check>
-        <button className="btn ghost" onClick={() => confirm('Start again from the default bot?') && set({ ...FLOW_DEFAULT, tunes: undefined })} title="Back to the default bot">
+        <button className="btn ghost" onClick={() => confirm('Start again from the default bot?') && (set({ ...FLOW_DEFAULT, tunes: undefined }), setConfig({ tries: 0 }))} title="Back to the default bot">
           Reset
         </button>
-        <button className="btn bb2-primary" disabled={busy || blocked} onClick={run}>
+        <button className="btn bb2-primary" disabled={busy || blocked} onClick={() => run()}>
           {busy ? 'Testing…' : '▶ Test bot'}
+        </button>
+        <button className={`btn bb2-deploy-top${res && v ? ` t-${v.tone}` : ''}`} disabled={!res || busy} onClick={deploy} title={res ? `Deploy this bot to the crypto swarm (${c.authority === 'tested' ? 'to trade as tested' : 'the council decides its trades'}) — change who decides in the Deploy block` : 'Test the bot first: a bot can only be deployed with its test result'}>
+          {deployed ? '✓ Deployed' : '⇢ Deploy'}
         </button>
       </div>
       <div className="pro-scroll" ref={scrollRef}>
@@ -599,6 +608,22 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
             <div className={`bb-verdict t-${v.tone}`}>
               <b>{v.tone === 'good' ? 'Looks good' : v.tone === 'ok' ? 'Maybe' : 'Not yet'}</b> — {v.text}
             </div>
+            <div className="bb2-deploy-bar" data-deploy-bar>
+              <span>
+                <b>Deploy it from here.</b> This test is the same one the backtester runs — nothing else is needed first.
+              </span>
+              <span className="bb2-deploy-who" role="radiogroup" aria-label="Who decides its trades">
+                <button className={`chip${c.authority === 'council' ? ' active' : ''}`} onClick={() => setConfig({ authority: 'council' })} title="The bot proposes; the swarm’s council votes and can block a signal">
+                  Council decides
+                </button>
+                <button className={`chip${c.authority === 'tested' ? ' active' : ''}`} onClick={() => setConfig({ authority: 'tested' })} title="The bot takes every signal it was tested on; only Guardian and Risk can stop a trade">
+                  Trade as tested
+                </button>
+              </span>
+              <button className={`btn bb2-primary bb2-deploy-here t-${v.tone}`} onClick={deploy} disabled={busy}>
+                {deployed ? '✓ Deployed to the crypto swarm' : '⇢ Deploy to the crypto swarm'}
+              </button>
+            </div>
             <div className="bb-tiles">
               {[
                 ['Return a year', pct(res.oos.cagr), 'On the data it never saw (the last 30 %).', res.oos.cagr >= 0 ? 'up' : 'down'],
@@ -617,6 +642,17 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
                 </div>
               ))}
             </div>
+            <Optimizer
+              flow={c}
+              test={res}
+              tries={c.tries ?? 1}
+              busy={busy}
+              onApply={(f, label) => {
+                set({ ...f, tunes: f.tunes });
+                setArrived((a) => [`Optimizer: “${label}” applied — testing it on the unseen data now.`, ...a].slice(0, 4));
+                run(f);
+              }}
+            />
             <div className="lab-line">
               Built on the first 70 %: Sharpe {num(res.is.sharpe)} · judged on the last 30 %: Sharpe {num(res.oos.sharpe)}.{' '}
               {res.is.sharpe > 1 && res.oos.sharpe < res.is.sharpe * 0.4 ? 'It did much better on the data it was built on than on new data — a sign of over-fitting.' : res.oos.sharpe >= res.is.sharpe * 0.6 ? 'It held up on new data about as well as on the data it was built on — a good sign.' : ''}

@@ -3,12 +3,12 @@
 import { create } from 'zustand';
 import { desktop } from '../desktop/bridge';
 import type { StrategySpec } from './backtest';
-import type { DeciderTest, Parts, ResearchResult } from './research';
+import type { DeciderTest, Diag, Parts, Periods, ResearchResult } from './research';
 import type { MonteCarlo, Perf } from './stats';
 
 export interface LabConfig {
   coins: string[];
-  timeframe: '1h' | '4h' | '1d';
+  timeframe: '15m' | '1h' | '4h' | '1d';
   years: number;
   source: 'auto' | 'binance' | 'okx' | 'bybit' | 'hyperliquid';
   isShare: number;
@@ -52,6 +52,10 @@ export interface LabTest {
   mc: MonteCarlo | null;
   /** the unseen trades' results in R */
   rs?: number[];
+  /** the unseen data by month (or week) */
+  periods?: Periods;
+  /** how its trades went on the training years */
+  diag?: Diag;
   /** buy-and-hold over the unseen period */
   bh?: Perf;
   perCoin?: { coin: string; oos: Perf }[];

@@ -890,6 +890,162 @@ function coinSplit(run: Run, how: NonNullable<StrategySpec['weights']>): Record<
   return Object.fromEntries(coins.map((c, i) => [c, floored[i] / tot]));
 }
 
+// ---------- what a test shows: the diagnosis, and trying changes without touching the unseen data ----------
+
+/** results by calendar period: months, or weeks when the stretch is too short for months to mean anything */
+export interface Periods {
+  unit: 'month' | 'week';
+  list: { t: number; ret: number }[];
+  /** share of periods that made money, the worst one, the average one */
+  up: number;
+  worst: number;
+  avg: number;
+}
+
+export function periodsOf(rets: ArrayLike<number>, times: ArrayLike<number>): Periods {
+  let first = Infinity;
+  let last = -Infinity;
+  for (let i = 0; i < times.length; i++)
+    if (times[i]) {
+      first = Math.min(first, times[i]);
+      last = Math.max(last, times[i]);
+    }
+  const unit: Periods['unit'] = last - first < 120 * 86_400_000 ? 'week' : 'month';
+  // weeks from Monday (UTC); months by the calendar
+  const keyOfT = (t: number) => {
+    if (unit === 'week') return Math.floor((t - 4 * 86_400_000) / (7 * 86_400_000)) * 7 * 86_400_000 + 4 * 86_400_000;
+    const d = new Date(t);
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+  };
+  const acc = new Map<number, number>();
+  for (let i = 0; i < times.length; i++) {
+    if (!times[i]) continue;
+    const k = keyOfT(times[i]);
+    acc.set(k, (acc.get(k) ?? 1) * (1 + (Number.isFinite(rets[i]) ? rets[i] : 0)));
+  }
+  const list = [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([t, m]) => ({ t, ret: m - 1 }));
+  const n = list.length;
+  return { unit, list, up: n ? list.filter((x) => x.ret > 0).length / n : NaN, worst: n ? Math.min(...list.map((x) => x.ret)) : NaN, avg: n ? list.reduce((a, x) => a + x.ret, 0) / n : NaN };
+}
+
+/** how a strategy's trades went on the training years: what ended them, each side, each coin, and what trading cost */
+export interface Diag {
+  trades: number;
+  exits: { reason: Trade['reason']; n: number; avgR: number }[];
+  long: { n: number; avgR: number; win: number };
+  short: { n: number; avgR: number; win: number };
+  /** bars held, on average: winners and losers */
+  heldWin: number;
+  heldLoss: number;
+  coins: { coin: string; sharpe: number; trades: number }[];
+  /** fees and slippage as a share of the profit before them (above 1: they ate all of it) */
+  costShare: number;
+  tradesPerMonth: number;
+  exposure: number;
+}
+
+function diagOf(ctxs: Ctx[], spec: StrategySpec, costs: Costs, bpy: number, gate?: Gate): Diag {
+  const run = runAll(ctxs, spec, 'is', costs, gate);
+  const free = runAll(ctxs, spec, 'is', { feeBps: 0, slipBps: 0 }, gate);
+  const sum = (x: Float64Array) => x.reduce((a, b) => a + b, 0);
+  const gross = sum(free.rets);
+  const net = sum(run.rets);
+  const side = (d: 1 | -1) => {
+    const ts = run.trades.filter((t) => t.side === d);
+    return { n: ts.length, avgR: ts.length ? ts.reduce((a, t) => a + t.r, 0) / ts.length : NaN, win: ts.length ? ts.filter((t) => t.r > 0).length / ts.length : NaN };
+  };
+  const reasons: Trade['reason'][] = ['stop', 'target', 'trail', 'time', 'flip', 'end'];
+  const held = (ts: Trade[]) => (ts.length ? ts.reduce((a, t) => a + (t.exitI - t.entryI + 1), 0) / ts.length : NaN);
+  const months = run.times.length ? Math.max(1 / 30, (run.times[run.times.length - 1] - run.times[0]) / (30.44 * 86_400_000)) : 1;
+  return {
+    trades: run.trades.length,
+    exits: reasons.map((reason) => {
+      const ts = run.trades.filter((t) => t.reason === reason);
+      return { reason, n: ts.length, avgR: ts.length ? ts.reduce((a, t) => a + t.r, 0) / ts.length : NaN };
+    }).filter((x) => x.n > 0),
+    long: side(1),
+    short: side(-1),
+    heldWin: held(run.trades.filter((t) => t.r > 0)),
+    heldLoss: held(run.trades.filter((t) => t.r <= 0)),
+    coins: run.per.map((x) => ({ coin: x.m.coin, sharpe: perf(x.bt.rets, x.bt.trades, bpy, x.bt.exposure).sharpe, trades: x.bt.trades.length })),
+    costShare: gross > 0 ? (gross - net) / gross : net < gross ? Infinity : 0,
+    tradesPerMonth: run.trades.length / months / Math.max(1, ctxs.length),
+    exposure: run.exposure,
+  };
+}
+
+/** a variant of a strategy, measured on the validation part of the training years */
+export interface VariantScore {
+  id: string;
+  sharpe: number;
+  /** total return over the validation stretch, its deepest drawdown, the trades in it */
+  ret: number;
+  maxDD: number;
+  trades: number;
+  /** share of its weeks that made money, and the worst week */
+  weeksUp: number;
+  worstWeek: number;
+  /** the Sharpe ratio on the earlier training years (the part the models were fitted on) */
+  early: number;
+  error?: string;
+}
+
+/**
+ * Try versions of a strategy WITHOUT looking at the unseen data. The training
+ * years are split again: models are fitted on their first 70 %, and each
+ * version is measured on the last 30 % of them (the validation stretch). The
+ * final 30 % of all the history — the part every test is judged on — is never
+ * read here, so what is found can still be tested honestly on it.
+ */
+export function scoreVariants(markets: Market[], specs: { id: string; spec: StrategySpec }[], isShare = 0.7, costs: Costs = COSTS, onProgress?: (done: number, total: number) => void): VariantScore[] {
+  const base = withBench(markets);
+  const outer = (m: Market) => Math.floor(m.bars.length * isShare);
+  // only the training bars are handed to the rules at all
+  const ctxs = base.map((m, k) => {
+    const end = outer(m);
+    const cut: Market = { ...m, bars: m.bars.slice(0, end), funding: m.funding ? m.funding.slice(0, end) : m.funding, bench: m.bench ? m.bench.slice(0, end) : m.bench };
+    return ctxOf(cut, Math.max(50, Math.floor(end * 0.7)), 42 + k);
+  });
+  const bpy = barsPerYear(markets[0].tfH);
+  const out: VariantScore[] = [];
+  specs.forEach(({ id, spec: s0 }, k) => {
+    try {
+      // sizing found from a test's own trades (Kelly), the split across coins and the decision maker are left out: they are fitted, not chosen
+      const { autoMeta: _a, meta: _m, coinWeights: _c, weights: _w, ...rest } = s0;
+      const unitIfKelly = (z: Sizing | undefined) => (z?.mode === 'kelly' && !(z.target > 0) ? undefined : z);
+      const spec: StrategySpec = { ...rest, sizing: unitIfKelly(rest.sizing), sizing2: unitIfKelly(rest.sizing2) };
+      const per = ctxs.map((c) => ({ m: c.m, c, bt: backtest(c, spec, c.trainEnd, c.m.bars.length, costs) }));
+      const p = pool(per);
+      const trades = per.flatMap((x) => x.bt.trades);
+      const pf = perf(p.rets, trades, bpy, per.reduce((a, x) => a + x.bt.exposure, 0) / per.length);
+      const perE = ctxs.map((c) => ({ m: c.m, c, bt: backtest(c, spec, 50, c.trainEnd, costs) }));
+      const pe = pool(perE);
+      const early = perf(pe.rets, perE.flatMap((x) => x.bt.trades), bpy, 0);
+      const wk = periodsOf(p.rets, p.times);
+      // weeks whatever the stretch: enough of them to count
+      const weeks = wk.unit === 'week' ? wk : periodsOfWeeks(p.rets, p.times);
+      out.push({ id, sharpe: pf.sharpe, ret: pf.totalReturn, maxDD: pf.maxDD, trades: pf.trades, weeksUp: weeks.up, worstWeek: weeks.worst, early: early.sharpe });
+    } catch (err) {
+      out.push({ id, sharpe: NaN, ret: NaN, maxDD: NaN, trades: 0, weeksUp: NaN, worstWeek: NaN, early: NaN, error: String((err as Error)?.message ?? err) });
+    }
+    onProgress?.(k + 1, specs.length);
+  });
+  return out;
+}
+
+function periodsOfWeeks(rets: ArrayLike<number>, times: ArrayLike<number>): Periods {
+  const W = 7 * 86_400_000;
+  const acc = new Map<number, number>();
+  for (let i = 0; i < times.length; i++) {
+    if (!times[i]) continue;
+    const k = Math.floor((times[i] - 4 * 86_400_000) / W);
+    acc.set(k, (acc.get(k) ?? 1) * (1 + (Number.isFinite(rets[i]) ? rets[i] : 0)));
+  }
+  const list = [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([k, m]) => ({ t: k * W + 4 * 86_400_000, ret: m - 1 }));
+  const n = list.length;
+  return { unit: 'week', list, up: n ? list.filter((x) => x.ret > 0).length / n : NaN, worst: n ? Math.min(...list.map((x) => x.ret)) : NaN, avg: n ? list.reduce((a, x) => a + x.ret, 0) / n : NaN };
+}
+
 /** one strategy's full test, on demand (the Backtest screen and the bot builder) */
 export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, costs: Costs = COSTS) {
   const ctxs = withBench(markets).map((m, k) => ctxOf(m, Math.floor(m.bars.length * isShare), 42 + k));
@@ -985,6 +1141,10 @@ export function evaluate(markets: Market[], spec0: StrategySpec, isShare = 0.7, 
     curve: equityCurve(full, bhAll),
     trades: oos.trades.length,
     mc: monteCarlo(oos.trades.map((t) => t.r)),
+    /** the unseen data by month (or week): what "a return every month" looked like */
+    periods: periodsOf(oos.rets, oos.times),
+    /** how its trades went on the training years — what the optimizer's advice reads */
+    diag: diagOf(ctxs, spec, costs, bpy, gate),
     /** the unseen trades' results in R, oldest first (the Quant desk's Monte Carlo panel resamples them) */
     rs: oos.trades.slice().sort((a, b) => a.exitI - b.exitI).map((t) => Math.round(t.r * 1000) / 1000),
     /** buy-and-hold over the same unseen period, for comparison */
