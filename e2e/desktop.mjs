@@ -36,13 +36,13 @@ await seedDesktopLedger(userData);
   let seed = 20261107;
   const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, rnd()))) * Math.cos(2 * Math.PI * rnd());
-  for (const [tf, ms, days, sd, keep] of [['1h', 3_600_000, 760, 0.006, 0.997], ['15m', 900_000, 195, 0.003, 0.995]]) {
+  for (const [tf, ms, days, sd, keep, drift] of [['1h', 3_600_000, 760, 0.006, 0.997, 0.03], ['15m', 900_000, 195, 0.003, 0.995, 0.1]]) {
     const last = Math.floor(Date.now() / ms) * ms + 2 * ms;
     const n = Math.round((days * 86_400_000) / ms);
     let p = 60_000;
     let mu = 0;
     const bars = Array.from({ length: n }, (_, i) => {
-      mu = keep * mu + sd * 0.1 * gauss();
+      mu = keep * mu + sd * drift * gauss();
       const o = p;
       p *= Math.exp(mu + sd * gauss());
       return { time: last - (n - 1 - i) * ms, open: o, high: Math.max(o, p) * (1 + Math.abs(gauss()) * sd * 0.3), low: Math.min(o, p) * (1 - Math.abs(gauss()) * sd * 0.3), close: p, volume: 100 * (1 + Math.abs(gauss())) };

@@ -8,6 +8,76 @@ command line).
 It never promises an edge. It looks for one the way academic finance does, and
 says plainly when it finds none.
 
+## The edge finder (FARM) — strategies found for you, all the time
+
+The edge finder is a strategy farm that runs by itself for as long as the
+terminal is open. **Every bot is treated as curve-fitted until it proves it is
+not.** It starts a minute and a half after the terminal opens (so it never
+slows the start), carries on from where it was, and stays stopped once you
+press **Stop**.
+
+**Breeding.** Bots are built from the bot builder's own blocks — the Lab's
+rules and filters and the Quant desk's models (GARCH filters and stops,
+hidden-Markov, Hurst and variance-ratio regimes, the Kalman trend, the
+Ornstein–Uhlenbeck rule, VaR and volatility sizing, the bitcoin hedge, the
+neural network and the other learned rules). Each one is scored on the first
+70 % of the history only (its *fitness*: the training Sharpe, rewarding bots
+that work on most coins). The fittest breed the next generation — children
+take blocks from two parents (crossover), others change one block or setting
+(mutation) — and new random bots arrive every generation; a population that
+stops improving starts over. The unseen data is never used to choose.
+
+**The gauntlet.** A bot that trains well (Sharpe 0.7 or more, enough trades)
+then faces, in order:
+
+1. **The unseen 30 %** — it must make money there, with a Sharpe of 0.5 or
+   more and at least half its training Sharpe.
+2. **100 random bots** — the same number of trades, held as long, entered at
+   random: it must beat at least 75.
+3. **Its settings nudged** — every setting one step each way (each strategy's
+   look-backs and thresholds, the stop, the hold, the profit target): at least
+   half of those versions must still make money on the unseen data.
+4. **1,000 shuffles** — its trades in 1,000 random orders at 1 % risk a trade:
+   the unlucky 1-in-20 drawdown must stay within the limit (20 % by default).
+5. **Significance** — a t-statistic of 2 or more on the unseen data. When
+   hundreds of bots are tried, a few pass the first four by luck: on pure noise
+   about 2 % of the bots tried did, in the Lab's own tests. This check stopped
+   all of them. Bots that pass the four but not this go on the **watch list**.
+
+**Fresh data.** Survivors are then tested on candles that arrive after they
+were found — data no test has seen at all (the history is refreshed every two
+hours, every half hour for 15-minute paces). They climb a ladder: **new**
+(nothing since), **incubating** (fewer than 5 trades), **proving** (5–14,
+still making money), **proven** (15 or more, still making money) — or
+**fade** (losing over 10 or more trades, or falling half as far again as they
+ever did in testing) and drop out.
+
+**The top five** are the best still standing — significant on the unseen
+data, or proven on fresh data — no two from the same family (pace, strategies
+and filters), proven ones first. Each shows its return a year, Sharpe, worst
+drop, months that made money, the random bots it beat, the nudges it kept, the
+shuffle drawdown and its fresh-data result; open one for its rules in words,
+its curve and every check, then **Open in the bot builder** (every block shows
+what it is built of; test it there for the full read-out and the optimizer) or
+**Deploy to the crypto swarm**, choosing who decides its trades. Deploying is
+always yours to do.
+
+**The live fleet.** Every strategy deployed to the swarm is watched on the
+candles since it was deployed: watching (too few trades), healthy, slipping
+(well short of its test) or fading (losing) — with a top-five strategy at the
+same pace offered as its replacement.
+
+**Settings**: the coins (up to 8), the paces bred (any of the bot builder's
+styles — each needs its candles), long and short or long only, the speed
+(*gentle*, about a third of one processor core, the default; or *full*) and
+the shuffle drawdown limit. `FARM` is in the Strategy Lab and on the Quant
+desk; the Research screen shows it at a glance.
+
+What it cannot do: a bot that survived every check on history can still stop
+working — markets change. The fresh-data ladder and the fleet watch are there
+because of that, and the checks lower the odds of a lucky bot, they do not
+make them zero.
+
 ## The screens
 
 | Code | Screen | What it does |

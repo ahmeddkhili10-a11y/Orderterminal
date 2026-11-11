@@ -71,7 +71,7 @@
 <!-- ============ copyright / about ============ -->
 <section>
   <div style="padding-top:36px">
-    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.2</div>
+    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.3</div>
     <h1 style="font-size:22pt">About this manual</h1>
     <p>This manual explains how to use every part of Novus Ordo, the professional crypto trading terminal: the market terminal, the Quant desk, the Strategy Lab and its bot builder, the crypto swarm, and the wallet and exchange connections that link it to your accounts. It is written in plain English. Where a technical term is unavoidable, it is explained where it first appears and again in the glossary at the back.</p>
     <p>Each chapter starts with what a part of the terminal is for, then shows how to use it step by step. Function codes — short names you type on the command line, such as <code>VAR</code> or <code>BOT</code> — appear in a box like this so you can find them on screen.</p>
@@ -334,9 +334,30 @@
 <!-- ============ 5 strategy lab ============ -->
 <section class="chapter" data-ch="5">
   <div class="ch-head"><div class="ch-num">Chapter 5</div><h1>The Strategy Lab</h1><p class="ch-lead">Strategy Lab (F2): build a strategy, test it honestly on years of data, and deploy it to the crypto swarm.</p></div>
+  <h2 data-toc>The edge finder: strategies found for you</h2>
+  <p>The edge finder (<code>FARM</code>) is a strategy farm that runs by itself for as long as the terminal is open. You do not need to build and test bots one at a time: it builds them from the bot builder's blocks — every strategy and filter, and the Quant desk's models — tests them, and lists the best five that survive. It treats every bot as curve-fitted until the bot proves it is not.</p>
+  <ol class="steps">
+    <li><b>Breed.</b> Bots are built from the blocks and scored on the first 70 % of the history. The best ones are combined and varied into the next generation, and new random bots keep arriving.</li>
+    <li><b>The unseen 30 %.</b> A bot that did well in training is tested on the last 30 % of the history, which it never saw. It must make money there, and do at least half as well as in training.</li>
+    <li><b>100 random bots.</b> It must beat at least 75 of 100 bots that make the same number of trades at random.</li>
+    <li><b>Its settings nudged.</b> Every setting is moved one step each way. If fewer than half of those versions still make money, its result was luck in its exact settings, and it is thrown out.</li>
+    <li><b>1,000 shuffles.</b> Its trades are put in 1,000 random orders. If the unlucky orders cause too deep a drawdown, it is thrown out.</li>
+    <li><b>Significant.</b> Its result on the unseen data must be strong enough that luck would produce it less than 1 time in 40. When hundreds of bots are tried, a few pass the earlier checks by luck; this one catches them. Those that miss it go on a <b>watch list</b>.</li>
+    <li><b>Fresh data.</b> Survivors keep being tested on new candles that arrive after they were found, and climb a ladder: new → incubating → proving → proven. Those that fade are dropped.</li>
+  </ol>
+  <figure><img src="img/farm.jpg" /><figcaption>The edge finder running (here on test data): how many bots got through each check, and where the survivors stand on fresh data. The top five are listed below this, with their returns and checks.</figcaption></figure>
+  <h3>Using it</h3>
+  <ul>
+    <li>It starts by itself a minute and a half after the terminal opens, and carries on from where it was. Press <b>■ Stop</b> when you are satisfied; it keeps everything it found and stays stopped until you press <b>▶ Start</b>.</li>
+    <li><b>⚙ Settings</b>: the coins, the paces to breed (scalping, intraday, swing, one-week and the 15-minute styles), long and short or long only, the speed (<i>gentle</i> keeps the terminal smooth; <i>full</i> tries more bots an hour) and the drawdown limit for the shuffle test.</li>
+    <li>Click a top-five strategy to see its rules in words, its curve, and every check it passed. Then <b>Open in the bot builder</b> to see what it is built of, block by block, or <b>Deploy to the crypto swarm</b> — choosing <i>Council decides</i> or <i>Trade as tested</i>. Deploying is always your decision.</li>
+    <li><b>The live fleet</b> shows every strategy you deployed, checked on the candles since: healthy, slipping or fading. When one fades, a top-five strategy at the same pace is offered as its replacement.</li>
+  </ul>
+  <div class="box warn"><b>What it cannot promise</b>A bot that survived every check on history can still stop working, because markets change. That is why survivors keep being tested on fresh data, and why your deployed strategies are watched. Prefer strategies marked <b>proving</b> or <b>proven</b>; the checks lower the odds of a lucky bot, they do not make them zero.</div>
   <h2 data-toc>The Lab's screens</h2>
   <table>
     <tr><th>Code</th><th style="width:24%">Screen</th><th>What it does</th></tr>
+    <tr><td class="code">FARM</td><td>Edge finder</td><td>Breeds, tests and forward-tests bots by itself, all the time; lists the five best to deploy.</td></tr>
     <tr><td class="code">BOT</td><td>Bot builder</td><td>Build a bot block by block in plain English, backtest it and deploy it. The easiest way in.</td></tr>
     <tr><td class="code">RSCH</td><td>Research</td><td>Tests the whole library of published strategies on years of history, mixes them, and ranks the five best with an honest verdict.</td></tr>
     <tr><td class="code">LIB</td><td>Strategy library</td><td>Every rule and filter, the research papers behind it, and why it should work.</td></tr>
@@ -675,7 +696,7 @@
   </table>
   <table>
     <tr><th>Code</th><th>Function</th></tr>
-    <tr><td class="code">BOT</td><td>Bot builder</td></tr><tr><td class="code">RSCH</td><td>Research</td></tr><tr><td class="code">LIB</td><td>Strategy library</td></tr><tr><td class="code">BT</td><td>Backtest builder</td></tr><tr><td class="code">DEPL</td><td>Deployed strategies</td></tr>
+    <tr><td class="code">FARM</td><td>Edge finder</td></tr><tr><td class="code">BOT</td><td>Bot builder</td></tr><tr><td class="code">RSCH</td><td>Research</td></tr><tr><td class="code">LIB</td><td>Strategy library</td></tr><tr><td class="code">BT</td><td>Backtest builder</td></tr><tr><td class="code">DEPL</td><td>Deployed strategies</td></tr>
     <tr><td class="code">VAR</td><td>Value at risk</td></tr><tr><td class="code">CAPM</td><td>CAPM</td></tr><tr><td class="code">EF</td><td>Efficient frontier</td></tr><tr><td class="code">KELLY</td><td>Kelly criterion</td></tr><tr><td class="code">NNET</td><td>Neural network</td></tr><tr><td class="code">PAIR</td><td>Pairs &amp; cointegration</td></tr><tr><td class="code">SEAS</td><td>Seasonality</td></tr><tr><td class="code">MC</td><td>Monte Carlo</td></tr><tr><td class="code">DHG</td><td>Delta hedging</td></tr><tr><td class="code">VTGT</td><td>Volatility targeting</td></tr><tr><td class="code">MOM</td><td>Momentum</td></tr><tr><td class="code">REGM</td><td>Regimes</td></tr>
     <tr><td class="code">SWRM</td><td>Crypto swarm view</td></tr><tr><td class="code">SWCF</td><td>Swarm rules</td></tr><tr><td class="code">TKT</td><td>Order ticket</td></tr><tr><td class="code">PORT</td><td>Portfolio</td></tr><tr><td class="code">AMT</td><td>AMT bots</td></tr><tr><td class="code">ALRT</td><td>Alerts</td></tr><tr><td class="code">TG</td><td>Telegram</td></tr><tr><td class="code">WALL</td><td>Wallet</td></tr><tr><td class="code">LUNO</td><td>Luno lane</td></tr><tr><td class="code">CALC</td><td>Calculator</td></tr><tr><td class="code">NOTE</td><td>Journal</td></tr><tr><td class="code">DB</td><td>Database</td></tr><tr><td class="code">HELP</td><td>Every function</td></tr>
   </table>
@@ -737,7 +758,7 @@
     <p style="margin-top:40px;font-size:10pt;color:#5a6371;letter-spacing:0.2em;text-transform:uppercase">Conceived, designed and constructed by</p>
     <p style="font-family:'Inter Display','Inter',sans-serif;font-size:26pt;font-weight:700;margin:6px 0 4px">Quincy Gininda</p>
     <p style="max-width:420px;margin:24px auto 0;color:#4a5361">The market terminal, the Quant desk, the Strategy Lab and bot builder, the crypto swarm and its agents, and this manual are the work of Quincy Gininda.</p>
-    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.2 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
+    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.3 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
   </div>
 </section>
 
