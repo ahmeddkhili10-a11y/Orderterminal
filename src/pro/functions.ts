@@ -2,6 +2,8 @@
 // line (or clicked on the function keys) that open a screen in a workspace.
 // A coin before the code makes it the market first: "ETH GP", "SOL BOOK".
 
+import { COIN_NAMES, coinOf } from '../market/coinNames';
+
 export type Workspace = 'markets' | 'lab' | 'quant';
 /** where a function lives: a terminal workspace, or the crypto swarm's own view */
 export type FnHome = Workspace | 'swarm';
@@ -23,6 +25,7 @@ export const WORKSPACES: { id: Workspace; name: string; key: string; desc: strin
 
 export const FUNCTIONS: Fn[] = [
   // markets
+  { code: 'ASK', name: 'Instrument report', panel: 'report', ws: 'markets', desc: 'Everything about a coin now: bullish or bearish and why, forecasts, levels, positioning, news' },
   { code: 'MON', name: 'Monitor', panel: 'monitor', ws: 'markets', desc: 'Quote board: last, change, range, volume, funding, open interest' },
   { code: 'HMAP', name: 'Heat map', panel: 'heatgrid', ws: 'markets', desc: 'The market as tiles: size by volume, colour by change' },
   { code: 'GP', name: 'Graph price', panel: 'historical', ws: 'markets', desc: 'Candles or market profile, VWAP, averages' },
@@ -91,7 +94,7 @@ export const FN_MAP = Object.fromEntries(FUNCTIONS.map((f) => [f.code, f]));
 
 /** the function keys shown for each workspace */
 export const KEYS: Record<Workspace, string[]> = {
-  markets: ['MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
+  markets: ['ASK', 'MON', 'GP', 'GIP', 'BOOK', 'TAS', 'HMAP', 'CORR', 'HVOL', 'GV', 'FCST', 'FUND', 'OI', 'LIQ', 'TOP'],
   lab: ['FARM', 'BOT', 'LIB', 'RSCH', 'BT', 'DEPL', 'VAR', 'VTGT', 'REGM', 'GV', 'FCST'],
   quant: ['FARM', 'VAR', 'CAPM', 'EF', 'KELLY', 'NNET', 'PAIR', 'SEAS', 'MC', 'DHG', 'VTGT', 'MOM', 'REGM', 'GV'],
 };
@@ -103,13 +106,20 @@ export interface Parsed {
   unknown: string[];
 }
 
-/** "eth gp <go>" → the coin ETH and the GP function */
+/** the words of a plain question, skipped when reading a command ("tell me about bitcoin") */
+const FILLER = new Set(['ABOUT', 'ME', 'ON', 'THE', 'FOR', 'WHAT', 'WHATS', 'IS', 'ARE', 'HOW', 'S', 'TELL', 'GIVE', 'SHOW', 'A', 'AN', 'OF', 'DOING', 'GOING', 'REPORT', 'FULL', 'PLEASE', 'WITH', 'NOW', 'TODAY', 'COIN', 'TOKEN', 'PRICE', 'UP', 'TO', 'AT', 'IT', 'AND']);
+/** words that make a sentence a question about a coin: answered with its report */
+const ASKING = new Set(['ABOUT', 'HOW', 'WHAT', 'WHATS', 'TELL', 'REPORT', 'DOING', 'SHOW', 'GIVE']);
+
+/** "eth gp <go>" → the coin ETH and the GP function; "ask about solana" → SOL and its report */
 export function parseCommand(text: string): Parsed {
   const words = text
     .toUpperCase()
     .replace(/<GO>|<EQUITY>|<CRYPTO>|<CURNCY>/g, ' ')
+    .replace(/[?!.'’]/g, ' ')
     .split(/[\s,]+/)
     .filter(Boolean);
+  const asking = words.some((w) => ASKING.has(w));
   let coin: string | null = null;
   let fn: Fn | null = null;
   let workspace: Workspace | null = null;
@@ -119,9 +129,12 @@ export function parseCommand(text: string): Parsed {
     if (FN_MAP[w]) fn = FN_MAP[w];
     else if (ws) workspace = ws.id;
     else if (w === 'LAB') workspace = 'lab';
-    else if (/^[A-Z0-9]{2,10}$/.test(w) && !coin) coin = w;
+    else if (FILLER.has(w)) continue;
+    else if (/^[A-Z0-9]{2,16}$/.test(w) && !coin && coinOf(w).length <= 10) coin = coinOf(w);
     else unknown.push(w);
   }
+  // a question about a coin ("how is bitcoin doing") opens its report
+  if (asking && coin && !fn) fn = FN_MAP.ASK;
   return { coin, fn, workspace: workspace ?? (fn && fn.ws !== 'swarm' ? fn.ws : null), unknown };
 }
 
@@ -129,6 +142,9 @@ export function parseCommand(text: string): Parsed {
 export function suggest(text: string, limit = 8): Fn[] {
   const last = text.toUpperCase().split(/\s+/).filter(Boolean).pop() ?? '';
   if (!last) return [];
+  // a coin's name, or a sentence that already names its function ("ask about bitcoin"), is not a half-typed code
+  if (COIN_NAMES[last.replace(/[^A-Z0-9]/g, '')]) return [];
+  if (parseCommand(text).fn && !FN_MAP[last]) return [];
   const starts = FUNCTIONS.filter((f) => f.code.startsWith(last));
   const names = FUNCTIONS.filter((f) => !starts.includes(f) && (f.name.toUpperCase().includes(last) || f.desc.toUpperCase().includes(last)));
   return [...starts, ...names].slice(0, limit);

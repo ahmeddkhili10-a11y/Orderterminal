@@ -141,7 +141,7 @@ export function CommandBar() {
           ref={input}
           className="pro-cmd-input mono"
           value={text}
-          placeholder="Type a function and press Enter — ETH GP · MON · HMAP · RSCH · F1–F4 workspaces"
+          placeholder="Type a function and press Enter — ASK SOL · ask about bitcoin · ETH GP · MON · RSCH · F1–F4"
           onChange={(e) => {
             setText(e.target.value);
             setPick(0);

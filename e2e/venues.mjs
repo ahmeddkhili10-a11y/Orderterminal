@@ -182,15 +182,17 @@ const WS_ROUTES = [
 
 function klines(n, iv) {
   const now = Math.floor(Date.now() / iv) * iv;
-  let p = mid;
+  // the move per candle grows with the candle's length (a random walk): ±60 a minute, about ±2 % a day
+  const k = Math.sqrt(iv / 60e3);
+  // walk back from the price now, so the newest candle closes where the live feed trades
+  let c = mid;
   const rows = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const o = p;
-    const c = o + rnd(-60, 60);
-    rows.push([now - i * iv, o.toFixed(1), (Math.max(o, c) + rnd(0, 40)).toFixed(1), (Math.min(o, c) - rnd(0, 40)).toFixed(1), c.toFixed(1), rnd(50, 400).toFixed(3), 0, 0, 0, rnd(20, 200).toFixed(3)]);
-    p = c;
+  for (let i = 0; i < n; i++) {
+    const o = c - rnd(-60, 60) * k;
+    rows.push([now - i * iv, o.toFixed(1), (Math.max(o, c) + rnd(0, 40) * k).toFixed(1), (Math.min(o, c) - rnd(0, 40) * k).toFixed(1), c.toFixed(1), rnd(50, 400).toFixed(3), 0, 0, 0, rnd(20, 200).toFixed(3)]);
+    c = o;
   }
-  return rows;
+  return rows.reverse();
 }
 
 const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
@@ -220,8 +222,9 @@ try {
     r.fulfill({ json: { lastUpdateId: 1000, bids: levels('binancef', 'bid', 500), asks: levels('binancef', 'ask', 500) } }),
   );
   await page.route(/fapi\.binance\.com\/fapi\/v1\/klines/, (r) => {
-    const iv = { '1m': 60e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3 }[new URL(r.request().url()).searchParams.get('interval')] ?? 60e3;
-    return r.fulfill({ json: klines(500, iv) });
+    const q = new URL(r.request().url()).searchParams;
+    const iv = { '1m': 60e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3 }[q.get('interval')] ?? 60e3;
+    return r.fulfill({ json: klines(Math.min(1500, Number(q.get('limit')) || 500), iv) });
   });
   await page.route(/okx\.com\/api\/v5\/public\/instruments/, (r) => r.fulfill({ json: { data: [{ ctVal: '0.01' }] } }));
   await page.route(/fapi\.binance\.com\/(fapi\/v1\/openInterest|futures\/data)/, (r) => {
@@ -265,6 +268,36 @@ try {
     await page.locator('.gallery-card').nth(ids.indexOf(preset)).click();
     await page.waitForTimeout(4000);
     await page.screenshot({ path: `${OUT}venues-${preset}.png` });
+  }
+  // ASK: a plain question on the command line opens the coin's full report in Markets
+  await page.evaluate(async () => (await import('/src/store/settings.ts')).useSettings.getState().set({ ui: 'pro', workspace: 'markets' }));
+  await page.waitForSelector('.pro-cmd-input', { timeout: 15_000 });
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('ask about bitcoin');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.ask-verdict', { timeout: 30_000 });
+  await page.waitForFunction(() => document.querySelectorAll('.ask-signal').length >= 8, null, { timeout: 30_000 });
+  // the next-candle model fits a moment after the report is drawn
+  await page.waitForFunction(() => /Odds it closes up/.test(document.querySelector('.ask-panel')?.textContent ?? ''), null, { timeout: 30_000 }).catch(() => errors.push('ASK: the next-candle forecast never appeared'));
+  const ask = await page.evaluate(() => ({
+    verdicts: [...document.querySelectorAll('.ask-verdict b')].map((b) => b.textContent),
+    cards: [...document.querySelectorAll('.ask-card-title')].map((b) => b.textContent),
+    ranges: document.querySelectorAll('.ask-range').length,
+    levels: document.querySelectorAll('.ask-level').length,
+    summary: document.querySelector('.ask-summary')?.textContent ?? '',
+  }));
+  console.error(`ASK BTC: ${ask.verdicts.join(' / ')} · ${ask.cards.length} sections · ${ask.levels} levels`);
+  if (ask.verdicts.length !== 2 || !ask.verdicts.every((v) => /Bullish|Bearish|Neutral|Leaning/.test(v ?? ''))) errors.push(`ASK: no verdicts (${ask.verdicts})`);
+  if (ask.ranges < 2) errors.push('ASK: the GARCH ranges are missing');
+  if (ask.levels < 3) errors.push('ASK: the key levels are missing');
+  if (!/BTC is at/.test(ask.summary)) errors.push('ASK: no summary');
+  for (const t of ['WHY · SHORT TERM', 'WHY · MEDIUM TERM', 'KEY LEVELS', 'VOLATILITY & RISK', 'POSITIONING & ORDER FLOW']) if (!ask.cards.some((c) => c.startsWith(t))) errors.push(`ASK: the ${t} section is missing`);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${OUT}venues-ask.png` });
+  for (const [i, y] of [[2, 650], [3, 1400], [4, 2200]]) {
+    await page.evaluate((y) => document.querySelector('.ask-panel .pro-scroll')?.scrollTo(0, y), y);
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${OUT}venues-ask-${i}.png` });
   }
   const crashed = await page.locator('text=crashed').count();
   if (crashed) errors.push(`${crashed} panel(s) crashed`);

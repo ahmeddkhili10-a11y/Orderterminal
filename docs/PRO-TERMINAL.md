@@ -28,7 +28,7 @@ square, every number on screen backed by live data. The classic swarm views
 | Code | Screen | | Code | Screen |
 |---|---|---|---|---|
 | `MON` | Monitor — the quote board | | `BOT` | Bot builder |
-| | | | `LIB` | Strategy library |
+| `ASK` | Instrument report: everything about one coin (below) | | `LIB` | Strategy library |
 | `HMAP` | Heat map | | `RSCH` | Research |
 | `GP` | Price graph | | `BT` | Backtest builder |
 | `GIP` | Footprint | | `DEPL` | Deployed strategies |
@@ -62,6 +62,46 @@ square, every number on screen backed by live data. The classic swarm views
 | `WL` | Watchlist | | | |
 | `TOP` | Top news | | | |
 | `WEI` | World markets (Yahoo Finance) | | | |
+
+## Ask about a coin: the instrument report (`ASK`)
+
+`ASK SOL`, or plain words — *ask about solana*, *tell me about bitcoin*,
+*how is avax doing* — makes the coin the market and opens its report in
+Markets. The command line skips filler words and knows coins by name
+(`src/market/coinNames.ts`: bitcoin → BTC, avalanche → AVAX …); a sentence
+that already names its function is never taken over by a suggestion. The
+report has its own search box and quick chips.
+
+The analysis is pure and tested (`src/market/report.ts`, `buildReport`): it
+reads ~500 daily and 1,000 hourly candles from the board venue, bitcoin's
+daily candles, the live feed (funding, open interest and its change,
+long/short accounts, basis), the last hour of trades and the last day of
+liquidations across the aggregate venues, and the shared news stream
+(`src/market/news.ts`). It returns:
+
+- **two verdicts** — short term (hours to days) and medium term (weeks) — as a
+  weighted vote of signals, each with its reading and a sentence on why:
+  medium uses the 200-day average, the 50/200 cross, 90- and 30-day
+  time-series momentum, the 17-indicator daily trend vote, the 90-day trend
+  t-statistic, strength against bitcoin and the HMM regime; short uses the
+  hourly trend vote, the 24-hour move, hourly EMAs, the 7-day VWAP, hourly
+  RSI extremes, funding crowding (contrarian), order-flow share,
+  liquidation skew, the next-candle forest (only when its out-of-sample
+  Brier skill is positive) and headline tone;
+- performance (1 h to 1 y, year to date) and the 52-week range;
+- GARCH (best by BIC, fat tails) price ranges for a day and a week at 68 %
+  and 95 %, and the next hourly candle (`candleForecast`, fitted once per new
+  candle after the screen is drawn);
+- key levels: swing highs and lows (120 days), 52-week extremes, the 50- and
+  200-day averages, the 30-day volume profile (POC, value area), yesterday's
+  pivots, the 7-day VWAP — merged within 0.4 %;
+- trend (averages, ADX, RSI, trend votes, t), regime (HMM, Hurst, variance
+  ratio), volatility (GARCH now vs long run, realised, rank, VaR), beta,
+  correlation and alpha against bitcoin, positioning and flow, news with a
+  keyword tone, and the Lab's survivors and deployed strategies on the coin;
+- a plain-English summary and a list of what it could not work out.
+
+The verdict is labelled a lean, not a promise, on screen and in the manual.
 
 ## The QUANT desk (F3)
 

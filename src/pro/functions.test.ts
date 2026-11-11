@@ -13,6 +13,21 @@ describe('the command line', () => {
     expect(parseCommand('SWRM')).toMatchObject({ fn: { code: 'SWRM', ws: 'swarm' }, workspace: null });
     expect(parseCommand('lab').workspace).toBe('lab');
   });
+  it('answers plain questions about a coin with its report', () => {
+    expect(parseCommand('ask about bitcoin')).toMatchObject({ coin: 'BTC', fn: { code: 'ASK' }, workspace: 'markets', unknown: [] });
+    expect(parseCommand('ASK SOL')).toMatchObject({ coin: 'SOL', fn: { code: 'ASK' } });
+    expect(parseCommand('Tell me about Avalanche?')).toMatchObject({ coin: 'AVAX', fn: { code: 'ASK' }, unknown: [] });
+    expect(parseCommand("how is solana doing")).toMatchObject({ coin: 'SOL', fn: { code: 'ASK' } });
+    expect(parseCommand('ask about chainlink')).toMatchObject({ coin: 'LINK' });
+    // names work with other functions too, and a bare coin still just switches the market
+    expect(parseCommand('ethereum gp')).toMatchObject({ coin: 'ETH', fn: { code: 'GP' } });
+    expect(parseCommand('bitcoin')).toMatchObject({ coin: 'BTC', fn: null });
+    // and Enter is not taken over by a suggestion (CORR mentions bitcoin in its description)
+    expect(suggest('ask about bitcoin')).toEqual([]);
+    expect(suggest('bitcoin')).toEqual([]);
+    expect(suggest('how is sol doing')).toEqual([]);
+    expect(suggest('ASK')[0].code).toBe('ASK');
+  });
   it('suggests codes first, then names', () => {
     expect(suggest('co')[0].code).toBe('CORR');
     expect(suggest('volat').map((f) => f.code)).toContain('HVOL');

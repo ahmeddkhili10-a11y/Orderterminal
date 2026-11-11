@@ -41,6 +41,7 @@ import { CapmPanel, CAPM_DEFAULTS, EF_DEFAULTS, FrontierPanel, KellyPanel, KELLY
 import { NeuralPanel, NEURAL_DEFAULTS } from '../pro/NeuralPanel';
 import { MC_DEFAULTS, MonteCarloPanel, PAIR_DEFAULTS, PairPanel, SEASON_DEFAULTS, SeasonPanel } from '../pro/EdgePanels';
 import { FARM_PANEL_DEFAULTS, FarmPanel } from '../pro/FarmPanel';
+import { REPORT_DEFAULTS, ReportPanel } from '../pro/ReportPanel';
 
 import { BUILDER_DEFAULTS, LabBuilder, LabDeployed, LabLibrary, LabResearch, LIB_DEFAULTS, RESEARCH_PANEL_DEFAULTS } from '../pro/LabPanels';
 import { ProHelp } from '../pro/HelpPanel';
@@ -102,6 +103,7 @@ export const PANELS: PanelDef[] = [
   { id: 'funding', title: 'Funding', category: 'Derivatives', component: FundingMonitor, defaults: { ...FUNDING_DEFAULTS }, aggregated: true, description: 'Funding rates, APR, countdown and basis across perp venues.' },
   { id: 'options', title: 'Options Flow', category: 'Derivatives', component: OptionsFlow, defaults: { ...OPTIONS_DEFAULTS }, description: 'Deribit option prints: premium, IV, strikes, put/call and block trades.' },
   { id: 'spread', title: 'Spread Chart', category: 'Market', component: SpreadChart, defaults: { ...SPREAD_DEFAULTS }, aggregated: true, description: 'Price difference of each venue versus the primary.' },
+  { id: 'report', title: 'ASK · Instrument report', category: 'Market', component: ReportPanel, defaults: { ...REPORT_DEFAULTS }, description: 'Everything about one coin now: bullish or bearish for hours and weeks (and why), performance, GARCH forecast ranges, the next candle, key levels, trend and regime, volatility and risk, against bitcoin, funding, open interest, order flow, liquidations, news and the Lab’s strategies on it. Type ASK SOL or “ask about bitcoin”.' },
   { id: 'summary', title: 'Symbol Summary', category: 'Market', component: SymbolSummary, defaults: { ...SUMMARY_DEFAULTS }, description: 'Price, 24h stats, funding, OI, long/short ratio and basis.' },
   { id: 'screener', title: 'Screener', category: 'Market', component: Screener, defaults: { ...SCREENER_DEFAULTS }, description: 'All perps on a venue: price, change, volume, funding, OI.' },
   { id: 'watchlist', title: 'Watchlist', category: 'Market', component: Watchlist, defaults: { ...WATCHLIST_DEFAULTS }, description: 'Prices for any symbol on any supported venue.' },

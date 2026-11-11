@@ -177,7 +177,7 @@ export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'quant', () => IJsonModel> 
       row(
         100,
         row(23, ts(62, tab('monitor'), tab('watchlist'), tab('screener')), ts(38, tab('heatgrid'))),
-        row(51, ts(64, tab('historical'), tab('footprint'), tab('heatmap')), ts(36, tab('garch'), tab('fcst'), tab('correl'), tab('volmon'), tab('cvd'), tab('flowpulse'))),
+        row(51, ts(64, tab('historical'), tab('report'), tab('footprint'), tab('heatmap')), ts(36, tab('garch'), tab('fcst'), tab('correl'), tab('volmon'), tab('cvd'), tab('flowpulse'))),
         row(26, ts(52, tab('orderbook'), tab('dom'), tab('tape'), tab('depth')), ts(48, tab('news'), tab('funding'), tab('oi'), tab('liquidations'), tab('summary'))),
       ),
     ),
@@ -186,7 +186,7 @@ export const PRO_LAYOUTS: Record<'markets' | 'lab' | 'quant', () => IJsonModel> 
 };
 
 /** bumped per workspace when its starting layout changes, so the new one is used once */
-const PRO_VERSION: Partial<Record<keyof typeof PRO_LAYOUTS, number>> = { quant: 5, lab: 4 };
+const PRO_VERSION: Partial<Record<keyof typeof PRO_LAYOUTS, number>> = { quant: 5, lab: 4, markets: 2 };
 const proKey = (ws: keyof typeof PRO_LAYOUTS) => `${LAYOUT_KEY}:pro:${ws}${PRO_VERSION[ws] ? `:v${PRO_VERSION[ws]}` : ''}`;
 
 export function loadProLayout(ws: keyof typeof PRO_LAYOUTS): IJsonModel {

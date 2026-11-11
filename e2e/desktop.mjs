@@ -97,6 +97,17 @@ try {
   await page.waitForSelector('.flexlayout__tab_button:has-text("MON · Monitor")', { timeout: 15_000 });
   expect(true, 'the markets workspace opens with the monitor');
   await page.screenshot({ path: `${OUT}desktop-pro-markets.png` });
+  // ASK: a question in plain words switches the market and opens the coin's report
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('ask about solana');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.ask-panel', { timeout: 10_000 });
+  expect(/SOL — instrument report/.test(await page.locator('.ask-panel').innerText()) && (await page.locator('.pro-cmd-prompt').innerText()) === 'SOL', '“ask about solana” makes SOL the market and opens its instrument report (ASK)');
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('bitcoin');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.pro-cmd-prompt')?.textContent === 'BTC', null, { timeout: 10_000 });
+  expect((await page.locator('text=crashed').count()) === 0, 'a coin’s name on its own switches the market back (bitcoin → BTC)');
   await page.click('.pro-cmd-input');
   await page.keyboard.type('RSCH');
   await page.keyboard.press('Enter');

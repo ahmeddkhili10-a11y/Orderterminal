@@ -1,8 +1,6 @@
-import { create } from 'zustand';
 import { useEffect, useState } from 'react';
 import { fmtAgo, fmtTime } from '../core/format';
-import type { ConnState, NewsItem } from '../core/types';
-import { connectNews, fetchRecentNews } from '../exchanges/news';
+import { releaseNews, retainNews, useNews } from '../market/news';
 import { hub } from '../market/hub';
 import { Chip, Empty, Spacer, Toolbar, useHubVersion, useTicker, type PanelProps } from '../ui/controls';
 
@@ -11,35 +9,6 @@ export interface NewsConfig {
 }
 
 export const NEWS_DEFAULTS: NewsConfig = { onlyPrimary: false };
-
-/** Shared news stream: one socket regardless of how many News panels are open. */
-const useNews = create<{ items: NewsItem[]; status: ConnState; error?: string }>(() => ({ items: [], status: 'idle' }));
-let newsRefs = 0;
-let newsConn: { close(): void } | null = null;
-
-function retainNews() {
-  if (newsRefs++ > 0) return;
-  fetchRecentNews()
-    .then((items) => useNews.setState((s) => ({ items: dedupe([...s.items, ...items]) })))
-    .catch(() => undefined);
-  newsConn = connectNews(
-    (n) => useNews.setState((s) => ({ items: dedupe([n, ...s.items]).slice(0, 300) })),
-    (status, error) => useNews.setState({ status, error }),
-  );
-}
-
-function releaseNews() {
-  if (--newsRefs > 0) return;
-  newsConn?.close();
-  newsConn = null;
-}
-
-function dedupe(items: NewsItem[]) {
-  const seen = new Set<string>();
-  return items
-    .filter((i) => (seen.has(i.id) ? false : (seen.add(i.id), true)))
-    .sort((a, b) => b.time - a.time);
-}
 
 export function NewsFeed({ config: c, setConfig }: PanelProps<NewsConfig>) {
   useHubVersion();

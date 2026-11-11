@@ -71,7 +71,7 @@
 <!-- ============ copyright / about ============ -->
 <section>
   <div style="padding-top:36px">
-    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.3</div>
+    <div class="ch-num">Novus Ordo · Operator's Manual · Edition 1.4</div>
     <h1 style="font-size:22pt">About this manual</h1>
     <p>This manual explains how to use every part of Novus Ordo, the professional crypto trading terminal: the market terminal, the Quant desk, the Strategy Lab and its bot builder, the crypto swarm, and the wallet and exchange connections that link it to your accounts. It is written in plain English. Where a technical term is unavoidable, it is explained where it first appears and again in the glossary at the back.</p>
     <p>Each chapter starts with what a part of the terminal is for, then shows how to use it step by step. Function codes — short names you type on the command line, such as <code>VAR</code> or <code>BOT</code> — appear in a box like this so you can find them on screen.</p>
@@ -186,9 +186,36 @@
   </ul>
   <p>Supported venues: Binance (futures and spot), Bybit, OKX, Hyperliquid, Coinbase, Kraken, Bitget, Bitfinex and Deribit (options), plus any of more than 100 exchanges through CCXT. A built-in <b>Simulator</b> produces a realistic synthetic market for learning and testing; it is clearly labelled.</p>
   <figure><img src="img/orderflow.jpg" /><figcaption>The order-flow layout: the depth ladder (left), the footprint chart (centre), the tape and market summary (right), cumulative delta below.</figcaption></figure>
+  <h2 data-toc>Ask about a coin: the instrument report</h2>
+  <p>Type <code>ASK SOL</code> — or simply <i>ask about solana</i>, <i>tell me about bitcoin</i>, <i>how is avax doing</i> — on the command line and press <kbd>Enter</kbd>. The coin becomes the market and its full report opens in Markets. Coins can be typed by ticker or by name (bitcoin, ethereum, solana, avalanche, chainlink and so on). On the report itself, type any coin in the search box or click one of the quick chips.</p>
+  <p>The report answers the question <b>“is it bullish or bearish, and why?”</b> for two horizons:</p>
+  <ul>
+    <li><b>Short term — hours to days.</b> The hourly trend vote (17 indicators), the last 24 hours, the hourly averages, the week's VWAP, the hourly RSI, funding (a crowded long is a warning), the last hour's order flow, liquidations, the next-candle model (only if it has beaten chance on candles it never saw) and the tone of the news.</li>
+    <li><b>Medium term — the coming weeks.</b> The 200-day average, the 50/200-day cross, three- and one-month momentum, the daily trend vote, the trend's statistical significance, strength against bitcoin and the regime.</li>
+  </ul>
+  <p>Each signal votes bullish, bearish or neutral with a weight; the balance is the verdict (Bullish, Leaning bullish, Neutral, Leaning bearish, Bearish) shown on a gauge, with how much of the weight agrees. Every vote says why it voted — switch on <b>Explain</b> to read it.</p>
+  <figure><img src="img/ask-top.jpg" /><figcaption>ASK BTC (here on the simulator's test data): the two verdicts, the summary in plain words, performance from an hour to a year, the 52-week range, the price with its 50- and 200-day averages, GARCH's ranges for tomorrow and a week, the next hourly candle, and every signal behind each verdict.</figcaption></figure>
+  <div style="break-inside: avoid">
+  <p>Below the verdicts the report sets out everything else worth knowing:</p>
+  <table>
+    <tr><th style="width:28%">Section</th><th>What it tells you</th></tr>
+    <tr><td>Performance</td><td>The change over 1 hour, 24 hours, 7, 30 and 90 days, a year and the year to date; where the price sits in its 52-week range and how far below the high it is.</td></tr>
+    <tr><td>Where it could be</td><td>GARCH's price ranges for this time tomorrow and in a week: the inner band holds the price 2 times in 3, the outer band 19 times in 20. Plus the next hourly candle's odds, expected high and low, and its record on unseen candles.</td></tr>
+    <tr><td>Key levels</td><td>Resistance above and support below: swing highs and lows of the last four months, the 52-week extremes, the long averages, the volume profile's point of control and value area; yesterday's pivots and the 7-day VWAP.</td></tr>
+    <tr><td>Trend &amp; regime</td><td>The averages, ADX (trend strength), RSI, the trend votes, the trend's t-statistic; calm or turbulent (hidden Markov model) and trending or mean-reverting (Hurst, variance ratio).</td></tr>
+    <tr><td>Volatility &amp; risk</td><td>GARCH volatility now against its long-run level, realised volatility and its rank in the year, a typical day's move, and how much a bad day could cost (value at risk).</td></tr>
+    <tr><td>Against bitcoin</td><td>Beta, correlation and alpha, and whether it has beaten or lagged bitcoin over 30 and 90 days.</td></tr>
+    <tr><td>Positioning &amp; order flow</td><td>Funding and its yearly rate, open interest and its change, the share of accounts long, the basis, the last hour's buying against selling across your venues, and the last day's liquidations.</td></tr>
+    <tr><td>News</td><td>Headlines of the last three days that name the coin, each marked as sounding positive or negative.</td></tr>
+    <tr><td>In the Strategy Lab</td><td>Edge-finder survivors and deployed strategies that trade the coin, with a link to the edge finder.</td></tr>
+  </table>
+  </div>
+  <figure><img src="img/ask-detail.jpg" /><figcaption>The rest of the report: key levels either side of the price, trend and regime, volatility and risk, positioning and order flow.</figcaption></figure>
+  <div class="box warn"><b>A lean, not a promise.</b> Every signal in the report is a tendency measured on past data. Use the verdict to frame a decision — then size the trade by its risk, as the Quant desk shows, and never by the verdict alone.</div>
   <h2 data-toc>Price and order-flow functions</h2>
   <table>
     <tr><th>Code</th><th style="width:26%">Function</th><th>What it shows and what it is for</th></tr>
+    <tr><td class="code">ASK</td><td>Instrument report</td><td>Everything about one coin now: bullish or bearish and why, forecasts, levels, risk, positioning, news (see above).</td></tr>
     <tr><td class="code">MON</td><td>Monitor</td><td>The quote board: last price, change, range, volume, funding and open interest for your coins. Your first look at the day.</td></tr>
     <tr><td class="code">HMAP</td><td>Heat map</td><td>The whole market as tiles — size by volume, colour by change. Spot where money is moving at a glance.</td></tr>
     <tr><td class="code">GP</td><td>Graph price</td><td>Candles or market profile (TPO) with VWAP and moving averages, any timeframe. The main price chart.</td></tr>
@@ -758,7 +785,7 @@
     <p style="margin-top:40px;font-size:10pt;color:#5a6371;letter-spacing:0.2em;text-transform:uppercase">Conceived, designed and constructed by</p>
     <p style="font-family:'Inter Display','Inter',sans-serif;font-size:26pt;font-weight:700;margin:6px 0 4px">Quincy Gininda</p>
     <p style="max-width:420px;margin:24px auto 0;color:#4a5361">The market terminal, the Quant desk, the Strategy Lab and bot builder, the crypto swarm and its agents, and this manual are the work of Quincy Gininda.</p>
-    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.3 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
+    <p class="small" style="margin-top:60px">Operator's Manual · Edition 1.4 · November 2026<br />© 2026 Quincy Gininda. All rights reserved.</p>
   </div>
 </section>
 

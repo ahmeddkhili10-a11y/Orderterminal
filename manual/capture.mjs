@@ -1,5 +1,5 @@
-// Captures the Quant desk panels added after the first edition (PAIR, SEAS, MC) on the built-in simulator, for the manual.
-//   node --experimental-strip-types manual/capture.mjs <out-dir>
+// Captures the panels added after the first edition (PAIR, SEAS, MC, the ASK report) on the built-in simulator, for the manual.
+//   node --experimental-strip-types manual/capture.mjs <out-dir> [only-this-panel]
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 const { chromium } = createRequire('/home/user/Orderflow-terminal/')('playwright');
@@ -17,12 +17,16 @@ try {
     ['qpair', '.pair-table', '', 760],
     ['qseas', '.seas-grid', '&hour=21', 700],
     ['qmc', '.mc-ladder', '', 900],
+    ['report', '.ask-signal', '', 2350],
   ]) {
+    if (process.argv[3] && id !== process.argv[3]) continue;
     await page.setViewportSize({ width: 1280, height: h });
     await page.goto(`http://localhost:${PORT}/?embed=${id}&venue=sim&agg=sim&filter=none&theme=pro-amber&ui=pro${extra}`);
     await page.waitForFunction(() => /ALL SYSTEMS READY/.test(document.querySelector('.lock-loader')?.textContent ?? '') || !document.querySelector('.lock-key'), null, { timeout: 40000 });
     await unlock(page);
     await page.waitForSelector(wait, { timeout: 25000 }).catch(async () => { await page.screenshot({ path: `${OUT}/fail-${id}.png` }); console.log(id, 'no selector', (await page.locator('body').innerText()).slice(0, 300)); });
+    // the report: wait for the next-candle model too (it fits a moment after the rest)
+    if (id === 'report') await page.waitForFunction(() => /Odds it closes up/.test(document.body.textContent ?? ''), null, { timeout: 40000 }).catch(() => console.log('report: no candle model'));
     await page.waitForTimeout(1500);
     await page.screenshot({ path: `${OUT}/${id}.png` });
     console.log(id, 'ok');
