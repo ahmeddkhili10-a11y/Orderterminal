@@ -29,6 +29,7 @@ const root = join(here, '..');
 // training worker: bundled next to main.mjs and kept outside the asar archive
 const trainWorkerPath = join(here, 'trainWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 const labWorkerPath = join(here, 'labWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
+const farmWorkerPath = join(here, 'farmWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 const dbWorkerPath = join(here, 'dbWorker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 
 // ---------- the database's heavy work, on a thread of its own ----------
@@ -534,6 +535,9 @@ function registerIpc() {
   handle('lab:cancel', () => lab.cancel());
   handle('lab:test', (_e, spec, patch) => lab.test(spec, patch ?? {}));
   handle('lab:optimize', (_e, specs, patch) => lab.optimize(specs, patch ?? {}));
+  handle('lab:farm-state', () => lab.farmState());
+  handle('lab:farm-start', (_e, patch) => lab.farmStart(patch ?? {}));
+  handle('lab:farm-stop', () => lab.farmStop(true));
   // candles from the Lab's own history cache (a year of hourly bars for the Quant desk's seasonality map)
   handle('lab:bars', async (_e, coin, tf, years) => {
     const c = String(coin ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
@@ -1119,6 +1123,7 @@ app.whenReady().then(async () => {
         ccxt: ccxtSvc,
         dir: join(app.getPath('userData'), 'lab'),
         makeWorker: () => new Worker(labWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
+        makeFarmWorker: () => new Worker(farmWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
         emit: (ch, payload) => {
           for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(ch, payload);
         },
@@ -1132,6 +1137,8 @@ app.whenReady().then(async () => {
         },
         log: (level, msg) => (level === 'warn' ? log('warn', msg) : undefined),
       });
+      // the edge finder carries on by itself a while after the terminal opens (unless it was stopped)
+      if (process.env.NOVUS_NO_FARM !== '1') lab.farmAuto(90_000);
       log('info', 'exchange services ready');
     })
     .catch((e) => {
@@ -1190,6 +1197,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  lab?.shutdownFarm();
   void dbw?.terminate();
   db?.close();
 });

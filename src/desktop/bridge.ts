@@ -1,6 +1,10 @@
 import type { XPost } from '../shared/xapi';
 import type { Authority, LabConfig, LabDeployed, LabStatus, LabTest } from '../lab/store';
 import type { ResearchResult, VariantScore } from '../lab/research';
+import type { FarmCfg, FarmState } from '../lab/farm';
+
+/** the edge finder's state as the desktop process reports it */
+export type FarmView = FarmState & { starting?: boolean; wanted?: boolean };
 import type { StrategySpec } from '../lab/backtest';
 import type { Kline } from '../core/types';
 import type { TokenInfo, WalletActivity, WalletBalances } from '../shared/solana';
@@ -780,6 +784,13 @@ export interface NovusApi {
     authority(id: string, a: Authority): Promise<void>;
     onState(fn: (s: LabStatus) => void): () => void;
     onEvent(fn: (e: { kind: string; at?: number; id?: string; name?: string }) => void): () => void;
+    /** the edge finder: a strategy farm that runs by itself while the terminal is open */
+    farm?: {
+      state(): Promise<FarmView>;
+      start(patch?: Partial<FarmCfg>): Promise<FarmView>;
+      stop(): Promise<FarmView>;
+      onState(fn: (s: FarmView) => void): () => void;
+    };
   };
   cswarm: {
     state(): Promise<CSwarmState>;

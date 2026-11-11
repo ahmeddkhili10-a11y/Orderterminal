@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CryptoSwarm } from '../cswarm/cswarm.mjs';
 import { evaluate, research, scoreVariants } from '../../src/lab/research.ts';
 import { alignFunding, LabService } from './lab.mjs';
+import { createFarmRunner } from './farmLoop.mjs';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -42,6 +43,77 @@ function inlineWorker() {
   return w;
 }
 
+/** the edge finder's thread, run in-process: the same loop farmWorker.mjs runs */
+function inlineFarmWorker() {
+  const w = new EventEmitter();
+  const runner = createFarmRunner((m) => setImmediate(() => w.emit('message', m)), { sleep: () => new Promise((r) => setImmediate(r)) });
+  w.postMessage = (msg) => void runner.onMessage(msg);
+  w.terminate = async () => {};
+  w.runner = runner;
+  return w;
+}
+
+/** hourly candles with slow trends a trend rule can ride */
+function trendWalk(n, now, seed) {
+  let s = seed;
+  const rnd = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const g = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, rnd()))) * Math.cos(2 * Math.PI * rnd());
+  let p = 100;
+  let mu = 0;
+  return Array.from({ length: n }, (_, i) => {
+    mu = 0.997 * mu + 0.00045 * g();
+    const o = p;
+    p *= Math.exp(mu + 0.005 * g());
+    return { time: now - (n - i) * HOUR, open: o, high: Math.max(o, p) * 1.0015, low: Math.min(o, p) * 0.9985, close: p, volume: 100 + ((i * 37) % 11) * 20 };
+  });
+}
+
+describe('the edge finder service', () => {
+  it('starts, runs by itself, finds and keeps survivors, stops, and carries on after a restart', async () => {
+    const now = Date.UTC(2026, 10, 6, 12);
+    const ccxt = { history: vi.fn(async (_id, sym, _tf, since) => trendWalk(6000, now, sym.startsWith('BTC') ? 3 : 4).filter((b) => b.time >= since)), fundingHistory: vi.fn(async () => []) };
+    const dir = mkdtempSync(join(tmpdir(), 'lab-'));
+    const pushed = [];
+    let worker;
+    const lab = new LabService({ ccxt, dir, emit: (ch, m) => ch === 'lab:farm' && pushed.push(m), makeWorker: inlineWorker, makeFarmWorker: () => (worker = inlineFarmWorker()), now: () => now });
+    // never started: wanted by default, nothing found yet
+    expect(lab.farmState()).toMatchObject({ running: false, wanted: true, tried: 0, top: [] });
+    await expect(lab.farmStart({ coins: [], styles: ['intraday'] })).rejects.toThrow(/at least one coin/);
+    const st = await lab.farmStart({ coins: ['btc', 'ETH'], styles: ['intraday'] });
+    expect(st.running).toBe(true);
+    expect(st.cfg.coins).toEqual(['BTC', 'ETH']);
+    expect(ccxt.history.mock.calls.every((c) => c[2] === '1h')).toBe(true);
+    // it runs on its own until it has survivors
+    for (let i = 0; i < 20000 && !(worker.runner.farm?.survivors.length >= 1 && worker.runner.farm?.tried > 10); i++) await new Promise((r) => setImmediate(r));
+    expect(worker.runner.farm.tried).toBeGreaterThan(10);
+    expect(worker.runner.farm.survivors.length).toBeGreaterThan(0);
+    await new Promise((r) => setTimeout(r, 1600));
+    expect(pushed.length).toBeGreaterThan(1);
+    expect(lab.farmState().tried).toBeGreaterThan(0);
+    // stop: it saves, and stays stopped when the terminal opens again
+    const stopped = await lab.farmStop();
+    expect(stopped).toMatchObject({ running: false, wanted: false });
+    const tried = stopped.tried;
+    expect(tried).toBeGreaterThan(10);
+    const lab2 = new LabService({ ccxt, dir, emit: () => {}, makeWorker: inlineWorker, makeFarmWorker: () => (worker = inlineFarmWorker()), now: () => now });
+    expect(lab2.farmState()).toMatchObject({ running: false, wanted: false });
+    expect(lab2.farmState().tried).toBe(tried);
+    expect(lab2.farmState().survivors).toBeGreaterThan(0);
+    // started again, it carries on from where it was
+    await lab2.farmStart();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(worker.runner.farm.tried).toBeGreaterThanOrEqual(tried);
+    expect(worker.runner.farm.survivors.length).toBeGreaterThan(0);
+    // a strategy deployed is watched on fresh data
+    const s = worker.runner.farm.survivors[0];
+    const { buildSpec } = await import('../../src/lab/flow.ts');
+    lab2.deploy({ spec: buildSpec(s.flow).spec, tfH: 1, stats: { sharpe: 1, t: 2, dsr: 0.9, trades: 30, verdict: 'edge finder' } }, { crypto: true, meme: false }, ['BTC', 'ETH']);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(worker.runner.farm.fleet.length).toBe(1);
+    await lab2.farmStop();
+  }, 120_000);
+});
+
 describe('the optimizer and 15-minute history', () => {
   it('scores versions of a strategy in the worker and leaves no progress behind', async () => {
     const now = Date.UTC(2026, 10, 6, 12);
@@ -55,6 +127,20 @@ describe('the optimizer and 15-minute history', () => {
     expect(Number.isFinite(scores[0].sharpe)).toBe(true);
     expect(lab.status().progress).toBeNull();
     await expect(lab.optimize([], {})).rejects.toThrow(/nothing to try/);
+  });
+
+  it('a shorter request keeps the longer history in the cache', async () => {
+    const now = Date.UTC(2026, 10, 6, 12);
+    const ccxt = { history: vi.fn(async (_id, _sym, _tf, since) => walk(Math.floor((now - since) / HOUR), now, 3)) };
+    const lab = new LabService({ ccxt, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const two = await lab.candles('BTC', '1h', 2, 'binance');
+    expect(ccxt.history).toHaveBeenCalledTimes(1);
+    const one = await lab.candles('BTC', '1h', 1, 'binance');
+    expect(one.bars.length).toBeLessThan(two.bars.length);
+    // two years again: served from the cache, nothing downloaded again
+    const again = await lab.candles('BTC', '1h', 2, 'binance');
+    expect(ccxt.history).toHaveBeenCalledTimes(1);
+    expect(again.bars.length).toBe(two.bars.length);
   });
 
   it('downloads 15-minute candles, a year at most', async () => {

@@ -16,6 +16,8 @@ import { startLabLink, useLab, type LabConfig, type LabTest } from '../lab/store
 import { Check, NumberInput, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { Bars, Fan, LineChart } from './charts';
 import { SpecOptimizer } from './Optimizer';
+import { FarmStrip } from './FarmPanel';
+import { openFunction } from './ProBar';
 
 const pct = (x: number, d = 0) => `${(x * 100).toFixed(d)}%`;
 const num = (x: number, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : '—');
@@ -510,6 +512,7 @@ export function LabResearch() {
   return (
     <div className="pro-panel">
       <ConfigBar cfg={status.cfg} running={status.running} />
+      <FarmStrip onOpen={() => openFunction('labfarm', 'lab')} />
       {p && (
         <div className="lab-progress">
           <span>{p.stage}</span>

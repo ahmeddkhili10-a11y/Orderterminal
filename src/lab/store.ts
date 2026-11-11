@@ -1,7 +1,7 @@
 // The Strategy Lab in the terminal: its state from the desktop process (the
 // research runs there, in a worker), the last result, and the deployed list.
 import { create } from 'zustand';
-import { desktop } from '../desktop/bridge';
+import { desktop, type FarmView } from '../desktop/bridge';
 import type { StrategySpec } from './backtest';
 import type { DeciderTest, Diag, Parts, Periods, ResearchResult } from './research';
 import type { MonteCarlo, Perf } from './stats';
@@ -77,9 +77,11 @@ interface LabStore {
   status: LabStatus | null;
   result: ResearchResult | null;
   loaded: boolean;
+  /** the edge finder: the strategy farm running in the desktop process */
+  farm: FarmView | null;
 }
 
-export const useLab = create<LabStore>(() => ({ status: null, result: null, loaded: false }));
+export const useLab = create<LabStore>(() => ({ status: null, result: null, loaded: false, farm: null }));
 
 const api = () => desktop?.lab;
 
@@ -99,6 +101,13 @@ export function startLabLink() {
   L.onEvent((e) => {
     if (e.kind === 'done') void L.result().then((result) => useLab.setState({ result }));
   });
+  if (L.farm) {
+    L.farm
+      .state()
+      .then((farm) => useLab.setState({ farm }))
+      .catch(() => {});
+    L.farm.onState((farm) => useLab.setState({ farm }));
+  }
 }
 
 export const labApi = api;

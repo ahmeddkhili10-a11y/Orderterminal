@@ -13,7 +13,7 @@ import { create } from 'zustand';
 import { DECIDERS, FORECASTS, migrateFlow, MODELS, PORTFOLIOS, RISKS, STRATEGIES, STYLE_MAP, STYLES, type BlockId, type Decider, type Flow, type StyleId } from './flow';
 import type { Params } from './library';
 
-export type SendBlock = 'strategy' | 'model' | 'forecast' | 'decider' | 'risk' | 'portfolio';
+export type SendBlock = 'strategy' | 'model' | 'forecast' | 'decider' | 'risk' | 'portfolio' | 'flow';
 
 export interface LabSend {
   block: SendBlock;
@@ -29,10 +29,13 @@ export interface LabSend {
   style?: StyleId;
   /** strategy only: replace the bot's strategies instead of joining them */
   solo?: boolean;
+  /** flow: a whole bot (the edge finder's), shown in the bot builder block by block */
+  flow?: Flow;
+  name?: string;
 }
 
-const BLOCK_OF: Record<SendBlock, BlockId> = { strategy: 'strategy', model: 'model', forecast: 'forecast', decider: 'forecast', risk: 'risk', portfolio: 'risk' };
-const BLOCK_NAME: Record<SendBlock, string> = { strategy: 'Strategies', model: 'Market models', forecast: 'Forecasts & AI (a second opinion)', decider: 'Forecasts & AI (the decision maker)', risk: 'Risk management', portfolio: 'Risk management (the split across coins)' };
+const BLOCK_OF: Record<SendBlock, BlockId> = { strategy: 'strategy', model: 'model', forecast: 'forecast', decider: 'forecast', risk: 'risk', portfolio: 'risk', flow: 'strategy' };
+const BLOCK_NAME: Record<SendBlock, string> = { flow: 'the bot builder', strategy: 'Strategies', model: 'Market models', forecast: 'Forecasts & AI (a second opinion)', decider: 'Forecasts & AI (the decision maker)', risk: 'Risk management', portfolio: 'Risk management (the split across coins)' };
 
 const nameIn = (s: LabSend): string | null => {
   const list: readonly { id: string; name: string }[] = s.block === 'strategy' ? STRATEGIES : s.block === 'model' ? MODELS : s.block === 'forecast' ? FORECASTS : s.block === 'decider' ? DECIDERS : s.block === 'risk' ? RISKS : PORTFOLIOS;
@@ -68,6 +71,11 @@ export function tuneWords(tune: Params | undefined): string {
  */
 export function applySend(flow0: Flow, s: LabSend): { flow: Flow; text: string; block: BlockId; ok: boolean } {
   const flow = migrateFlow(flow0 as Flow & Record<string, unknown>);
+  if (s.block === 'flow') {
+    if (!s.flow) return { flow, text: `${s.from}: nothing to open.`, block: 'strategy', ok: false };
+    const next = migrateFlow({ ...s.flow, authority: flow.authority } as Flow & Record<string, unknown>);
+    return { flow: next, text: `From ${s.from}: “${s.name ?? 'the bot'}” is open in the bot builder — each block shows what it is built of. Test it here to see its full results, then deploy it, or change a block and test again.`, block: 'strategy', ok: true };
+  }
   const name = nameIn(s);
   const block = BLOCK_OF[s.block];
   if (!name) return { flow, text: `${s.from}: nothing in the bot builder matches “${s.id}”.`, block, ok: false };

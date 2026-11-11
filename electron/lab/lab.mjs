@@ -10,6 +10,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { STYLE_MAP } from '../../src/lab/flow.ts';
+import { FARM_DEFAULTS } from '../../src/lab/farm.ts';
 
 export const LAB_DEFAULTS = {
   coins: ['BTC', 'ETH', 'SOL'],
@@ -47,9 +49,12 @@ export function alignFunding(bars, rows, tfH) {
   return out;
 }
 
+/** markets as plain arrays, for a worker */
+const plainMarkets = (byTf) => Object.fromEntries(Object.entries(byTf).map(([tf, ms]) => [tf, ms.map((m) => ({ ...m, funding: m.funding ? Array.from(m.funding) : null }))]));
+
 export class LabService {
   /**
-   * @param o {{ ccxt, dir: string, emit: (ch, msg) => void, makeWorker: () => import('node:worker_threads').Worker, now?: () => number }}
+   * @param o {{ ccxt, dir: string, emit: (ch, msg) => void, makeWorker: () => import('node:worker_threads').Worker, makeFarmWorker?: () => import('node:worker_threads').Worker, now?: () => number }}
    */
   constructor(o) {
     this.ccxt = o.ccxt;
@@ -63,6 +68,179 @@ export class LabService {
     this.worker = null;
     this.progress = null;
     this.error = null;
+    // the edge finder: its own long-lived thread, its last state, and whether it should be running
+    this.makeFarmWorker = o.makeFarmWorker ?? null;
+    const farm = this.read('farm.json', null);
+    this.farmSaved = farm?.save ?? null;
+    this.farmWanted = farm ? farm.wanted !== false : true;
+    this.farmCfg = { ...FARM_DEFAULTS, ...(farm?.cfg ?? {}) };
+    this.farmSnap = farm?.state ? { ...farm.state, running: false } : null;
+    this.farmW = null;
+    this.farmTimer = null;
+    this.farmNote = '';
+    this.farmErr = '';
+  }
+
+  // ---------- the edge finder ----------
+
+  /** what the edge finder shows when asked: its live state, or the last one saved */
+  farmState() {
+    const base = this.farmSnap ?? { running: false, cfg: this.farmCfg, startedAt: 0, gen: 0, tried: 0, rate: 0, population: 0, funnel: { bred: 0, trained: 0, holdout: 0, random: 0, nudge: 0, shuffle: 0, proof: 0 }, ladder: { new: 0, incubating: 0, proving: 0, proven: 0, faded: 0 }, top: [], watch: [], survivors: 0, recent: [], fleet: [], dataTo: 0, dataAt: 0, note: '', error: '' };
+    return { ...base, running: !!this.farmW, starting: this.farmStarting ?? false, wanted: this.farmWanted, cfg: this.farmCfg, note: this.farmNote || base.note, error: this.farmErr || base.error };
+  }
+
+  farmPush() {
+    this.emit('lab:farm', this.farmState());
+  }
+
+  farmPersist(save) {
+    if (save) this.farmSaved = save;
+    this.write('farm.json', { wanted: this.farmWanted, cfg: this.farmCfg, save: this.farmSaved, state: this.farmSnap });
+  }
+
+  /** the candles the edge finder breeds on: for each pace's timeframe, the longest history any of its paces wants */
+  async farmMarkets(cfg) {
+    const years = {};
+    for (const id of cfg.styles) {
+      const st = STYLE_MAP[id];
+      if (st) years[st.timeframe] = Math.max(years[st.timeframe] ?? 0, st.years);
+    }
+    const out = {};
+    for (const [tf, yrs] of Object.entries(years)) {
+      const ms = [];
+      for (const coin of cfg.coins) {
+        this.farmNote = `Loading ${coin} ${tf} history…`;
+        this.farmPush();
+        try {
+          const { bars } = await this.candles(coin, tf, yrs, this.cfg.source);
+          let funding = null;
+          if (this.cfg.funding && tf !== '1d') {
+            try {
+              funding = alignFunding(bars, await this.funding(coin, bars[0].time), TF_H[tf]);
+            } catch {
+              /* the funding rules sit this one out */
+            }
+          }
+          ms.push({ coin, tfH: TF_H[tf], bars, funding });
+        } catch (err) {
+          this.farmErr = String(err?.message ?? err).slice(0, 200);
+        }
+      }
+      if (ms.length) out[tf] = ms;
+    }
+    this.farmNote = '';
+    return out;
+  }
+
+  fleetOf() {
+    return this.deployedList.map((d) => ({ id: d.id, name: d.spec.name, spec: d.spec, tfH: d.tfH, coins: d.coins, deployedAt: d.deployedAt, stats: d.stats }));
+  }
+
+  /** start the edge finder (it carries on from where it was); settings that change its candles start it over on them */
+  async farmStart(patch = {}) {
+    const next = { ...this.farmCfg, ...patch };
+    if (Array.isArray(next.coins)) next.coins = [...new Set(next.coins.map((c) => String(c).toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean))].slice(0, 8);
+    next.styles = (next.styles ?? []).filter((s) => STYLE_MAP[s]);
+    if (!next.coins.length || !next.styles.length) throw new Error('choose at least one coin and one pace');
+    if (this.farmW || this.farmStarting) await this.farmStop(false);
+    // other coins or paces: the old survivors were tested on other candles — they are kept, the counters too
+    this.farmCfg = next;
+    this.farmWanted = true;
+    this.farmErr = '';
+    this.farmStarting = true;
+    this.farmPersist();
+    this.farmPush();
+    try {
+      const markets = await this.farmMarkets(next);
+      if (!Object.keys(markets).length) throw new Error(this.farmErr || 'no history for these coins');
+      if (!this.makeFarmWorker) throw new Error('the edge finder needs the desktop app');
+      const w = this.makeFarmWorker();
+      this.farmW = w;
+      w.on('message', (m) => {
+        if (m.type === 'state' || m.type === 'save') {
+          this.farmSnap = m.state;
+          if (m.type === 'save') this.farmPersist(m.save);
+          this.farmPush();
+        } else if (m.type === 'stopped') {
+          this.farmDone?.();
+        } else if (m.type === 'error') {
+          this.farmErr = m.error;
+          this.farmPush();
+        }
+      });
+      w.on('error', (err) => {
+        this.farmErr = String(err?.message ?? err);
+        this.farmW = null;
+        this.farmPush();
+      });
+      w.postMessage({ type: 'start', cfg: next, save: this.farmSaved, markets: plainMarkets(markets), deployed: this.fleetOf() });
+      // fresher candles every so often: the survivors' and the fleet's forward tests move on
+      const every = next.styles.some((s) => STYLE_MAP[s]?.tfH < 1) ? 30 * 60_000 : 2 * 3_600_000;
+      clearInterval(this.farmTimer);
+      this.farmTimer = setInterval(() => void this.farmRefresh(), every);
+      this.farmTimer.unref?.();
+    } catch (err) {
+      this.farmErr = String(err?.message ?? err).slice(0, 200);
+      throw err;
+    } finally {
+      this.farmStarting = false;
+      this.farmPush();
+    }
+    return this.farmState();
+  }
+
+  async farmRefresh() {
+    if (!this.farmW) return;
+    const markets = await this.farmMarkets(this.farmCfg);
+    if (this.farmW && Object.keys(markets).length) this.farmW.postMessage({ type: 'markets', markets: plainMarkets(markets) });
+  }
+
+  /** stop the edge finder; its survivors and counters are kept for next time (wanted = false: it stays stopped when the terminal opens) */
+  async farmStop(user = true) {
+    if (user) this.farmWanted = false;
+    clearInterval(this.farmTimer);
+    this.farmTimer = null;
+    const w = this.farmW;
+    if (w) {
+      await new Promise((resolve) => {
+        const t = setTimeout(resolve, 15_000);
+        this.farmDone = () => {
+          clearTimeout(t);
+          resolve();
+        };
+        w.postMessage({ type: 'stop' });
+      });
+      this.farmDone = null;
+      void w.terminate();
+      this.farmW = null;
+    }
+    this.farmPersist();
+    this.farmPush();
+    return this.farmState();
+  }
+
+  /** when the terminal opens: carry on, unless it was stopped */
+  farmAuto(delayMs = 90_000) {
+    if (!this.farmWanted || !this.makeFarmWorker) return;
+    const t = setTimeout(() => {
+      if (this.farmWanted && !this.farmW) this.farmStart().catch(() => {
+        // no history yet (no connection): try again in ten minutes
+        const again = setTimeout(() => this.farmAuto(0), 10 * 60_000);
+        again.unref?.();
+      });
+    }, delayMs);
+    t.unref?.();
+  }
+
+  /** the swarm's deployed strategies changed: the edge finder watches them */
+  farmFleet() {
+    this.farmW?.postMessage({ type: 'fleet', deployed: this.fleetOf() });
+  }
+
+  shutdownFarm() {
+    clearInterval(this.farmTimer);
+    if (this.farmW) void this.farmW.terminate();
+    this.farmW = null;
   }
 
   read(name, fallback) {
@@ -134,7 +312,9 @@ export class LabService {
         // only closed candles
         const closed = bars.filter((b) => b.time + tfH * HOUR <= this.now());
         if (closed.length < 600) throw new Error(`only ${closed.length} candles`);
-        this.write(key, closed);
+        // the cache keeps the older candles too: a shorter request must not throw away history a longer one will want
+        const older = cached.filter((b) => b.time < closed[0].time);
+        this.write(key, older.length ? [...older, ...closed] : closed);
         return { bars: closed, source: id };
       } catch (err) {
         tried.push(`${id}: ${err?.message ?? err}`);
@@ -290,6 +470,7 @@ export class LabService {
     this.deployedList = [...this.deployedList, d];
     this.write('deployed.json', this.deployedList);
     this.push();
+    this.farmFleet();
     this.emit('lab:event', { kind: 'deployed', id: d.id, name: s.name });
     return d.id;
   }
@@ -298,6 +479,7 @@ export class LabService {
     this.deployedList = this.deployedList.filter((d) => d.id !== id);
     this.write('deployed.json', this.deployedList);
     this.push();
+    this.farmFleet();
   }
 
   /** who decides a deployed strategy's trades: the swarm's council (it can block a signal), or the strategy as tested (only the safety bots can) */

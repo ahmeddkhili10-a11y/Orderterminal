@@ -167,7 +167,7 @@ export interface Progress {
 
 // ---------- running one strategy on all coins ----------
 
-interface Run {
+export interface Run {
   per: { m: Market; c: Ctx; bt: BTResult }[];
   rets: Float64Array;
   times: number[];
@@ -176,7 +176,7 @@ interface Run {
 }
 
 /** average the coins' bar returns by time (an equal-weight portfolio of the strategy on each coin, or weighted by coin) */
-function pool(per: { bt: BTResult; m?: Market }[], weights?: Record<string, number>): { rets: Float64Array; times: number[] } {
+export function pool(per: { bt: BTResult; m?: Market }[], weights?: Record<string, number>): { rets: Float64Array; times: number[] } {
   const acc = new Map<number, [number, number]>();
   for (const { bt, m } of per) {
     const w = weights && m ? (weights[m.coin] ?? 0) : 1;
@@ -198,7 +198,7 @@ function pool(per: { bt: BTResult; m?: Market }[], weights?: Record<string, numb
 const valStart = (c: Ctx) => Math.max(50, Math.floor(c.trainEnd * 0.7));
 
 /** is: the training bars · val: the last 30 % of the training bars · oos: the unseen bars · all: everything */
-function runAll(ctxs: Ctx[], spec: StrategySpec, part: 'is' | 'val' | 'oos' | 'all', costs: Costs, gate?: (c: Ctx, i: number, side: 1 | -1) => boolean): Run {
+export function runAll(ctxs: Ctx[], spec: StrategySpec, part: 'is' | 'val' | 'oos' | 'all', costs: Costs, gate?: (c: Ctx, i: number, side: 1 | -1) => boolean): Run {
   const per = ctxs.map((c) => {
     const n = c.m.bars.length;
     const from = part === 'oos' ? c.trainEnd : part === 'val' ? valStart(c) : 50;

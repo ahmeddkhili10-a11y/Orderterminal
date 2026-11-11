@@ -36,13 +36,13 @@ await seedDesktopLedger(userData);
   let seed = 20261107;
   const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, rnd()))) * Math.cos(2 * Math.PI * rnd());
-  for (const [tf, ms, days, sd] of [['1h', 3_600_000, 380, 0.006], ['15m', 900_000, 195, 0.003]]) {
+  for (const [tf, ms, days, sd, keep] of [['1h', 3_600_000, 760, 0.006, 0.997], ['15m', 900_000, 195, 0.003, 0.995]]) {
     const last = Math.floor(Date.now() / ms) * ms + 2 * ms;
     const n = Math.round((days * 86_400_000) / ms);
     let p = 60_000;
     let mu = 0;
     const bars = Array.from({ length: n }, (_, i) => {
-      mu = 0.995 * mu + sd * 0.1 * gauss();
+      mu = keep * mu + sd * 0.1 * gauss();
       const o = p;
       p *= Math.exp(mu + sd * gauss());
       return { time: last - (n - 1 - i) * ms, open: o, high: Math.max(o, p) * (1 + Math.abs(gauss()) * sd * 0.3), low: Math.min(o, p) * (1 - Math.abs(gauss()) * sd * 0.3), close: p, volume: 100 * (1 + Math.abs(gauss())) };
@@ -53,7 +53,8 @@ await seedDesktopLedger(userData);
 const app = await electron.launch({
   executablePath: require('electron'),
   args: ['.', '--no-sandbox'],
-  env: { ...process.env, NOVUS_USER_DATA: userData },
+  // the edge finder is started by hand below, not by itself after a minute and a half
+  env: { ...process.env, NOVUS_USER_DATA: userData, NOVUS_NO_FARM: '1' },
 });
 try {
   const page = await app.firstWindow();
@@ -265,6 +266,63 @@ try {
   expect(riskChips.some((t) => /kelly/i.test(t)), `Kelly sizing from the desk joined the bot’s risk block (${riskChips.join(', ')})`);
   await page.screenshot({ path: `${OUT}desktop-bridge.png` });
   await page.click('.bb2-arrived button');
+  // the edge finder: started by hand, it breeds and tests bots by itself; a survivor opens in the bot builder and deploys
+  step('the edge finder (FARM)');
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('FARM');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-farm]', { timeout: 10_000 });
+  expect(/Stopped/.test(await page.locator('.farm-title').innerText()) && (await page.locator('[data-stage]').count()) === 7, 'FARM: the edge finder, stopped, with its seven-step gauntlet');
+  await page.click('[data-farm] button:has-text("Settings")');
+  await page.fill('.farm-settings input', 'BTC');
+  for (const id of ['swing']) if (await page.locator(`.farm-settings [data-style="${id}"].active`).count()) await page.click(`.farm-settings [data-style="${id}"]`);
+  if (!(await page.locator('.farm-settings [data-style="intraday"].active').count())) await page.click('.farm-settings [data-style="intraday"]');
+  await page.click('.farm-settings .chip:has-text("Full")');
+  await page.click('.farm-settings button:has-text("Apply and run")');
+  await page.waitForFunction(() => /Running · generation/.test(document.querySelector('.farm-title')?.textContent ?? ''), null, { timeout: 60_000 }).catch(async (e) => {
+    const st = await page.evaluate(() => window.novus.lab.farm.state());
+    console.error('  farm state:', JSON.stringify({ running: st.running, starting: st.starting, error: st.error, note: st.note, cfg: st.cfg }));
+    throw e;
+  });
+  expect(true, 'it starts from its settings (BTC, intraday pace, full speed) and runs by itself');
+  await page.waitForFunction(() => document.querySelectorAll('[data-farm] [data-survivor]').length > 0, null, { timeout: 240_000 });
+  const farm0 = await page.evaluate(() => window.novus.lab.farm.state());
+  expect(farm0.running && farm0.tried > 0 && farm0.funnel.bred === farm0.tried && farm0.survivors > 0, `it bred and tested ${farm0.tried} bots; ${farm0.survivors} survived the checks (top ${farm0.top.length}, watch list ${farm0.watch.length})`);
+  const stagesOk = ['holdout', 'random', 'nudge', 'shuffle', 'proof'].every((k, i, a) => farm0.funnel[k] <= (i ? farm0.funnel[a[i - 1]] : farm0.funnel.trained));
+  expect(stagesOk, 'the gauntlet narrows step by step: each check passes no more than the one before');
+  await page.locator('[data-farm] [data-survivor]').first().click();
+  await page.waitForSelector('[data-farm] [data-detail]', { timeout: 10_000 });
+  const det = await page.locator('[data-farm] [data-detail]').innerText();
+  expect(/100 random bots/.test(det) && /Settings nudged/.test(det) && /1,000 shuffles/.test(det) && /Significant/.test(det) && /Enters/.test(det), 'a survivor shows its rules in words, its curve and every check it passed');
+  await page.screenshot({ path: `${OUT}desktop-farm.png` });
+  const survivorName = (await page.locator('[data-farm] [data-detail] .pro-section').first().innerText()).replace(/^#\d+ — |^WATCH LIST — /, '');
+  await page.click('[data-farm] .farm-open');
+  await page.waitForSelector('.bb2-arrived:has-text("the edge finder")', { timeout: 15_000 });
+  const bchips = await page.locator('.bb-node[data-block="strategy"] .bb2-chip').allInnerTexts();
+  expect(bchips.length >= 1, `“Open in the bot builder”: the survivor opens block by block (${bchips.join(', ')})`);
+  await page.click('.bb2-arrived button');
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('FARM');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-farm] [data-detail]', { timeout: 10_000 });
+  await page.click('[data-farm] [data-detail] .chip:has-text("Trade as tested")');
+  await page.click('[data-farm] .farm-deploy');
+  await page.waitForSelector('[data-farm] .farm-deploy:has-text("Deployed")', { timeout: 15_000 });
+  const dep2 = (await page.evaluate(() => window.novus.lab.state())).deployed;
+  expect(dep2.some((d) => d.authority === 'tested' && /edge finder/.test(d.stats.verdict)), `deployed from the edge finder to the crypto swarm, to trade as tested (${survivorName.slice(0, 50)})`);
+  await page.waitForSelector('[data-farm] .farm-fleet [data-fleet]', { timeout: 20_000 });
+  expect(true, 'the live fleet: the deployed strategy is watched on fresh data');
+  await page.click('[data-farm] .farm-stop');
+  await page.waitForFunction(() => /Stopped/.test(document.querySelector('.farm-title')?.textContent ?? ''), null, { timeout: 30_000 });
+  const farm1 = await page.evaluate(() => window.novus.lab.farm.state());
+  expect(!farm1.running && farm1.wanted === false && farm1.survivors > 0 && farm1.tried >= farm0.tried, 'Stop: it stops, keeps everything it found, and stays stopped until started again');
+  await page.evaluate((ids) => Promise.all(ids.map((id) => window.novus.lab.undeploy(id))), dep2.map((d) => d.id));
+  // the research screen shows it at a glance
+  await page.click('.pro-cmd-input');
+  await page.keyboard.type('RSCH');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-farm-strip]', { timeout: 10_000 });
+  expect(/Edge finder/.test(await page.locator('[data-farm-strip]').innerText()), 'the research screen shows the edge finder and its top five at a glance');
   await page.keyboard.press('F3');
   await page.waitForSelector('.pro-ws-tab.active:has-text("QUANT DESK")', { timeout: 10_000 });
   await page.selectOption('.pro-theme-select', 'pro-eikon');
