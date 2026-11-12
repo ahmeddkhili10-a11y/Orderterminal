@@ -20,29 +20,85 @@ press **Stop**.
 rules and filters and the Quant desk's models (GARCH filters and stops,
 hidden-Markov, Hurst and variance-ratio regimes, the Kalman trend, the
 Ornstein–Uhlenbeck rule, VaR and volatility sizing, the bitcoin hedge, the
-neural network and the other learned rules). Each one is scored on the first
-70 % of the history only (its *fitness*: the training Sharpe, rewarding bots
-that work on most coins). The fittest breed the next generation — children
-take blocks from two parents (crossover), others change one block or setting
-(mutation) — and new random bots arrive every generation; a population that
-stops improving starts over. The unseen data is never used to choose.
+neural network and the other learned rules) — one to three strategies joined
+in any of five ways (all agree, majority, any one, the **regime switch**, or
+**setup, then trigger**). Each one is scored on the first 70 % of the history
+only. The unseen data is never used to choose.
 
-**The gauntlet.** A bot that trains well (Sharpe 0.7 or more, enough trades)
-then faces, in order:
+- **The training score** is the Sharpe ratio on the training years, but half
+  of it is the *worse half* of those years (a bot carried by one stretch
+  scores low), it is marked down when few of the coins were in profit, and
+  every block beyond two costs a little (parsimony). A bot with a learned part
+  (an AI strategy or second opinion) is scored on training candles its models
+  never saw — the models are fitted on the first 70 % of the training bars and
+  the bot is scored on the last 30 % of them — so a model that memorised its
+  training data no longer looks like an edge.
+- **Selection** is by tournament; children are a crossover (blocks from two
+  parents), a **merge** (the strategies of both, joined — how separate edges
+  are put together) or a mutation (one block, setting or join changed). New
+  random bots arrive every generation.
+- **Niches (quality-diversity).** The best bot of every *kind* — pace ×
+  families of strategy × sides — is kept in an archive. Parents are drawn from
+  it too, no more than two of a kind are carried over, and when the population
+  stops improving it starts over from the niches' champions rather than from
+  nothing. The search cannot collapse onto one idea.
+- **It learns which blocks work.** For every block it counts bots tried, bots
+  that trained well enough to face the gauntlet, and survivors, and draws the
+  blocks that keep producing more often. Nothing is dropped: what fails alone
+  may work in a combination not tried yet. The FARM screen lists what is
+  working.
+- **Bred from the survivors.** Each generation a few bots are refinements of
+  survivors, or two survivors of the same pace merged into one.
+
+**The gauntlet.** A bot that trains well (a score of 0.7 or more, enough
+trades) then faces, in order:
 
 1. **The unseen 30 %** — it must make money there, with a Sharpe of 0.5 or
    more and at least half its training Sharpe.
-2. **100 random bots** — the same number of trades, held as long, entered at
+2. **Steady** — not one lucky stretch, coin or trade: in profit in at least
+   two of the three thirds of the unseen stretch, on at least half its coins,
+   and still in profit with its best 5 % of trades taken away.
+3. **Double costs** — tested again on the unseen data with twice the fees and
+   slippage: it must still make money.
+4. **100 random bots** — the same number of trades, held as long, entered at
    random: it must beat at least 75.
-3. **Its settings nudged** — every setting one step each way (each strategy's
+5. **Its settings nudged** — every setting one step each way (each strategy's
    look-backs and thresholds, the stop, the hold, the profit target): at least
    half of those versions must still make money on the unseen data.
-4. **1,000 shuffles** — its trades in 1,000 random orders at 1 % risk a trade:
+6. **1,000 shuffles** — its trades in 1,000 random orders at 1 % risk a trade:
    the unlucky 1-in-20 drawdown must stay within the limit (20 % by default).
-5. **Significance** — a t-statistic of 2 or more on the unseen data. When
-   hundreds of bots are tried, a few pass the first four by luck: on pure noise
-   about 2 % of the bots tried did, in the Lab's own tests. This check stopped
-   all of them. Bots that pass the four but not this go on the **watch list**.
+7. **Significant after every bot tried** — the more bots are tried, the better
+   the luckiest looks, so the bar rises with every bot that reaches the unseen
+   data. Survivors' one-sided p-values (Newey–West t on the unseen returns) go
+   through the Benjamini–Hochberg procedure against the number of gauntlet
+   entrants at a false-discovery rate of 10 %: of the bots called significant,
+   at most about 1 in 10 should be flukes. Each survivor shows its *fluke
+   odds* (the q-value). A survivor can lose its place as the search goes on;
+   those not significant are the **watch list** and must prove themselves on
+   fresh data. (The first version used t ≥ 2 whatever the number tried; saved
+   survivors are ranked again when the farm restarts.)
+
+**The overfit meter.** The farm measures how overfit its own search is: the
+probability of backtest overfitting (Bailey, Borwein, López de Prado & Zhu
+2017) by combinatorially symmetric cross-validation. The training years are
+cut into eight stretches; for every way of calling four of them "in sample",
+the bot that did best there is looked up on the other four, and PBO is how
+often it lands in the bottom half. Only the latest bots that made money in
+training are compared (a bot that loses to its costs loses everywhere, and
+that sameness would hide the overfitting). In the Lab's tests it reads
+50–85 % on markets with no edge and under 5 % on markets with a real trend.
+
+**The team.** Survivors that make money at different times smooth each other
+out. From each of the strongest survivors in turn the farm builds a team,
+adding one at a time whichever other survivor lifts the portfolio's Sharpe
+most (by at least 3 %), never two of the same family, never two whose daily
+results correlate at 0.7 or more, never one that lost on the days compared;
+the best team found is shown. Members are weighted by inverse volatility
+(equal risk). It reports the team's Sharpe, worst drop and a year's return
+against the best member alone, and the average correlation, on the days of
+the unseen stretch every member has (45 at least). The team is chosen on the
+stretch its numbers are read on, so they flatter it; the forward test is the
+judge. **Deploy the team** deploys each member — after you confirm.
 
 **Fresh data.** Survivors are then tested on candles that arrive after they
 were found — data no test has seen at all (the history is refreshed every two
@@ -53,10 +109,10 @@ still making money), **proven** (15 or more, still making money) — or
 ever did in testing) and drop out.
 
 **The top five** are the best still standing — significant on the unseen
-data, or proven on fresh data — no two from the same family (pace, strategies
+data after every bot tried, or proven on fresh data — no two from the same family (pace, strategies
 and filters), proven ones first. Each shows its return a year, Sharpe, worst
 drop, months that made money, the random bots it beat, the nudges it kept, the
-shuffle drawdown and its fresh-data result; open one for its rules in words,
+shuffle drawdown, its fluke odds and its fresh-data result; open one for its rules in words,
 its curve and every check, then **Open in the bot builder** (every block shows
 what it is built of; test it there for the full read-out and the optimizer) or
 **Deploy to the crypto swarm**, choosing who decides its trades. Deploying is

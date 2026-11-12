@@ -1260,6 +1260,106 @@ export const SIGNALS: SignalDef[] = [
     compute: (c, p) => cached(c, `nn${p.horizon}:${p.edge}:${p.h1 ?? 16}:${p.h2 ?? 8}:${c.trainEnd}`, () => learnedSignal(c, p, 'nn')),
     describe: (p) => `a neural network (${FEATURES.length} inputs, ${p.h1 ?? 16} and ${p.h2 ?? 8} hidden units) forecasting the ${hrs(p.horizon)} direction; trade when its odds exceed ${(50 + p.edge * 100).toFixed(0)}%`,
   },
+  {
+    id: 'squeeze',
+    name: 'Volatility squeeze breakout',
+    family: 'breakout',
+    papers: ['bol01', 'cra90', 'boll86'],
+    rationale: 'Volatility clusters and cycles: the quietest stretches are followed by expansions. When the bands are among the narrowest they have been in a long while (the narrowest fifth), the first close outside them is the start of the expansion — trade it in its direction and hold until price falls back through the average.',
+    grid: { lookback: [20, 50, 100], squeeze: [120, 240, 480], k: [2, 2.5] },
+    exit: { stopAtr: 2, maxBars: 120, onFlip: true },
+    compute: (c, p) =>
+      cached(c, `squeeze${H(c, p.lookback)}:${H(c, p.squeeze)}:${p.k}`, () => {
+        const cl = close(c);
+        const m = smaH(c, p.lookback);
+        const sd = sdH(c, p.lookback);
+        const n = cl.length;
+        const w = H(c, p.squeeze);
+        const arm = H(c, p.lookback);
+        const out = state(n);
+        // the band width as a share of the price, ranked against the squeeze window: squeezed when it is in the
+        // narrowest fifth of what the window has seen
+        const bw = Float64Array.from(cl, (_, i) => (m[i] > 0 && Number.isFinite(sd[i]) ? sd[i] / m[i] : NaN));
+        const rank = pctRank(bw, w);
+        let armedAt = -Infinity;
+        let st = 0;
+        for (let i = 0; i < n; i++) {
+          if (rank[i] <= 0.2) armedAt = i;
+          if (!Number.isFinite(m[i]) || !Number.isFinite(sd[i])) continue;
+          if (st === 0 && i - armedAt <= arm) {
+            if (cl[i] > m[i] + p.k * sd[i]) st = 1;
+            else if (cl[i] < m[i] - p.k * sd[i]) st = -1;
+          } else if ((st === 1 && cl[i] < m[i]) || (st === -1 && cl[i] > m[i])) st = 0;
+          out[i] = st;
+        }
+        return out;
+      }),
+    describe: (p) => `after the ${p.k}σ bands of the ${hrs(p.lookback)} average have been among their narrowest fifth of the last ${hrs(p.squeeze).replace('-', ' ')}s, go with the first close outside them; out when price falls back through the average`,
+  },
+  {
+    id: 'atrtrend',
+    name: 'ATR trend line (Supertrend)',
+    family: 'trend',
+    papers: ['wil78', 'faith07', 'hu21'],
+    rationale: 'A trend is intact until price gives back more than a few average true ranges from where it has been: the line trails price at k ATRs, only ever tightening, and the side flips when a close crosses it. It sits through ordinary pullbacks and leaves on an unusual reversal — a trend rule whose patience scales with the market’s own volatility.',
+    grid: { n: [10, 20, 40], k: [2, 3, 4] },
+    exit: { stopAtr: 3, maxBars: 480, onFlip: true },
+    compute: (c, p) =>
+      cached(c, `atrtrend${H(c, p.n)}:${p.k}`, () => {
+        const b = c.m.bars;
+        const A = cached(c, `atr${H(c, p.n)}`, () => atr(b, H(c, p.n)));
+        const out = state(b.length);
+        let up = NaN;
+        let dn = NaN;
+        let dir = 0;
+        for (let i = 0; i < b.length; i++) {
+          if (!Number.isFinite(A[i])) continue;
+          const mid = (b[i].high + b[i].low) / 2;
+          const u = mid + p.k * A[i];
+          const d = mid - p.k * A[i];
+          // each band only tightens while price stays on its side
+          up = !Number.isFinite(up) || u < up || b[i - 1].close > up ? u : up;
+          dn = !Number.isFinite(dn) || d > dn || b[i - 1].close < dn ? d : dn;
+          if (dir === 0) dir = b[i].close >= mid ? 1 : -1;
+          else if (dir === 1 && b[i].close < dn) dir = -1;
+          else if (dir === -1 && b[i].close > up) dir = 1;
+          out[i] = dir;
+        }
+        return out;
+      }),
+    describe: (p) => `long while price holds above a line trailing ${p.k} ATRs (${hrs(p.n)}) below it, short while it holds below the line above; the side flips when a close crosses the line`,
+  },
+  {
+    id: 'rsbtc',
+    name: 'Relative strength against bitcoin',
+    family: 'relative',
+    papers: ['ltw22', 'dob23', 'flpwz25'],
+    rationale: 'Coins that have beaten the market keep beating it for weeks, and laggards keep lagging — momentum in the cross-section of coins, one of the three factors that price crypto. Measured here against bitcoin: buy the coin that has outrun bitcoin by more than its usual wobble, sell the one that has fallen behind.',
+    grid: { lookback: [168, 336, 720], k: [0.5, 1] },
+    needsBench: true,
+    exit: { stopAtr: 3, maxBars: 240, onFlip: true },
+    compute: (c, p) =>
+      cached(c, `rsbtc${H(c, p.lookback)}:${p.k}`, () => {
+        const bm = benchFilled(c);
+        const cl = close(c);
+        const out = state(cl.length);
+        if (!bm) return out;
+        const n = H(c, p.lookback);
+        // the coin's return over bitcoin's, bar by bar, and how much that usually wobbles
+        const rel = Float64Array.from(cl, (x, i) => (i > 0 ? Math.log(x / cl[i - 1]) - Math.log(bm[i] / bm[i - 1]) : 0)).map((x) => (Number.isFinite(x) ? x : 0));
+        const sd = rstd(rel, H(c, 720));
+        let acc = 0;
+        for (let i = 0; i < cl.length; i++) {
+          acc += rel[i];
+          if (i >= n) acc -= rel[i - n];
+          if (i < n + 1 || !(sd[i] > 0)) continue;
+          const z = acc / (sd[i] * Math.sqrt(n));
+          out[i] = z > p.k ? 1 : z < -p.k ? -1 : 0;
+        }
+        return out;
+      }),
+    describe: (p) => `long the coin when it has beaten bitcoin over ${hrs(p.lookback).replace('-', ' ')}s by more than ${p.k} standard deviations of its usual gap, short when it has lagged by as much`,
+  },
 ];
 
 // ---------- the filters ----------

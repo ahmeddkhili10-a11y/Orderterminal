@@ -19,7 +19,7 @@
 // buildSpec turns a chain into the Strategy Lab's StrategySpec; the Lab tests
 // it on years of history (training on the first 70 %, judging on the last
 // 30 % it never saw) and only then can it be deployed.
-import type { Combine, RuleRef, Sizing, StrategySpec } from './backtest';
+import { regimeSide, type Combine, type RuleRef, type Sizing, type StrategySpec } from './backtest';
 import { EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Family, type Params } from './library';
 
 export type StyleId = 'scalp15' | 'intraday15' | 'scalp' | 'intraday' | 'swing' | 'week' | 'position' | 'hold';
@@ -103,6 +103,7 @@ export const STRATEGIES: StrategyOption[] = [
   { id: 'vsmom', group: 'Trend following', name: 'Momentum that adjusts for volatility', plain: 'Momentum, but a move only counts if it is big for how jumpy the coin is right now (GARCH volatility).', suits: ['intraday', 'swing', 'week'], signal: 'vsmom', nature: 'state', params: (s) => ({ lookback: s.L, k: 1 }) },
   { id: 'vwmom', group: 'Trend following', name: 'Momentum weighted by volume', plain: 'Momentum where each candle counts by how much was traded: moves made on heavy volume decide the direction. In crypto studies this beat plain momentum.', suits: ['swing', 'week', 'position'], signal: 'vwmom', nature: 'state', params: (s) => ({ lookback: s.L }) },
   { id: 'ctrend', group: 'Trend following', name: 'Trend composite (17 indicators vote)', plain: 'RSI, stochastic, CCI, seven moving averages, MACD, volume trends, money flow and Bollinger bands each cast a vote; trades when most agree. Based on the crypto trend factor published in 2025.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'ctrend', nature: 'state', params: (s) => ({ unit: fast(s) ? 4 : 24, k: 0.3 }) },
+  { id: 'atrtrend', group: 'Trend following', name: 'ATR trend line (Supertrend)', plain: 'A line trails the price a few “average true ranges” away and only ever tightens. Long while price holds above it, short while below; the side flips when a close crosses the line. It sits through ordinary pullbacks and leaves on an unusual reversal.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'atrtrend', nature: 'state', params: (s) => ({ n: clamp(Math.round(s.L / 3), fl(s, 10), 40), k: 3 }) },
   // breakouts
   { id: 'donchian', group: 'Breakouts', name: 'Break of the recent high or low', plain: 'Buys when price closes above its highest high of the period, sells below the lowest low. Catches new trends early.', suits: ['intraday', 'swing', 'week', 'position'], signal: 'donchian', nature: 'event', params: (s) => ({ n: Math.max(fl(s, 20), s.L) }) },
   { id: 'bbreak', group: 'Breakouts', name: 'Bollinger band breakout', plain: 'Trades a close outside the Bollinger bands — a move bigger than normal for the coin.', suits: ['scalp', 'intraday', 'swing'], signal: 'bbreak', nature: 'event', params: (s) => ({ lookback: Math.max(fl(s, 20), s.L), k: 2 }) },
@@ -110,6 +111,7 @@ export const STRATEGIES: StrategyOption[] = [
   { id: 'volbrk', group: 'Breakouts', name: 'Big move on heavy volume', plain: 'Follows a sharp move only when volume is unusually heavy — a sign big players are behind it.', suits: ['scalp', 'intraday'], signal: 'volbrk', nature: 'event', params: (s) => ({ n: clamp(Math.round(s.L / 6), 1, 24), k: 2 }) },
   { id: 'maxmin', group: 'Breakouts', name: 'New 10-day high or low (buy both)', plain: 'Buys when price closes at a new 10-day high (the trend continues) and when it closes at a new 10-day low (the bounce after panic), and holds a day. A documented bitcoin pattern; it never shorts.', suits: ['swing', 'week', 'position'], signal: 'maxmin', nature: 'event', holdH: 24, longOnly: true, mixed: true, params: () => ({ n: 240, mode: 0 }) },
   { id: 'jump', group: 'Breakouts', name: 'Follow a big day', plain: 'After a day with an unusually big move (2.5 times its normal size), trades in the same direction for a day. In crypto, extreme days were followed more often than faded — but the published edge was thin.', suits: ['intraday', 'swing'], signal: 'jump', nature: 'event', holdH: 24, params: () => ({ k: 2.5 }) },
+  { id: 'squeeze', group: 'Breakouts', name: 'Volatility squeeze breakout', plain: 'Quiet markets do not stay quiet. When the bands around price are among the narrowest they have been in a long while, it waits for the first close outside them and goes with it — the start of the next big move — until price falls back through its average.', suits: ['scalp', 'intraday', 'swing', 'week'], signal: 'squeeze', nature: 'event', params: (s) => ({ lookback: clamp(s.L, fl(s, 20), 100), squeeze: clamp(s.L * 5, fl(s, 120), 480), k: 2 }) },
   // mean reversion
   { id: 'zrev', group: 'Buy the dip / sell the rip', name: 'Stretched from the average (z-score)', plain: 'Buys when price has fallen unusually far below its average, sells when it has risen unusually far — betting it snaps back.', suits: ['scalp', 'intraday', 'swing'], signal: 'zrev', nature: 'event', params: (s) => ({ lookback: Math.max(fl(s, 24), s.L), k: 2 }) },
   { id: 'rsi2', group: 'Buy the dip / sell the rip', name: 'RSI oversold / overbought', plain: 'Buys when the RSI says oversold, sells when overbought. Short, sharp bounces.', suits: ['scalp', 'intraday', 'swing'], signal: 'rsi2', nature: 'event', params: (s) => (fast(s) ? { n: 2, band: 10 } : { n: 14, band: 30 }) },
@@ -127,6 +129,7 @@ export const STRATEGIES: StrategyOption[] = [
   // against bitcoin
   { id: 'pairs', group: 'Against bitcoin (relative value)', name: 'Pairs trade: the coin against bitcoin', plain: 'Coins move with bitcoin. When a coin gets unusually cheap against bitcoin it buys the coin, when unusually rich it sells — betting the gap closes. Add the bitcoin hedge (Risk) to make it a true market-neutral pairs trade.', suits: ['scalp', 'intraday', 'swing'], signal: 'pairs', nature: 'event', needsBtc: true, params: (s) => ({ window: clamp(s.L * 7, fl(s, 168), 720), k: 2 }) },
   { id: 'btclead', group: 'Against bitcoin (relative value)', name: 'Bitcoin leads, the coin catches up', plain: 'When bitcoin has moved and a coin has not yet followed by its usual amount, trades the coin in bitcoin’s direction. News reaches bitcoin first; the published effect is fastest over minutes.', suits: ['scalp', 'intraday'], signal: 'btclead', nature: 'event', needsBtc: true, params: (s) => ({ n: s.tfH < 1 ? 0.25 : clamp(Math.round(s.L / 12), 1, 24), k: 1 }) },
+  { id: 'rsbtc', group: 'Against bitcoin (relative value)', name: 'Relative strength: coins beating bitcoin', plain: 'Coins that have been beating bitcoin tend to keep beating it for weeks, and laggards keep lagging. It buys a coin that has outrun bitcoin by more than its usual wobble and sells one that has fallen behind. Add the bitcoin hedge (Risk) to trade the difference alone.', suits: ['swing', 'week', 'position'], signal: 'rsbtc', nature: 'state', needsBtc: true, params: (s) => ({ lookback: clamp(s.L * 3, fl(s, 168), 720), k: 0.5 }) },
   // carry
   { id: 'carry', group: 'Funding (carry)', name: 'Get paid funding', plain: 'Takes the side the crowd is paying for: short when longs pay heavy funding, long when shorts do.', suits: ['swing', 'week'], signal: 'carry', nature: 'state', params: () => ({ lookback: 72, band: 0.25 }) },
   // machine learning
@@ -139,7 +142,8 @@ export const STRATEGIES: StrategyOption[] = [
 export const COMBINES: { id: Combine; name: string; plain: string }[] = [
   { id: 'all', name: 'All must agree', plain: 'Enter only when every strategy points the same way at the same candle. Fewer, better-confirmed trades.' },
   { id: 'majority', name: 'Majority vote', plain: 'Enter when more than half of the strategies point the same way and none points the other way.' },
-  { id: 'any', name: 'Any one (unless another disagrees)', plain: 'Enter when any strategy fires, as long as none of the others points the other way. More trades.' },
+  { id: 'any', name: 'Any one (unless another disagrees)', plain: 'Enter when any strategy fires, as long as none of the others points the other way. More trades.' },  { id: 'switch', name: 'Regime switch (trend rules in trends, dip rules in ranges)', plain: 'Reads the market’s regime every candle (ADX): while it trends, only the trend and breakout strategies trade; while it ranges, only the dip-buying ones. Each strategy works in the market it was made for — the classic way to pair a trend rule with a dip rule.' },
+  { id: 'then', name: 'Setup, then trigger', plain: 'The first strategy sets the direction; the trade is taken when the others confirm it within the next few candles. A breakout and the volume that confirms it need not land on the same candle.' },
 ];
 
 // ---------- 2. the market models (filters: when the strategies are allowed to trade) ----------
@@ -314,6 +318,9 @@ const find = <T extends { id: string }>(xs: readonly T[], id: string) => xs.find
 const holdText = (h: number) => (h >= 48 ? `${Math.round(h / 24)} days` : `${Math.round(h)} hours`);
 const sameRule = (a: RuleRef, b: RuleRef) => a.id === b.id && JSON.stringify(a.p) === JSON.stringify(b.p);
 
+/** “setup, then trigger”: how many candles after the setup the trigger may come (a quarter of the style's look-back) */
+export const thenWindow = (s: Style) => clamp(Math.round(s.L / s.tfH / 4), 2, 24);
+
 /** the chain as the Strategy Lab's strategy, its timeframe and history to test on */
 export function buildSpec(f0: Flow): { spec: StrategySpec; style: Style; timeframe: Style['timeframe']; years: number; coins: string[]; summary: string[] } {
   const f = migrateFlow(f0 as Flow & Record<string, unknown>);
@@ -357,6 +364,7 @@ export function buildSpec(f0: Flow): { spec: StrategySpec; style: Style; timefra
     name: '',
     signal: rules[0],
     ...(rules.length > 1 ? { also: rules.slice(1), combine: f.combine } : {}),
+    ...(rules.length > 1 && f.combine === 'then' ? { window: thenWindow(style) } : {}),
     filters,
     exit: { ...EXIT_DEFAULT, stopAtr: stop, targetR: tp.targetR, trailAtr: tp.trail ? Math.max(1.5, stop) : 0, maxBars, onFlip: f.flip, stopVol: garchStop ? Math.max(2, Math.round(stop * 1.3)) : 0 },
     sides: f.sides,
@@ -367,7 +375,7 @@ export function buildSpec(f0: Flow): { spec: StrategySpec; style: Style; timefra
     ...(f.decider !== 'none' && f.decider !== 'forest' && net.h1 > 0 ? { metaNet: [Math.round(net.h1), Math.round(net.h2 > 0 ? net.h2 : Math.max(2, net.h1 / 2))] as [number, number] } : {}),
     ...(f.portfolio !== 'equal' && coins.length > 1 ? { weights: f.portfolio } : {}),
   };
-  const joined = f.combine === 'all' ? ' + ' : f.combine === 'majority' ? ' ⋅maj⋅ ' : ' | ';
+  const joined = f.combine === 'all' ? ' + ' : f.combine === 'majority' ? ' ⋅maj⋅ ' : f.combine === 'switch' ? ' ⇄ ' : f.combine === 'then' ? ' → ' : ' | ';
   spec.name = [strats.map((s) => s.name).join(joined), ...filters.map((x) => FILTER_MAP[x.id]?.name).filter(Boolean), style.name.split(' — ')[0]].join(' · ');
   const comb = COMBINES.find((c) => c.id === f.combine)!;
   const summary = [
@@ -445,16 +453,18 @@ export function checkFlow(f0: Flow): Finding[] {
         continue;
       }
       if (fa === 'relative' && fb === 'relative') {
-        push('overlap', ['strategy'], pair, `${both} both trade the coin’s gap to bitcoin — much the same idea, read two ways.`);
+        if ((a.id === 'rsbtc') !== (b.id === 'rsbtc') && (a.id === 'pairs' || b.id === 'pairs')) push('clash', ['strategy'], pair, `${both} bet opposite ways on the same thing: one that the coin’s gap to bitcoin closes, the other that it keeps widening. Pick one.`);
+        else push('overlap', ['strategy'], pair, `${both} both trade the coin’s gap to bitcoin — much the same idea, read two ways.`);
         continue;
       }
       const trendRev = (isTrend(fa) && fb === 'reversion') || (isTrend(fb) && fa === 'reversion');
       const breakRev = (fa === 'breakout' && fb === 'reversion') || (fb === 'breakout' && fa === 'reversion');
-      if (trendRev) {
+      if ((trendRev || breakRev) && f.combine === 'switch') push('pair', ['strategy'], pair, `${both} pair well with the regime switch: the ${isTrend(fa) || fa === 'breakout' ? sq(a.name) : sq(b.name)} rule trades while the market trends, the dip rule while it ranges — each in the market it was made for.`);
+      else if (trendRev) {
         const st = isTrend(fa) ? a : b;
         if (f.combine === 'all' && st.nature === 'state') push('pair', ['strategy'], pair, `${both} pair well with “all must agree”: the trend rule picks the side, the dip rule picks the moment — buy the dips in an uptrend, sell the rallies in a downtrend.`);
-        else push('clash', ['strategy'], pair, `${both} pull opposite ways: one follows moves, the other bets they reverse. With “${COMBINES.find((c) => c.id === f.combine)!.name.toLowerCase()}” they will cancel out or flip-flop — use “all must agree” so the trend picks the side and the dip the moment.`);
-      } else if (breakRev) push('clash', ['strategy'], pair, `${both} fight by design: one buys strength, the other sells it. They will rarely agree — pick one, or expect very few trades.`);
+        else push('clash', ['strategy'], pair, `${both} pull opposite ways: one follows moves, the other bets they reverse. With “${COMBINES.find((c) => c.id === f.combine)!.name.toLowerCase()}” they will cancel out or flip-flop — use “all must agree” so the trend picks the side and the dip the moment, or the “regime switch” so each trades its own market.`);
+      } else if (breakRev) push('clash', ['strategy'], pair, `${both} fight by design: one buys strength, the other sells it. They will rarely agree — pick one, or join them with the “regime switch” so each trades its own market.`);
       else if (fa === fb && fa !== 'ml') push('overlap', ['strategy'], pair, `${both} are both ${fa === 'reversion' ? 'dip-buying' : fa === 'breakout' ? 'breakout' : fa === 'seasonal' ? 'calendar' : fa === 'carry' ? 'funding' : fa === 'volume' ? 'volume' : 'trend'} rules — they will mostly say the same thing. Together they confirm each other; they do not add a new idea.`);
       else if (isTrend(fa) && isTrend(fb)) push('overlap', ['strategy'], pair, `${both} both follow the trend — mostly the same signal; together they act as confirmation.`);
       else if (fa === 'ml' && fb === 'ml') push('pair', ['strategy'], pair, `${both} are two different AI models — when both point the same way, the call is stronger than either alone.`);
@@ -464,6 +474,11 @@ export function checkFlow(f0: Flow): Finding[] {
       if (f.combine === 'all' && a.nature === 'event' && b.nature === 'event') push('info', ['strategy'], pair, `${both} each fire only now and then; with “all must agree” both must fire on the same candle — expect very few trades (or choose “any one”).`);
     }
   if (S.length >= 3 && f.combine === 'all') push('info', ['strategy'], S.map((s) => s.id), `${S.length} strategies that must all agree will trade rarely — “majority vote” keeps the confirmation with more trades.`);
+  if (S.length >= 2 && f.combine === 'switch') {
+    const sides = S.map((x) => regimeSide(famOf(x.id)));
+    if (!(sides.includes('trend') && sides.includes('range'))) push('info', ['strategy'], S.map((x) => x.id), `The regime switch needs a trend or breakout strategy and a dip-buying one to switch between; with these picks it works like “any one”.`);
+  }
+  if (S.length >= 2 && f.combine === 'then') push('info', ['strategy'], S.map((x) => x.id), `Setup, then trigger: ${sq(S[0].name)} sets the direction, and the trade is taken when ${S.slice(1).map((x) => sq(x.name)).join(' and ')} ${S.length > 2 ? 'confirm' : 'confirms'} it within ${thenWindow(style)} candles. The first pick is the setup — reorder the picks to change it.`);
 
   // the strategies against the market models
   const sfam = S.map((s) => ({ s, fam: famOf(s.id) }));

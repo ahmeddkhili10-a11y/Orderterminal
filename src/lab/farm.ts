@@ -6,23 +6,41 @@
 // bitcoin hedge, the neural network) — so every one of them opens in the bot
 // builder as a chain of blocks. Each is:
 //
-//   1  trained   scored on the first 70 % of the history only (its fitness);
-//                the best breed the next generation (selection, crossover,
-//                mutation), and new random bots keep arriving
+//   1  trained   scored on the first 70 % of the history only (its fitness:
+//                the Sharpe ratio there, marked down when one half of the
+//                training years carried it, when few coins did, or when it
+//                needs many blocks); the best breed the next generation
+//                (selection, crossover, mutation, merging), new random bots
+//                keep arriving, and the best of every KIND of bot is kept in
+//                an archive of niches so the search does not collapse onto one
+//                idea. The farm also learns which blocks have been working
+//                and draws them more often.
 //   2  holdout   then examined on the last 30 % it never saw: it must make
 //                money there and do at least half as well as in training
-//   3  random    it must beat at least 75 of 100 random bots — the same
+//   3  steady    not one lucky stretch, coin or trade: in profit in two of the
+//                three thirds of the unseen stretch, on at least half its
+//                coins, and still in profit without its best 5 % of trades
+//   4  costs     still in profit at double the fees and slippage
+//   5  random    it must beat at least 75 of 100 random bots — the same
 //                number of trades, held as long, entered at random
-//   4  nudged    every setting is nudged one step each way; if fewer than half
+//   6  nudged    every setting is nudged one step each way; if fewer than half
 //                of those versions still make money on the unseen data, it
 //                was luck in its exact settings, and it is thrown out
-//   5  shuffled  its trades are shuffled 1,000 times; if the unlucky orders
+//   7  shuffled  its trades are shuffled 1,000 times; if the unlucky orders
 //                cause too deep a drawdown, it is thrown out
+//   8  proof     the bar for "significant" rises with every bot that has
+//                reached the unseen data (Benjamini–Hochberg: at most 1 in 10
+//                of the bots called significant should be flukes). The rest
+//                go on the watch list and must prove themselves forward.
 //
 // Survivors are then forward-tested on candles that arrive after they were
 // found (data no test has seen at all) and climb the incubation ladder — new,
 // incubating, proving, proven — or fade and drop out. The top five are the
-// best that are still standing; deploying one is the user's call.
+// best that are still standing; deploying one is the user's call. The farm
+// also picks THE TEAM: the survivors that fit together best as one portfolio
+// (little correlated, weighted by risk), and measures how overfit its own
+// search is (the probability of backtest overfitting, by combinatorially
+// symmetric cross-validation over each generation).
 //
 // The selection is on the training years only; the unseen 30 % is a gate it
 // passes or fails, never a score it is bred for. Every bot tried is counted,
@@ -30,6 +48,7 @@
 import {
   buildSpec,
   checkFlow,
+  COMBINES,
   FORECASTS,
   HOLDS,
   MODELS,
@@ -50,11 +69,25 @@ import {
   type Params,
 } from "./library";
 import { rngOf } from "./ml";
-import { periodsOf, runAll, withBench, type Periods } from "./research";
-import { COSTS, backtest, type Costs, type StrategySpec } from "./backtest";
+import {
+  periodsOf,
+  pool,
+  runAll,
+  withBench,
+  type Periods,
+} from "./research";
+import {
+  COSTS,
+  backtest,
+  regimeSide,
+  type Costs,
+  type StrategySpec,
+} from "./backtest";
 import {
   deflatedSharpe,
   monteCarlo,
+  ncdf,
+  pbo,
   perf,
   randomEntryTest,
   type Perf,
@@ -82,6 +115,8 @@ export type Stage =
   | "bred"
   | "trained"
   | "holdout"
+  | "steady"
+  | "costs"
   | "random"
   | "nudge"
   | "shuffle"
@@ -97,13 +132,25 @@ export const STAGES: { id: Stage; name: string; plain: string }[] = [
     id: "trained",
     name: "Good enough in training",
     plain:
-      "A Sharpe ratio of 0.7 or more on the training years, with enough trades, on most coins.",
+      "A training score of 0.7 or more: the Sharpe ratio on the training years, marked down when one half of them carried it, when few of the coins did, or when it needs many blocks.",
   },
   {
     id: "holdout",
     name: "Held up on the unseen 30 %",
     plain:
       "Made money on the last 30 % of the history it never saw, and at least half as well as in training.",
+  },
+  {
+    id: "steady",
+    name: "Not one lucky stretch, coin or trade",
+    plain:
+      "In profit in at least two of the three thirds of the unseen stretch, on at least half of its coins, and still in profit with its best 5 % of trades taken away.",
+  },
+  {
+    id: "costs",
+    name: "Survived double costs",
+    plain:
+      "Tested again on the unseen data with twice the fees and slippage: an edge that only exists at perfect prices is not an edge.",
   },
   {
     id: "random",
@@ -125,9 +172,9 @@ export const STAGES: { id: Stage; name: string; plain: string }[] = [
   },
   {
     id: "proof",
-    name: "Significant — fewer than 1 in 40 by luck",
+    name: "Significant after every bot tried",
     plain:
-      "Its result on the unseen data has a t-statistic of 2 or more. When thousands of bots are tried, a few pass the first four checks by luck alone; this one catches them. Those that miss it go on the watch list and are forward-tested anyway.",
+      "The more bots are tried, the better the luckiest of them looks — so the bar for “significant” rises with every bot that reaches the unseen data (Benjamini–Hochberg: of the bots called significant, at most 1 in 10 should be flukes). Those that miss it go on the watch list and are forward-tested anyway.",
   },
 ];
 
@@ -197,8 +244,21 @@ export interface Survivor {
   forward: Forward | null;
   stage: Ladder;
   summary: string[];
-  /** statistically significant on the unseen data (t ≥ 2): the top five is drawn from these, and from those proven on fresh data */
+  /** significant on the unseen data after allowing for every bot that reached it (false-discovery rate 10 %): the top five is drawn from these, and from those proven on fresh data */
   sig: boolean;
+  /** the chance a bot with no edge would show this unseen result, and the same allowing for every bot that reached the unseen data (the q-value) */
+  p?: number;
+  q?: number;
+  /** steady: thirds of the unseen stretch in profit, coins in profit, the total R without its best 5 % of trades; costs: the unseen Sharpe at double fees and slippage */
+  checks?: {
+    thirds: number;
+    coinsUp: number;
+    coins: number;
+    noBest: number;
+    cost2: number;
+  };
+  /** its return each day of the unseen stretch (how survivors fit together is read from these) */
+  daily?: { d0: number; r: number[] };
   /** the equity curve over the whole history, thinned (for the panel) */
   curve: number[];
   split: number;
@@ -246,11 +306,59 @@ export interface FarmState {
   dataAt: number;
   note: string;
   error: string;
+  /** bots that reached the unseen data (the count the significance bar allows for) */
+  entrants?: number;
+  /** how overfit the search is: the probability of backtest overfitting over recent generations (null until measured) */
+  pbo?: number | null;
+  /** kinds of bot kept in the archive (pace × families of strategy × sides) */
+  niches?: number;
+  /** the blocks that have been working: tried, trained well enough to face the gauntlet, survived it */
+  blocks?: BlockStat[];
+  /** the survivors that fit together best as one portfolio */
+  team?: Team | null;
+}
+
+export interface BlockStat {
+  id: string;
+  kind: "strategy" | "model" | "join" | "risk";
+  name: string;
+  tried: number;
+  passed: number;
+  survived: number;
+}
+
+export interface Team {
+  members: {
+    id: string;
+    name: string;
+    /** its share of the risk (inverse volatility) */
+    weight: number;
+    /** its Sharpe ratio alone, on the team's days */
+    sharpe: number;
+    /** what is needed to open it in the bot builder or deploy it */
+    flow: Flow;
+    tfH: number;
+    coins: string[];
+    stage: Ladder;
+    sig: boolean;
+    oos: { sharpe: number; t: number; trades: number };
+    dsr: number;
+  }[];
+  /** the team as one portfolio over the days every member has */
+  sharpe: number;
+  maxDD: number;
+  /** a year's return at the members' tested sizes */
+  ret: number;
+  /** the average correlation between members' daily results */
+  corr: number;
+  days: number;
+  /** the best member alone over the same days */
+  solo: { name: string; sharpe: number; maxDD: number };
 }
 
 /** what is saved between sessions */
 export interface FarmSave {
-  v: 1;
+  v: 1 | 2;
   cfg: FarmCfg;
   gen: number;
   tried: number;
@@ -260,13 +368,19 @@ export interface FarmSave {
   seen: string[];
   startedAt: number;
   recent: Reject[];
+  /** block → [tried, passed training, survived] */
+  stats?: Record<string, [number, number, number]>;
+  /** the best bot of each niche */
+  archive?: { flow: Flow; fit: number }[];
+  pbo?: number[];
 }
 
 const keyOf = (f: Flow) =>
   JSON.stringify([
     f.style,
-    [...f.strategies].sort(),
-    f.combine,
+    // “setup, then trigger” depends on which strategy comes first
+    f.combine === "then" ? f.strategies : [...f.strategies].sort(),
+    f.strategies.length > 1 ? f.combine : "",
     [...f.models].sort(),
     [...f.forecasts].sort(),
     [...f.risks].sort(),
@@ -279,6 +393,22 @@ const keyOf = (f: Flow) =>
   ]);
 const familyOf = (f: Flow) =>
   JSON.stringify([f.style, [...f.strategies].sort(), [...f.models].sort()]);
+
+const famOfStrategy = (id: string) => {
+  const o = STRATEGIES.find((s) => s.id === id);
+  return (o && SIGNAL_MAP[o.signal]?.family) ?? "trend";
+};
+/** the kind of bot: its pace, the families of its strategies, the sides it trades */
+const nicheOf = (f: Flow) =>
+  `${f.style}|${[...new Set(f.strategies.map(famOfStrategy))].sort().join("+")}|${f.sides}`;
+
+/** the blocks a bot is made of, as keys for what the farm learns about them */
+const blockKeys = (f: Flow): string[] => [
+  ...f.strategies.map((id) => `strategy:${id}`),
+  ...f.models.map((id) => `model:${id}`),
+  ...f.risks.map((id) => `risk:${id}`),
+  ...(f.strategies.length > 1 ? [`join:${f.combine}`] : []),
+];
 
 interface Ind {
   flow: Flow;
@@ -296,12 +426,19 @@ interface Pool {
 }
 
 const ML = new Set(["nn", "rf", "ols", "candle"]);
+/** a bot with a learned part: an AI strategy, or an AI second opinion */
+const usesML = (f: Flow) =>
+  f.strategies.some((s) => ML.has(s)) || f.forecasts.some((x) => x !== "kalman");
 const TRAIN_MIN_SHARPE = 0.7;
+/** the false-discovery rate allowed among the bots called significant */
+const FDR = 0.1;
 
 export class Farm {
   cfg: FarmCfg;
   private rnd: () => number;
   private ctxs: Record<string, Ctx[]> = {};
+  /** the same markets with the models fitted on the first 70 % of the TRAINING bars only: the last 30 % of them scores a learned rule honestly */
+  private inner: Record<string, Ctx[]> = {};
   private funding = false;
   private pop: Ind[] = [];
   private cursor = 0;
@@ -314,6 +451,8 @@ export class Farm {
     bred: 0,
     trained: 0,
     holdout: 0,
+    steady: 0,
+    costs: 0,
     random: 0,
     nudge: 0,
     shuffle: 0,
@@ -328,7 +467,16 @@ export class Farm {
   dataTo = 0;
   dataAt = 0;
   private costs: Costs;
+  private stress: number;
   private now: () => number;
+  /** what the farm has learned about each block: tried, trained well enough for the gauntlet, survived it */
+  private stats = new Map<string, { n: number; pass: number; surv: number }>();
+  /** the best bot of each kind (niche), kept across restarts of the population */
+  private archive = new Map<string, { flow: Flow; fit: number }>();
+  /** the latest bots that made money in training, by timeframe: each one's mean return in eight stretches of the training years (for the overfit meter) */
+  private genBlocks: Record<string, number[][]> = {};
+  private pboHist: number[] = [];
+  private teamCache: Team | null = null;
 
   constructor(
     cfg: Partial<FarmCfg> = {},
@@ -337,14 +485,17 @@ export class Farm {
       now?: () => number;
       costs?: Costs;
       save?: FarmSave | null;
+      /** the multiple of the fees and slippage a bot must survive (2) */
+      stress?: number;
     } = {},
   ) {
     this.cfg = { ...FARM_DEFAULTS, ...cfg };
     this.now = o.now ?? Date.now;
     this.rnd = rngOf(o.seed ?? (this.now() % 1_000_000) + 7);
     this.costs = o.costs ?? COSTS;
+    this.stress = o.stress ?? 2;
     this.startedAt = this.now();
-    if (o.save && o.save.v === 1) this.restore(o.save);
+    if (o.save && (o.save.v === 1 || o.save.v === 2)) this.restore(o.save);
   }
 
   // ---------- data ----------
@@ -352,12 +503,19 @@ export class Farm {
   /** the candles to breed on, by timeframe ('1h', '4h' …); called again with fresher candles to forward-test the survivors */
   setMarkets(byTf: Record<string, Market[]>) {
     this.ctxs = {};
+    this.inner = {};
+    // other candles: the stretches of the training years the overfit meter compares are no longer the same
+    this.genBlocks = {};
     for (const [tf, ms] of Object.entries(byTf)) {
       const ok = ms.filter((m) => m.bars.length >= 400);
-      if (ok.length)
-        this.ctxs[tf] = withBench(ok).map((m, k) =>
-          ctxOf(m, Math.floor(m.bars.length * 0.7), 42 + k),
-        );
+      if (!ok.length) continue;
+      const withB = withBench(ok);
+      this.ctxs[tf] = withB.map((m, k) =>
+        ctxOf(m, Math.floor(m.bars.length * 0.7), 42 + k),
+      );
+      this.inner[tf] = withB.map((m, k) =>
+        ctxOf(m, Math.floor(Math.floor(m.bars.length * 0.7) * 0.7), 42 + k),
+      );
     }
     this.funding = Object.values(byTf).some((ms) =>
       ms.some((m) => m.funding && m.funding.some((x) => x !== 0)),
@@ -394,8 +552,6 @@ export class Farm {
         (s.needsBtc && !btcPair)
       )
         return false;
-      if (s.longOnly && this.cfg.sides !== "long" && this.rnd() < 0.3)
-        return true;
       return true;
     }).map((s) => s.id);
     const models = MODELS.filter(
@@ -424,6 +580,94 @@ export class Farm {
     return out;
   }
 
+  // ---------- what the farm learns about its blocks ----------
+
+  /**
+   * How often a block is drawn. A block that keeps producing bots good enough
+   * to face the gauntlet (and more so, survivors) is drawn more; one that has
+   * had many tries and produced nothing is drawn less — never dropped, since
+   * what fails alone may work in a combination not yet tried.
+   */
+  private weight(key: string): number {
+    const st = this.stats.get(key);
+    if (!st) return 1;
+    return Math.max(0.15, Math.min(4, (10 * (st.pass + 2 * st.surv + 1)) / (st.n + 10)));
+  }
+
+  /** one of the ids, drawn by what the farm has learned about them */
+  private pickW(ids: readonly string[], kind: string): string {
+    const w = ids.map((id) => this.weight(`${kind}:${id}`));
+    let x = this.rnd() * w.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < ids.length; i++) {
+      x -= w[i];
+      if (x <= 0) return ids[i];
+    }
+    return ids[ids.length - 1];
+  }
+
+  private someW(ids: readonly string[], n: number, kind: string): string[] {
+    const left = [...ids];
+    const out: string[] = [];
+    while (out.length < n && left.length) {
+      const id = this.pickW(left, kind);
+      out.push(id);
+      left.splice(left.indexOf(id), 1);
+    }
+    return out;
+  }
+
+  private note(f: Flow, what: "n" | "pass" | "surv") {
+    for (const k of blockKeys(f)) {
+      const st = this.stats.get(k) ?? { n: 0, pass: 0, surv: 0 };
+      st[what]++;
+      this.stats.set(k, st);
+    }
+  }
+
+  /** the blocks that have been working, best first */
+  blocks(): BlockStat[] {
+    const nameOf = (kind: string, id: string) =>
+      kind === "strategy"
+        ? STRATEGIES.find((x) => x.id === id)?.name
+        : kind === "model"
+          ? MODELS.find((x) => x.id === id)?.name
+          : kind === "risk"
+            ? RISKS.find((x) => x.id === id)?.name
+            : COMBINES.find((x) => x.id === id)?.name;
+    return [...this.stats.entries()]
+      .map(([key, st]) => {
+        const [kind, id] = key.split(":");
+        return {
+          id,
+          kind: kind as BlockStat["kind"],
+          name: nameOf(kind, id) ?? id,
+          tried: st.n,
+          passed: st.pass,
+          survived: st.surv,
+        };
+      })
+      .filter((b) => b.tried >= 5 && b.passed > 0)
+      .sort(
+        (a, b) =>
+          b.survived - a.survived ||
+          b.passed / b.tried - a.passed / a.tried,
+      )
+      .slice(0, 12);
+  }
+
+  /** how two or more strategies are joined: the regime switch when there is something to switch between */
+  private joinFor(strategies: string[]): Flow["combine"] {
+    if (strategies.length < 2) return "all";
+    const sides = strategies.map((id) => regimeSide(famOfStrategy(id)));
+    const canSwitch = sides.includes("trend") && sides.includes("range");
+    const opts: Flow["combine"][] = canSwitch
+      ? ["switch", "all"]
+      : strategies.length > 2
+        ? ["majority", "any", "then"]
+        : ["all", "majority", "any", "then"];
+    return this.pickW(opts, "join") as Flow["combine"];
+  }
+
   /** a strategy's settings: each one from its published grid, or the style's default */
   private tuneFor(style: StyleId, id: string): Params | null {
     const opt = STRATEGIES.find((s) => s.id === id);
@@ -447,8 +691,9 @@ export class Farm {
       // the learned rules are slower: drawn less often
       const plain = P.strategies.filter((s) => !ML.has(s));
       const draw = () =>
-        this.rnd() < 0.12 ? this.pick(P.strategies) : this.pick(plain);
-      const n = this.rnd() < 0.55 ? 1 : 2;
+        this.pickW(this.rnd() < 0.12 || !plain.length ? P.strategies : plain, "strategy");
+      const u = this.rnd();
+      const n = u < 0.5 ? 1 : u < 0.92 ? 2 : 3;
       const strategies = [...new Set(Array.from({ length: n }, draw))];
       const tunes: Record<string, Params> = {};
       for (const s of strategies) {
@@ -458,8 +703,8 @@ export class Farm {
       const flow: Flow = {
         style,
         strategies,
-        combine: this.pick(["all", "all", "majority", "any"] as const),
-        models: this.some(P.models, this.pick([0, 1, 1, 2])),
+        combine: this.joinFor(strategies),
+        models: this.someW(P.models, this.pick([0, 1, 1, 2]), "model"),
         forecasts:
           this.rnd() < 0.2
             ? [
@@ -507,26 +752,25 @@ export class Farm {
     for (let attempt = 0; attempt < 20; attempt++) {
       const f: Flow = { ...f0, tunes: f0.tunes ? { ...f0.tunes } : undefined };
       const P = this.pool(f.style);
-      switch (Math.floor(this.rnd() * 9)) {
+      switch (Math.floor(this.rnd() * 10)) {
         case 0: {
           // a strategy swapped, added or removed
-          const s = this.pick(
-            P.strategies.filter((x) => !ML.has(x) || this.rnd() < 0.15),
+          const pool = P.strategies.filter(
+            (x) => !ML.has(x) || this.rnd() < 0.15,
           );
-          if (f.strategies.length > 1 && this.rnd() < 0.4)
-            f.strategies = f.strategies.filter(
-              (_, i) => i !== Math.floor(this.rnd() * f.strategies.length),
-            );
-          else if (f.strategies.length < 2 && this.rnd() < 0.5)
+          const s = this.pickW(pool.length ? pool : P.strategies, "strategy");
+          const at = Math.floor(this.rnd() * f.strategies.length);
+          if (f.strategies.length > 1 && this.rnd() < 0.35)
+            f.strategies = f.strategies.filter((_, i) => i !== at);
+          else if (f.strategies.length < 3 && this.rnd() < 0.5)
             f.strategies = [...new Set([...f.strategies, s])];
           else
             f.strategies = [
-              ...new Set(
-                f.strategies.map((x, i) =>
-                  i === Math.floor(this.rnd() * f.strategies.length) ? s : x,
-                ),
-              ),
+              ...new Set(f.strategies.map((x, i) => (i === at ? s : x))),
             ];
+          // the join must still suit what is joined
+          if (f.strategies.length > 1 && this.rnd() < 0.5)
+            f.combine = this.joinFor(f.strategies);
           break;
         }
         case 1: {
@@ -544,7 +788,7 @@ export class Farm {
           break;
         }
         case 2: {
-          const m = this.pick(P.models);
+          const m = this.pickW(P.models, "model");
           f.models = f.models.includes(m)
             ? f.models.filter((x) => x !== m)
             : f.models.length < 2
@@ -573,8 +817,18 @@ export class Farm {
           if (this.cfg.sides !== "long" && this.rnd() < 0.3)
             f.sides = f.sides === "both" ? "long" : "both";
           break;
+        case 8:
+          // how the strategies are joined; with “setup, then trigger”, which one sets up
+          if (f.strategies.length > 1) {
+            if (f.combine === "then" && this.rnd() < 0.5)
+              f.strategies = [...f.strategies].reverse();
+            else
+              f.combine = this.pick(
+                ["all", "majority", "any", "switch", "then"] as const,
+              );
+          } else f.stopWidth = this.pick(STOP_WIDTHS).id;
+          break;
         default:
-          f.combine = this.pick(["all", "majority", "any"] as const);
           f.forecasts = f.forecasts.length ? [] : ["kalman"];
       }
       // settings only for the strategies it has
@@ -616,6 +870,36 @@ export class Farm {
     return this.mutate(a);
   }
 
+  /** two bots merged into one: the strategies of both, joined — how separate edges are put together */
+  merge(a: Flow, b: Flow): Flow {
+    if (a.style !== b.style) return this.mutate(a);
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const strategies = [...new Set([...a.strategies, ...b.strategies])];
+      while (strategies.length > 3)
+        strategies.splice(Math.floor(this.rnd() * strategies.length), 1);
+      if (strategies.length < 2) break;
+      const from = () => (this.rnd() < 0.5 ? a : b);
+      const tunes = { ...(b.tunes ?? {}), ...(a.tunes ?? {}) };
+      const keep = Object.fromEntries(
+        Object.entries(tunes).filter(([k]) =>
+          strategies.some((x) => k === `strategy:${x}`),
+        ),
+      );
+      const f: Flow = {
+        ...a,
+        strategies,
+        combine: this.joinFor(strategies),
+        tunes: Object.keys(keep).length ? keep : undefined,
+        models: from().models,
+        risks: from().risks,
+        forecasts: from().forecasts,
+      };
+      if (this.valid(f) && keyOf(f) !== keyOf(a) && keyOf(f) !== keyOf(b))
+        return f;
+    }
+    return this.cross(a, b);
+  }
+
   private seedPop(n: number) {
     const out: Ind[] = [];
     for (let i = 0; i < n * 3 && out.length < n; i++) {
@@ -631,10 +915,49 @@ export class Farm {
     return (a.fit ?? -Infinity) >= (b.fit ?? -Infinity) ? a : b;
   }
 
-  /** the next generation: the best carried over, children of the fitter, and new random bots */
+  /**
+   * How overfit the search is: the probability of backtest overfitting (Bailey,
+   * Borwein, López de Prado & Zhu 2017) over the latest bots that made money
+   * in training. The training years are cut into eight stretches; for every
+   * way of calling four of them "in sample", the bot that did best there is
+   * looked up on the other four — PBO is how often it lands in the bottom
+   * half. Only bots in profit in training are compared: a bot that loses to
+   * its costs loses everywhere, and that sameness would hide the overfitting.
+   */
+  private measureOverfit() {
+    let sum = 0;
+    let k = 0;
+    for (const rows of Object.values(this.genBlocks)) {
+      if (rows.length < 10) continue;
+      const v = pbo(rows);
+      if (v === null) continue;
+      sum += v * rows.length;
+      k += rows.length;
+    }
+    if (!k) return;
+    this.pboHist.push(sum / k);
+    if (this.pboHist.length > 5) this.pboHist.shift();
+  }
+
+  /** the probability of backtest overfitting of the search, over recent generations */
+  overfit(): number | null {
+    return this.pboHist.length
+      ? this.pboHist.reduce((a, b) => a + b, 0) / this.pboHist.length
+      : null;
+  }
+
+  /** a parent for the next generation: mostly the fitter of two from the population, sometimes the champion of a random niche */
+  private parent(): Flow {
+    if (this.archive.size && this.rnd() < 0.3)
+      return this.pick([...this.archive.values()]).flow;
+    return this.tournament().flow;
+  }
+
+  /** the next generation: the best of each kind carried over, children of the fitter and of the niches' champions, bots bred from the survivors, and new random bots */
   private breed() {
     const N = 40;
     this.gen++;
+    this.measureOverfit();
     const scored = this.pop
       .filter((x) => Number.isFinite(x.fit))
       .sort((a, b) => b.fit - a.fit);
@@ -643,36 +966,65 @@ export class Farm {
       this.best = top;
       this.stale = 0;
     } else this.stale++;
-    // stuck for a while: start over with fresh bots (keeping the two best)
-    if (this.stale >= 8 || scored.length < 4) {
-      this.stale = 0;
-      this.best = -Infinity;
-      this.pop = [
-        ...scored.slice(0, 2).map((x) => ({ ...x })),
-        ...this.seedPop(N - Math.min(2, scored.length)),
-      ];
-      this.cursor = 0;
-      return;
-    }
-    const next: Ind[] = scored.slice(0, 6).map((x) => ({ ...x }));
-    const keys = new Set(next.map((x) => x.key));
-    let guard = 0;
-    while (next.length < N - 8 && guard++ < 200) {
-      const child =
-        this.rnd() < 0.5
-          ? this.cross(this.tournament().flow, this.tournament().flow)
-          : this.mutate(this.tournament().flow);
-      const k = keyOf(child);
-      if (keys.has(k)) continue;
+    const next: Ind[] = [];
+    const keys = new Set<string>();
+    const add = (flow: Flow, fit = NaN) => {
+      const k = keyOf(flow);
+      if (keys.has(k)) return false;
       keys.add(k);
       next.push({
-        flow: child,
+        flow,
         key: k,
-        fit: this.seen.get(k) ?? NaN,
-        done: this.seen.has(k),
+        fit: Number.isFinite(fit) ? fit : (this.seen.get(k) ?? NaN),
+        done: Number.isFinite(fit) || this.seen.has(k),
       });
+      return true;
+    };
+    // stuck for a while: start over with fresh bots — the niches' champions keep what was learned
+    const restart = this.stale >= 8 || scored.length < 4;
+    if (restart) {
+      this.stale = 0;
+      this.best = -Infinity;
+      for (const x of scored.slice(0, 2)) add(x.flow, x.fit);
+      const champs = [...this.archive.values()].sort((a, b) => b.fit - a.fit);
+      for (const c of this.some(champs.slice(0, 24), 8)) add(this.mutate(c.flow));
+    } else {
+      // the best carried over: no more than two of a kind
+      const perNiche = new Map<string, number>();
+      for (const x of scored) {
+        if (next.length >= 6) break;
+        const nk = nicheOf(x.flow);
+        if ((perNiche.get(nk) ?? 0) >= 2) continue;
+        perNiche.set(nk, (perNiche.get(nk) ?? 0) + 1);
+        add(x.flow, x.fit);
+      }
+      let guard = 0;
+      while (next.length < N - 12 && guard++ < 300) {
+        const u = this.rnd();
+        add(
+          u < 0.4
+            ? this.cross(this.parent(), this.parent())
+            : u < 0.55
+              ? this.merge(this.parent(), this.parent())
+              : this.mutate(this.parent()),
+        );
+      }
     }
-    next.push(...this.seedPop(N - next.length));
+    // bred from the survivors: refinements of bots that passed, and pairs of them merged into one
+    const live = this.survivors.filter((x) => x.stage !== "faded");
+    let guard = 0;
+    const want = Math.min(4, live.length);
+    let made = 0;
+    while (made < want && guard++ < 40) {
+      const a = this.pick(live);
+      const mates = live.filter((x) => x !== a && x.style === a.style);
+      const child =
+        mates.length && this.rnd() < 0.6
+          ? this.merge(a.flow, this.pick(mates).flow)
+          : this.mutate(a.flow);
+      if (!this.seen.has(keyOf(child)) && add(child)) made++;
+    }
+    for (const x of this.seedPop(N - next.length)) add(x.flow);
     this.pop = next;
     this.cursor = 0;
   }
@@ -696,20 +1048,104 @@ export class Farm {
     };
   }
 
-  /** the training score: Sharpe on the training years, rewarding bots that work on most coins */
-  train(f: Flow): { fit: number; is: Perf | null } {
+  /** a learned bot on the last 30 % of the training bars, its models fitted on the 70 % before them */
+  private runInner(
+    f: Flow,
+    x: NonNullable<ReturnType<Farm["ctxFor"]>>,
+  ): {
+    per: { bt: ReturnType<typeof backtest> }[];
+    rets: Float64Array;
+    trades: ReturnType<typeof backtest>["trades"];
+    exposure: number;
+  } | null {
+    const inner = this.inner[buildSpec(f).timeframe];
+    if (!inner) return null;
+    const per = x.ctxs.map((outer) => {
+      const c = inner.find((q) => q.m.coin === outer.m.coin)!;
+      return {
+        m: c.m,
+        bt: backtest(c, x.spec, c.trainEnd, outer.trainEnd, this.costs),
+      };
+    });
+    return {
+      per,
+      rets: pool(per).rets,
+      trades: per.flatMap((q) => q.bt.trades),
+      exposure: per.reduce((a, q) => a + q.bt.exposure, 0) / (per.length || 1),
+    };
+  }
+
+  /**
+   * The training score. The Sharpe ratio on the training years, but:
+   *   · half of it is the WORSE half of those years — a bot carried by one
+   *     stretch scores low (stability is the best single predictor of a bot
+   *     holding up on new data);
+   *   · it is marked down when few of the coins were in profit;
+   *   · every block beyond two costs a little (a simple bot that scores the
+   *     same as a complicated one is the better bet).
+   * A bot with a learned part (an AI strategy or second opinion) is scored
+   * on training bars its models never saw. Also returns the bot's mean
+   * return in eight stretches of the training years, for the overfit meter.
+   */
+  train(f: Flow): {
+    fit: number;
+    is: Perf | null;
+    tf?: string;
+    blocks?: number[];
+  } {
     const x = this.ctxFor(f);
     if (!x) return { fit: -Infinity, is: null };
     const bpy = barsPerYear(x.tfH);
-    const r = runAll(x.ctxs, x.spec, "is", this.costs);
+    // a learned rule scored on the bars it learned from looks better than it is: its models are fitted on
+    // the first 70 % of the training bars and it is scored on the last 30 % of them
+    const learned = usesML(f);
+    const r = learned ? this.runInner(f, x) : runAll(x.ctxs, x.spec, "is", this.costs);
+    if (!r) return { fit: -Infinity, is: null };
     const p = perf(r.rets, r.trades, bpy, r.exposure);
     const coinsUp =
       r.per.filter((q) => q.bt.rets.reduce((a, b) => a + b, 0) > 0).length /
       r.per.length;
-    const minTrades = Math.max(20, 8 * x.ctxs.length);
+    const minTrades = learned
+      ? Math.max(12, 4 * x.ctxs.length)
+      : Math.max(20, 8 * x.ctxs.length);
+    if (p.trades < minTrades) return { fit: -Infinity, is: p };
+    const n = r.rets.length;
+    const sharpeOf = (from: number, to: number) => {
+      let sum = 0;
+      let sq = 0;
+      for (let i = from; i < to; i++) {
+        sum += r.rets[i];
+        sq += r.rets[i] * r.rets[i];
+      }
+      const k = to - from;
+      const m = sum / k;
+      const sd = Math.sqrt(Math.max(0, sq / k - m * m));
+      return sd > 0 ? (m / sd) * Math.sqrt(bpy) : 0;
+    };
+    const half = Math.floor(n / 2);
+    const worse = Math.min(sharpeOf(0, half), sharpeOf(half, n));
+    const size =
+      f.strategies.length + f.models.length + f.forecasts.length + f.risks.length;
+    const fit =
+      (0.5 * p.sharpe + 0.5 * worse) * (0.5 + 0.5 * coinsUp) -
+      0.04 * Math.max(0, size - 2);
+    // eight equal stretches of the training years: the mean return in each, in units of the bot's own volatility
+    const S = 8;
+    const sd = p.vol / Math.sqrt(bpy);
+    const blocks: number[] = [];
+    if (sd > 0 && n >= S * 20 && !learned)
+      for (let b = 0; b < S; b++) {
+        const a = Math.floor((b * n) / S);
+        const z = Math.floor(((b + 1) * n) / S);
+        let sum = 0;
+        for (let i = a; i < z; i++) sum += r.rets[i];
+        blocks.push(sum / (z - a) / sd);
+      }
     return {
-      fit: p.trades < minTrades ? -Infinity : p.sharpe * (0.5 + 0.5 * coinsUp),
+      fit,
       is: p,
+      tf: buildSpec(f).timeframe,
+      blocks: blocks.length === S ? blocks : undefined,
     };
   }
 
@@ -790,7 +1226,52 @@ export class Farm {
         at: "holdout",
         why: `did far worse on new data than in training (Sharpe ${is.sharpe.toFixed(2)} → ${oos.sharpe.toFixed(2)})`,
       };
-    // 3 — 100 random bots
+    // 3 — steady: not one lucky stretch, coin or trade
+    const third = Math.floor(run.rets.length / 3);
+    let thirds = 0;
+    for (let k = 0; k < 3; k++) {
+      let sum = 0;
+      const to = k === 2 ? run.rets.length : (k + 1) * third;
+      for (let i = k * third; i < to; i++) sum += run.rets[i];
+      if (sum > 0) thirds++;
+    }
+    const coinsUp = run.per.filter(
+      (q) => q.bt.rets.reduce((a, b) => a + b, 0) > 0,
+    ).length;
+    const rs = run.trades.map((t) => t.r).sort((a, b) => b - a);
+    const drop = Math.max(1, Math.round(rs.length * 0.05));
+    const noBest = rs.slice(drop).reduce((a, b) => a + b, 0);
+    if (thirds < 2)
+      return {
+        ok: false,
+        at: "steady",
+        why: `in profit in only ${thirds} of the 3 thirds of the unseen stretch — one stretch carried it`,
+      };
+    if (coinsUp < Math.ceil(run.per.length / 2))
+      return {
+        ok: false,
+        at: "steady",
+        why: `in profit on only ${coinsUp} of its ${run.per.length} coins`,
+      };
+    if (!(noBest > 0))
+      return {
+        ok: false,
+        at: "steady",
+        why: `without its best ${drop} trade${drop === 1 ? "" : "s"} (5 %) it loses — a few lucky trades made the result`,
+      };
+    // 4 — double costs
+    const dear = runAll(x.ctxs, x.spec, "oos", {
+      feeBps: this.costs.feeBps * this.stress,
+      slipBps: this.costs.slipBps * this.stress,
+    });
+    const cost2 = perf(dear.rets, dear.trades, bpy, dear.exposure);
+    if (!(cost2.totalReturn > 0))
+      return {
+        ok: false,
+        at: "costs",
+        why: `loses at double the fees and slippage (Sharpe ${cost2.sharpe.toFixed(2)}) — the edge is thinner than its costs`,
+      };
+    // 5 — 100 random bots
     const nul = randomEntryTest(
       run.per.map((q) => ({
         logClose: Float64Array.from(q.c.m.bars, (b) => Math.log(b.close)),
@@ -811,7 +1292,7 @@ export class Farm {
         at: "random",
         why: `beat only ${beat} of 100 random bots (needs 75)`,
       };
-    // 4 — every setting nudged
+    // 6 — every setting nudged
     const nb = this.neighbours(f);
     let kept = 0;
     for (const n of nb) {
@@ -828,7 +1309,7 @@ export class Farm {
         at: "nudge",
         why: `only ${kept} of ${nb.length} nudged versions still made money`,
       };
-    // 5 — 1,000 shuffles
+    // 7 — 1,000 shuffles
     const mc = monteCarlo(
       run.trades.map((t) => t.r),
       1000,
@@ -880,7 +1361,16 @@ export class Farm {
       score: 0,
       forward: null,
       stage: "new",
-      sig: oos.t >= 2,
+      sig: false,
+      p: 1 - ncdf(oos.t),
+      checks: {
+        thirds,
+        coinsUp,
+        coins: run.per.length,
+        noBest,
+        cost2: cost2.sharpe,
+      },
+      daily: dailyOf(run.rets, run.times),
       summary: built.summary,
       curve,
       split: Math.min(
@@ -953,6 +1443,7 @@ export class Farm {
       s.score = scoreOf(s);
     }
     this.prune();
+    this.rank();
   }
 
   /** the strategies deployed in the swarm, checked on the candles since they were deployed */
@@ -1036,7 +1527,7 @@ export class Farm {
       ind.fit = had;
       return { what: "idle" };
     }
-    let r: { fit: number; is: Perf | null };
+    let r: ReturnType<Farm["train"]>;
     try {
       r = this.train(ind.flow);
     } catch {
@@ -1044,6 +1535,25 @@ export class Farm {
     }
     ind.fit = r.fit;
     this.seen.set(ind.key, r.fit);
+    this.note(ind.flow, "n");
+    if (r.tf && r.blocks && r.is && r.is.sharpe > 0) {
+      const rows = (this.genBlocks[r.tf] ??= []);
+      rows.push(r.blocks);
+      if (rows.length > 80) rows.shift();
+    }
+    // the best of its kind so far goes in the archive
+    if (Number.isFinite(r.fit)) {
+      const nk = nicheOf(ind.flow);
+      const had = this.archive.get(nk);
+      if (!had || r.fit > had.fit)
+        this.archive.set(nk, { flow: ind.flow, fit: r.fit });
+      if (this.archive.size > 300) {
+        const worst = [...this.archive.entries()].sort(
+          (a, b) => a[1].fit - b[1].fit,
+        )[0];
+        this.archive.delete(worst[0]);
+      }
+    }
     if (this.seen.size > 20_000)
       this.seen.delete(this.seen.keys().next().value as string);
     this.tried++;
@@ -1056,6 +1566,7 @@ export class Farm {
       !this.survivors.some((s) => s.key === ind.key)
     ) {
       this.funnel.trained++;
+      this.note(ind.flow, "pass");
       (ind as Ind & { is?: Perf }).fit = r.fit;
       this.queue.push({ ...ind, is: r.is } as Ind & { is: Perf });
     }
@@ -1083,10 +1594,17 @@ export class Farm {
       this.recent = this.recent.slice(0, 12);
       return { what: "rejected", name };
     }
-    // the four checks passed; significance decides the top five or the watch list
-    for (const st of ["holdout", "random", "nudge", "shuffle"] as Stage[])
+    // every check passed; significance (allowing for every bot tried) decides the top five or the watch list
+    for (const st of [
+      "holdout",
+      "steady",
+      "costs",
+      "random",
+      "nudge",
+      "shuffle",
+    ] as Stage[])
       this.funnel[st]++;
-    if (res.s.sig) this.funnel.proof++;
+    this.note(g.flow, "surv");
     // the same result from the same family is the same bot: kept once
     const twin = this.survivors.find(
       (x) =>
@@ -1095,12 +1613,15 @@ export class Farm {
         x.oos.trades === res.s.oos.trades,
     );
     if (!twin) this.survivors.push(res.s);
+    this.prune();
+    this.rank();
+    const sig = !twin && res.s.sig;
     this.recent.unshift({
       name,
-      at: res.s.sig ? "proof" : "shuffle",
-      why: res.s.sig
-        ? `SURVIVED every check — beat ${res.s.beat} of 100 random bots, ${res.s.nudge.kept} of ${res.s.nudge.tried} nudges kept, t = ${res.s.oos.t.toFixed(1)}`
-        : `passed the four checks but t = ${res.s.oos.t.toFixed(1)} on the unseen data (needs 2): on the watch list, forward-testing`,
+      at: sig ? "proof" : "shuffle",
+      why: sig
+        ? `SURVIVED every check — beat ${res.s.beat} of 100 random bots, ${res.s.nudge.kept} of ${res.s.nudge.tried} nudges kept, t = ${res.s.oos.t.toFixed(1)}: significant even after the ${this.funnel.trained.toLocaleString()} bots that reached the unseen data`
+        : `passed every check, but t = ${res.s.oos.t.toFixed(1)} on the unseen data is not yet significant after ${this.funnel.trained.toLocaleString()} bots tried there: on the watch list, forward-testing`,
       t: this.now(),
     });
     this.recent = this.recent.slice(0, 12);
@@ -1108,9 +1629,45 @@ export class Farm {
     return { what: "survived", name };
   }
 
+  /**
+   * Which survivors are significant, allowing for every bot that reached the
+   * unseen data (Benjamini & Hochberg 1995). Each survivor's one-sided
+   * p-value is ranked against the number of gauntlet entrants: the k-th
+   * smallest must be below k / entrants × 10 %. So the bar rises as more bots
+   * are tried — a survivor can lose its place to the search going on — and of
+   * those called significant, at most about 1 in 10 should be flukes.
+   */
+  rank() {
+    const M = Math.max(1, this.funnel.trained, this.survivors.length);
+    const byP = [...this.survivors]
+      .map((s) => {
+        if (!(s.p! >= 0)) s.p = 1 - ncdf(s.oos.t);
+        return s;
+      })
+      .sort((a, b) => a.p! - b.p!);
+    // q-values: the smallest false-discovery rate at which each would be called significant
+    let q = 1;
+    for (let k = byP.length - 1; k >= 0; k--) {
+      q = Math.min(q, (byP[k].p! * M) / (k + 1));
+      byP[k].q = q;
+      byP[k].sig = q <= FDR;
+    }
+    // the last step of the funnel is how many stand as significant NOW (it can fall as more bots are tried)
+    this.funnel.proof = byP.filter((x) => x.sig).length;
+    this.teamCache = null;
+  }
+
   /** the funnel counts each stage a bot PASSED; a rejection at a stage means it passed the ones before */
   noteFail(at: Stage) {
-    const order: Stage[] = ["holdout", "random", "nudge", "shuffle", "proof"];
+    const order: Stage[] = [
+      "holdout",
+      "steady",
+      "costs",
+      "random",
+      "nudge",
+      "shuffle",
+      "proof",
+    ];
     for (const st of order) {
       if (st === at) break;
       this.funnel[st]++;
@@ -1162,6 +1719,150 @@ export class Farm {
     return out;
   }
 
+  /**
+   * The team: the survivors that fit together best as one portfolio. Starting
+   * from the best survivor, it adds — one at a time — whichever other survivor
+   * raises the portfolio's Sharpe ratio the most (members weighted by inverse
+   * volatility, so each carries the same risk), as long as it is of a
+   * different family and not closely correlated (under 0.7) with a member.
+   * Read on the days of the unseen stretch every member has. The team is
+   * chosen on that same stretch, so its numbers flatter it a little; the
+   * forward test is the judge.
+   */
+  team(): Team | null {
+    if (this.teamCache) return this.teamCache;
+    const live = this.survivors
+      .filter((s) => s.stage !== "faded" && s.daily && s.daily.r.length >= 45)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 25);
+    if (live.length < 2) return null;
+    const cut = (ms: Survivor[]): number[][] | null => {
+      const a = Math.max(...ms.map((m) => m.daily!.d0));
+      const b = Math.min(...ms.map((m) => m.daily!.d0 + m.daily!.r.length - 1));
+      if (b - a + 1 < 45) return null;
+      return ms.map((m) => m.daily!.r.slice(a - m.daily!.d0, b - m.daily!.d0 + 1));
+    };
+    const mean = (x: number[]) => x.reduce((p, q) => p + q, 0) / x.length;
+    const sdOf = (x: number[]) => {
+      const m = mean(x);
+      return Math.sqrt(x.reduce((p, q) => p + (q - m) ** 2, 0) / x.length);
+    };
+    const corr = (x: number[], y: number[]) => {
+      const mx = mean(x);
+      const my = mean(y);
+      let sxy = 0;
+      let sxx = 0;
+      let syy = 0;
+      for (let i = 0; i < x.length; i++) {
+        sxy += (x[i] - mx) * (y[i] - my);
+        sxx += (x[i] - mx) ** 2;
+        syy += (y[i] - my) ** 2;
+      }
+      return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0;
+    };
+    const stat = (ms: Survivor[]) => {
+      const xs = cut(ms);
+      if (!xs) return null;
+      const sds = xs.map(sdOf);
+      if (sds.some((v) => !(v > 0))) return null;
+      const iv = sds.map((v) => 1 / v);
+      const tot = iv.reduce((p, q) => p + q, 0);
+      const w = iv.map((v) => v / tot);
+      const port = xs[0].map((_, i) => xs.reduce((p, x, k) => p + w[k] * x[i], 0));
+      const sd = sdOf(port);
+      let eq = 1;
+      let peak = 1;
+      let dd = 0;
+      for (const r of port) {
+        eq *= 1 + r;
+        peak = Math.max(peak, eq);
+        dd = Math.max(dd, 1 - eq / peak);
+      }
+      let cs = 0;
+      let ck = 0;
+      let cmax = 0;
+      for (let i = 0; i < xs.length; i++)
+        for (let j = i + 1; j < xs.length; j++) {
+          const c = corr(xs[i], xs[j]);
+          cs += c;
+          ck++;
+          cmax = Math.max(cmax, c);
+        }
+      const each = xs.map((x) => {
+        const v = sdOf(x);
+        let e = 1;
+        let pk = 1;
+        let d = 0;
+        for (const r of x) {
+          e *= 1 + r;
+          pk = Math.max(pk, e);
+          d = Math.max(d, 1 - e / pk);
+        }
+        return { sharpe: v > 0 ? (mean(x) / v) * Math.sqrt(365) : 0, maxDD: d };
+      });
+      return {
+        w,
+        sharpe: sd > 0 ? (mean(port) / sd) * Math.sqrt(365) : 0,
+        maxDD: dd,
+        ret: mean(port) * 365,
+        corr: ck ? cs / ck : 0,
+        cmax,
+        days: port.length,
+        each,
+      };
+    };
+    let best: { ms: Survivor[]; st: NonNullable<ReturnType<typeof stat>> } | null = null;
+    // every survivor in turn as the first member; the best team found is kept
+    for (const seed of live.slice(0, 8)) {
+      const ms = [seed];
+      let cur = stat(ms);
+      // a team is built only from members that made money on the days it is read on
+      if (!cur || !(cur.sharpe > 0)) continue;
+      while (ms.length < 5) {
+        let add: { c: Survivor; st: NonNullable<ReturnType<typeof stat>> } | null = null;
+        for (const c of live) {
+          if (ms.includes(c) || ms.some((m) => familyOf(m.flow) === familyOf(c.flow))) continue;
+          const st = stat([...ms, c]);
+          if (!st || st.cmax >= 0.7 || st.each.some((e) => !(e.sharpe > 0))) continue;
+          if (st.sharpe > (add?.st.sharpe ?? cur.sharpe * 1.03)) add = { c, st };
+        }
+        if (!add) break;
+        ms.push(add.c);
+        cur = add.st;
+      }
+      if (ms.length >= 2 && (!best || cur.sharpe > best.st.sharpe)) best = { ms: [...ms], st: cur };
+    }
+    if (!best) return null;
+    const { ms, st } = best;
+    const top = st.each.reduce((a, b, i) => (b.sharpe > st.each[a].sharpe ? i : a), 0);
+    this.teamCache = {
+      members: ms.map((m, i) => ({
+        id: m.id,
+        name: m.name,
+        weight: st.w[i],
+        sharpe: st.each[i].sharpe,
+        flow: m.flow,
+        tfH: m.tfH,
+        coins: m.coins,
+        stage: m.stage,
+        sig: m.sig,
+        oos: { sharpe: m.oos.sharpe, t: m.oos.t, trades: m.oos.trades },
+        dsr: m.dsr,
+      })),
+      sharpe: st.sharpe,
+      maxDD: st.maxDD,
+      ret: st.ret,
+      corr: st.corr,
+      days: st.days,
+      solo: {
+        name: ms[top].name,
+        sharpe: st.each[top].sharpe,
+        maxDD: st.each[top].maxDD,
+      },
+    };
+    return this.teamCache;
+  }
+
   rate(): number {
     const t = this.stamps;
     if (t.length < 2) return 0;
@@ -1197,12 +1898,17 @@ export class Farm {
       dataAt: this.dataAt,
       note,
       error,
+      entrants: this.funnel.trained,
+      pbo: this.overfit(),
+      niches: this.archive.size,
+      blocks: this.blocks(),
+      team: this.team(),
     };
   }
 
   save(): FarmSave {
     return {
-      v: 1,
+      v: 2,
       cfg: this.cfg,
       gen: this.gen,
       tried: this.tried,
@@ -1212,6 +1918,13 @@ export class Farm {
       seen: [...this.seen.keys()].slice(-5000),
       startedAt: this.startedAt,
       recent: this.recent,
+      stats: Object.fromEntries(
+        [...this.stats.entries()].map(([k, v]) => [k, [v.n, v.pass, v.surv]]),
+      ),
+      archive: [...this.archive.values()]
+        .sort((a, b) => b.fit - a.fit)
+        .slice(0, 80),
+      pbo: this.pboHist,
     };
   }
 
@@ -1231,6 +1944,15 @@ export class Farm {
     for (const x of this.pop) this.seen.delete(x.key);
     this.startedAt = s.startedAt ?? this.startedAt;
     this.recent = s.recent ?? [];
+    for (const [k, v] of Object.entries(s.stats ?? {}))
+      if (Array.isArray(v))
+        this.stats.set(k, { n: v[0] ?? 0, pass: v[1] ?? 0, surv: v[2] ?? 0 });
+    for (const a of s.archive ?? [])
+      if (a?.flow && Number.isFinite(a.fit))
+        this.archive.set(nicheOf(a.flow), { flow: a.flow, fit: a.fit });
+    this.pboHist = (s.pbo ?? []).filter(Number.isFinite).slice(-5);
+    // an earlier version called a survivor significant at t ≥ 2: every one is ranked again, allowing for every bot tried
+    this.rank();
   }
 }
 
@@ -1249,9 +1971,9 @@ export function ladderOf(s: Pick<Survivor, "forward" | "oos">): Ladder {
   return f.ret > 0 ? "proven" : "faded";
 }
 
-/** the leaderboard score: the unseen Sharpe, worth more when it survived its nudges well, beat more random bots, and traded enough; fresh data counts on top */
+/** the leaderboard score: the unseen Sharpe, worth more when it survived its nudges well, beat more random bots, traded enough and kept its edge at double costs; fresh data counts on top */
 export function scoreOf(
-  s: Pick<Survivor, "oos" | "nudge" | "beat" | "forward">,
+  s: Pick<Survivor, "oos" | "nudge" | "beat" | "forward" | "checks">,
 ): number {
   const nudge = s.nudge.tried ? s.nudge.kept / s.nudge.tried : 0;
   let v =
@@ -1259,9 +1981,34 @@ export function scoreOf(
     (0.5 + 0.5 * nudge) *
     Math.min(1, s.oos.trades / 30) *
     (0.75 + 0.25 * ((s.beat - 75) / 25));
+  // an edge that mostly survives double costs is worth more than one that barely does
+  if (s.checks && s.oos.sharpe > 0)
+    v *= 0.7 + 0.3 * Math.max(0, Math.min(1, s.checks.cost2 / s.oos.sharpe));
   if (s.forward && s.forward.trades >= 5)
     v += 0.5 * Math.max(-2, Math.min(3, s.forward.sharpe));
   return v;
 }
 
 export const farmKey = keyOf;
+export const farmNiche = nicheOf;
+
+/** a bar-by-bar return series as one return a day (UTC), for comparing strategies of different paces */
+export function dailyOf(
+  rets: ArrayLike<number>,
+  times: ArrayLike<number>,
+): { d0: number; r: number[] } | undefined {
+  let d0 = Infinity;
+  let d1 = -Infinity;
+  for (let i = 0; i < times.length; i++)
+    if (times[i]) {
+      const d = Math.floor(times[i] / 86_400_000);
+      if (d < d0) d0 = d;
+      if (d > d1) d1 = d;
+    }
+  if (!Number.isFinite(d0)) return undefined;
+  const r = new Array<number>(d1 - d0 + 1).fill(0);
+  for (let i = 0; i < times.length; i++)
+    if (times[i] && Number.isFinite(rets[i]))
+      r[Math.floor(times[i] / 86_400_000) - d0] += rets[i];
+  return { d0, r: r.map((x) => Math.round(x * 1e6) / 1e6) };
+}

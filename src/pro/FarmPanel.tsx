@@ -1,13 +1,22 @@
 // FARM — the edge finder: a strategy farm that runs by itself while the
 // terminal is open. Bots are bred from the bot builder's blocks, trained on
-// the first 70 % of the history, and must survive the unseen 30 %, 100 random
-// bots, their settings nudged, 1,000 shuffles and a significance test. The
-// survivors are forward-tested on fresh data; the best five are here, ready to
-// open in the bot builder or deploy to the crypto swarm — the user's call.
+// the first 70 % of the history, and must survive the unseen 30 %, the
+// steadiness and double-cost checks, 100 random bots, their settings nudged,
+// 1,000 shuffles and a significance test that allows for every bot tried. The
+// survivors are forward-tested on fresh data; the best five are here, with
+// the team that fits together best, what the search has learned and how
+// overfit it is — ready to open in the bot builder or deploy to the crypto
+// swarm, which is the user's call.
 import { useEffect, useMemo, useState } from "react";
 import { desktop, type FarmView } from "../desktop/bridge";
 import { sendToBot } from "../lab/bridge";
-import { LADDER, STAGES, type FleetItem, type Survivor } from "../lab/farm";
+import {
+  LADDER,
+  STAGES,
+  type FleetItem,
+  type Survivor,
+  type Team,
+} from "../lab/farm";
 import { buildSpec, STYLE_MAP, STYLES, type StyleId } from "../lab/flow";
 import { startLabLink, useLab, type Authority } from "../lab/store";
 import { Popover, type PanelProps } from "../ui/controls";
@@ -153,9 +162,12 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
             edge finder breeds bots from the bot builder’s blocks — the Strategy
             Lab’s rules and the Quant desk’s models — trains each on the first
             70 % of the history, and keeps it only if it survives every check
-            below. It runs by itself while the terminal is open; the best five
-            that are still standing are listed here for you to open, test and
-            deploy.
+            below. It learns which blocks have been working and draws them more
+            often, keeps the best bot of every kind so the search does not
+            collapse onto one idea, and merges survivors into new bots. It runs
+            by itself while the terminal is open; the best five that are still
+            standing are listed here for you to open, test and deploy — with
+            the team of survivors that fit together best.
           </div>
         )}
         <div className="farm-grid">
@@ -200,6 +212,8 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
               {farm.cfg.coins.join(" ")} ·{" "}
               {farm.cfg.styles.map(paceOf).join(", ")}
             </div>
+            <div className="pro-section">THE SEARCH ITSELF</div>
+            <Search farm={farm} explain={c.explain} />
           </div>
         </div>
 
@@ -218,8 +232,8 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
         {farm.watch.length > 0 && (
           <>
             <div className="pro-section">
-              WATCH LIST — PASSED THE FOUR CHECKS, NOT YET SIGNIFICANT;
-              FORWARD-TESTING
+              WATCH LIST — PASSED EVERY CHECK, NOT YET SIGNIFICANT AFTER EVERY
+              BOT TRIED; FORWARD-TESTING
             </div>
             <Table
               rows={farm.watch}
@@ -237,6 +251,29 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
             onMsg={setMsg}
             explain={c.explain}
           />
+        )}
+
+        {farm.team && farm.team.members.length > 1 && (
+          <>
+            <div className="pro-section">
+              THE TEAM — THE SURVIVORS THAT FIT TOGETHER BEST
+            </div>
+            <TeamCard
+              team={farm.team}
+              explain={c.explain}
+              onSel={(id) => all.some((x) => x.id === id) && setSel(id)}
+              onMsg={setMsg}
+            />
+          </>
+        )}
+
+        {(farm.blocks?.length ?? 0) > 0 && (
+          <>
+            <div className="pro-section">
+              WHAT IS WORKING — THE BLOCKS BEHIND THE BOTS THAT GOT FURTHEST
+            </div>
+            <Blocks farm={farm} explain={c.explain} />
+          </>
         )}
 
         {farm.fleet.length > 0 && (
@@ -262,7 +299,7 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
                 <b>
                   {r.at === "proof"
                     ? "survived"
-                    : r.why.startsWith("passed the four")
+                    : r.why.startsWith("passed every check")
                       ? "watch list"
                       : `out at: ${STAGES.find((x) => x.id === r.at)?.name.toLowerCase() ?? r.at}`}
                 </b>
@@ -352,6 +389,9 @@ function Table({
             <th title="The unlucky 1-in-20 drawdown of 1,000 shuffles, at 1 % risk a trade">
               SHUFFLE
             </th>
+            <th title="The chance it is a fluke, allowing for every bot that reached the unseen data (its q-value): under 10 % counts as significant">
+              FLUKE ODDS
+            </th>
             <th title="Since it was found: on candles no test has seen">
               FRESH DATA
             </th>
@@ -382,6 +422,9 @@ function Table({
                 {s.nudge.kept}/{s.nudge.tried}
               </td>
               <td className="mono">{pct(s.mc.dd95, 0)}</td>
+              <td className={`mono ${s.sig ? "up" : "muted"}`}>
+                {s.q === undefined ? "—" : s.q < 0.001 ? "<0.1%" : pct(s.q, s.q < 0.1 ? 1 : 0)}
+              </td>
               <td
                 className={`mono ${s.forward && s.forward.trades ? (s.forward.ret >= 0 ? "up" : "down") : "muted"}`}
               >
@@ -425,6 +468,20 @@ function Detail({
       value: `Sharpe ${num(s.oos.sharpe)} · ${pct(s.oos.totalReturn)} · ${s.oos.trades} trades · win rate ${pct(s.oos.winRate, 0)}`,
       pass: true,
     },
+    ...(s.checks
+      ? [
+          {
+            name: "Steady",
+            value: `in profit in ${s.checks.thirds} of 3 thirds of the unseen stretch · on ${s.checks.coinsUp} of ${s.checks.coins} coin${s.checks.coins === 1 ? "" : "s"} · ${s.checks.noBest >= 0 ? "+" : ""}${num(s.checks.noBest, 1)} R without its best 5 % of trades`,
+            pass: true,
+          },
+          {
+            name: "Double costs",
+            value: `Sharpe ${num(s.checks.cost2)} at twice the fees and slippage (${num(s.oos.sharpe)} at normal costs)`,
+            pass: s.checks.cost2 > 0,
+          },
+        ]
+      : []),
     {
       name: "100 random bots",
       value: `beat ${s.beat} of 100`,
@@ -442,7 +499,7 @@ function Detail({
     },
     {
       name: "Significant",
-      value: `t = ${num(s.oos.t)} (needs 2) · chance it is real after ${int(s.tried)} bots tried: ${pct(s.dsr, 0)}`,
+      value: `t = ${num(s.oos.t)} · odds it is a fluke, allowing for every bot that reached the unseen data: ${s.q === undefined ? "—" : s.q < 0.001 ? "under 0.1 %" : pct(s.q, 1)} (under 10 % counts)${s.sig ? "" : " — the bar rises as more bots are tried; fresh data can still prove it"}`,
       pass: s.sig,
     },
     {
@@ -600,6 +657,262 @@ function Detail({
           UTC. It has passed every test on history; fresh candles will show
           whether it keeps working. Deploying now is your call — many traders
           wait for “proving”.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** the search itself: how overfit it is, how many kinds of bot it keeps, how many reached the unseen data */
+function Search({ farm, explain }: { farm: FarmView; explain: boolean }) {
+  const p = farm.pbo;
+  const has = typeof p === "number" && Number.isFinite(p);
+  const tone = !has ? "muted" : p! < 0.25 ? "up" : p! < 0.5 ? "warn" : "down";
+  const word = !has
+    ? "not measured yet"
+    : p! < 0.25
+      ? "low — the bots that train best tend to stay ahead on other data"
+      : p! < 0.5
+        ? "moderate — training rank carries over only partly"
+        : "high — the best bot in training is no better than the rest on other data: there may be no edge to find in these coins and paces";
+  return (
+    <div className="farm-search" data-search>
+      <div className="farm-meter" title="Probability of backtest overfitting (Bailey, Borwein, López de Prado & Zhu 2017), by combinatorially symmetric cross-validation over the latest bots that made money in training">
+        <span>Overfit meter</span>
+        <span className="farm-bar">
+          <i className={tone} style={{ width: `${has ? Math.max(2, p! * 100) : 0}%` }} />
+        </span>
+        <b className={`mono ${tone}`}>{has ? pct(p!, 0) : "—"}</b>
+      </div>
+      <div className="lab-line">
+        <span className={tone}>{word}</span>
+      </div>
+      <div className="lab-kv mono">
+        <span>{int(farm.niches ?? 0)} kinds of bot kept</span>
+        <span>{int(farm.entrants ?? farm.funnel.trained)} reached the unseen data</span>
+        <span>{int(farm.survivors)} survivors held</span>
+      </div>
+      {explain && (
+        <div className="lab-line muted">
+          The meter cuts the training years into eight stretches and asks, for
+          every way of splitting them in half: does the bot that did best on
+          one half stay in the top half on the other? The share of splits where
+          it does not is the reading — near 50 % or more means the search is
+          fitting noise. The significance bar for the top five rises with
+          every bot that reaches the unseen data, so a long search cannot talk
+          itself into a fluke.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** the blocks the farm has learned are working: it draws these more often */
+function Blocks({ farm, explain }: { farm: FarmView; explain: boolean }) {
+  const rows = farm.blocks ?? [];
+  const KIND: Record<string, string> = {
+    strategy: "Strategy",
+    model: "Market model",
+    join: "How rules are joined",
+    risk: "Risk",
+  };
+  return (
+    <div className="farm-wide" data-blocks>
+      <table className="pro-table compact farm-blocks">
+        <thead>
+          <tr>
+            <th className="l">BLOCK</th>
+            <th className="l">KIND</th>
+            <th title="Bots tried with this block">TRIED</th>
+            <th title="Of those, how many trained well enough to face the gauntlet">
+              FACED THE GAUNTLET
+            </th>
+            <th title="Of those, how many survived every check">SURVIVED</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((b) => (
+            <tr key={`${b.kind}:${b.id}`}>
+              <td className="l b">{b.name}</td>
+              <td className="l muted">{KIND[b.kind] ?? b.kind}</td>
+              <td className="mono">{int(b.tried)}</td>
+              <td className="mono">
+                {int(b.passed)} · {pct(b.passed / Math.max(1, b.tried), 0)}
+              </td>
+              <td className={`mono ${b.survived ? "up b" : "muted"}`}>
+                {int(b.survived)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {explain && (
+        <div className="lab-line muted">
+          The farm keeps count for every block and draws the ones that keep
+          producing good bots more often. A block that has produced nothing is
+          drawn less, never dropped: what fails alone may work in a combination
+          not tried yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** the team: survivors that fit together as one portfolio */
+function TeamCard({
+  team,
+  explain,
+  onSel,
+  onMsg,
+}: {
+  team: Team;
+  explain: boolean;
+  onSel: (id: string) => void;
+  onMsg: (m: string) => void;
+}) {
+  const [authority, setAuthority] = useState<Authority>("council");
+  const [busy, setBusy] = useState(false);
+  const deployed = useLab((s) => s.status?.deployed ?? []);
+  const live = (name: string) => deployed.some((d) => d.name === name);
+  const left = team.members.filter((m) => !live(m.name));
+  const deployAll = async () => {
+    if (!desktop?.lab || !left.length) return;
+    if (
+      !confirm(
+        `Deploy these ${left.length} strategies to the crypto swarm?\n\n${left.map((m) => `• ${m.name}`).join("\n")}\n\nEach trades on its own; the swarm’s risk rules size every trade. You can switch any of them off under DEPL.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      for (const m of left) {
+        const built = buildSpec(m.flow);
+        await desktop.lab.deploy(
+          {
+            spec: { ...built.spec, name: m.name },
+            tfH: m.tfH,
+            stats: {
+              sharpe: m.oos.sharpe,
+              t: m.oos.t,
+              dsr: m.dsr,
+              trades: m.oos.trades,
+              verdict: `edge finder · team · ${m.stage}`,
+            },
+            authority,
+          },
+          { crypto: true, meme: false },
+          m.coins,
+        );
+      }
+      onMsg(
+        `Deployed the team (${left.length} strateg${left.length === 1 ? "y" : "ies"}) to the crypto swarm. The edge finder watches each on fresh data in “The live fleet”.`,
+      );
+    } catch (e) {
+      onMsg(String((e as Error)?.message ?? e));
+    }
+    setBusy(false);
+  };
+  const lift = team.solo.sharpe > 0 ? team.sharpe / team.solo.sharpe - 1 : NaN;
+  return (
+    <div className="farm-team" data-team>
+      <div className="farm-team-stats">
+        <div>
+          <small>TOGETHER · SHARPE</small>
+          <b className="mono up">{num(team.sharpe)}</b>
+          <span className="muted">
+            best member alone {num(team.solo.sharpe)}
+            {Number.isFinite(lift) ? ` (${lift >= 0 ? "+" : ""}${pct(lift, 0)})` : ""}
+          </span>
+        </div>
+        <div>
+          <small>WORST DROP</small>
+          <b className="mono down">{pct(-team.maxDD)}</b>
+          <span className="muted">best member alone {pct(-team.solo.maxDD)}</span>
+        </div>
+        <div>
+          <small>A YEAR</small>
+          <b className={`mono ${team.ret >= 0 ? "up" : "down"}`}>{pct(team.ret, 0)}</b>
+          <span className="muted">at the members’ tested sizes</span>
+        </div>
+        <div>
+          <small>MOVE TOGETHER</small>
+          <b className="mono">{num(team.corr)}</b>
+          <span className="muted">average correlation · {int(team.days)} days</span>
+        </div>
+      </div>
+      <table className="pro-table compact farm-team-table">
+        <thead>
+          <tr>
+            <th className="l">MEMBER</th>
+            <th className="l">PACE</th>
+            <th title="Its share of the team’s risk: inverse volatility, so each member carries the same risk">
+              SHARE OF RISK
+            </th>
+            <th title="Its Sharpe ratio alone, on the team’s days">ALONE</th>
+            <th className="l">STAGE</th>
+            <th className="l" />
+          </tr>
+        </thead>
+        <tbody>
+          {team.members.map((m) => (
+            <tr key={m.id} onClick={() => onSel(m.id)} data-member={m.id}>
+              <td className="l b farm-name" title={m.name}>
+                {m.name.split(" · ").slice(0, 2).join(" · ")}
+              </td>
+              <td className="l muted">{paceOf(m.flow.style)}</td>
+              <td className="mono">
+                <span className="farm-share">
+                  <i style={{ width: `${m.weight * 100}%` }} />
+                </span>{" "}
+                {pct(m.weight, 0)}
+              </td>
+              <td className="mono">{num(m.sharpe)}</td>
+              <td className={`l ${STAGE_TONE[m.stage] ?? ""}`}>
+                {LADDER.find((l) => l.id === m.stage)?.name ?? m.stage}
+                {m.sig ? "" : " · watch list"}
+              </td>
+              <td className="l">
+                {live(m.name) ? (
+                  <span className="up">✓ deployed</span>
+                ) : (
+                  <button
+                    className="btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      sendToBot({ block: "flow", id: "flow", from: "the edge finder", flow: m.flow, name: m.name });
+                      onMsg(`Opened “${m.name}” in the bot builder (BOT).`);
+                    }}
+                  >
+                    Open
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="farm-actions">
+        <span className="muted">Who decides their trades:</span>
+        <button className={`chip${authority === "council" ? " active" : ""}`} onClick={() => setAuthority("council")}>
+          Council decides
+        </button>
+        <button className={`chip${authority === "tested" ? " active" : ""}`} onClick={() => setAuthority("tested")}>
+          Trade as tested
+        </button>
+        <button className="btn bb2-primary farm-team-deploy" disabled={busy || !left.length} onClick={() => void deployAll()}>
+          {!left.length ? "✓ The team is deployed" : `⇢ Deploy the team (${left.length})`}
+        </button>
+      </div>
+      {explain && (
+        <div className="lab-line muted">
+          Strategies that make money at different times smooth each other out:
+          together they earn more for the same risk than the best of them alone.
+          The farm starts from a strong survivor and adds, one at a time, the
+          survivor that lifts the combined result most — never two of the same
+          kind, never two that move as one. Each member’s share is set so all
+          carry the same risk. The team is picked on the same unseen stretch its
+          numbers are read on, so they flatter it a little: the forward test on
+          fresh data is the judge, and deploying it is your call.
         </div>
       )}
     </div>

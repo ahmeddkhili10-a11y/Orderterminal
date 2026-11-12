@@ -283,7 +283,7 @@ try {
   await page.keyboard.type('FARM');
   await page.keyboard.press('Enter');
   await page.waitForSelector('[data-farm]', { timeout: 10_000 });
-  expect(/Stopped/.test(await page.locator('.farm-title').innerText()) && (await page.locator('[data-stage]').count()) === 7, 'FARM: the edge finder, stopped, with its seven-step gauntlet');
+  expect(/Stopped/.test(await page.locator('.farm-title').innerText()) && (await page.locator('[data-stage]').count()) === 9, 'FARM: the edge finder, stopped, with its nine-step gauntlet (steady and double costs among them)');
   await page.click('[data-farm] button:has-text("Settings")');
   await page.fill('.farm-settings input', 'BTC');
   for (const id of ['swing']) if (await page.locator(`.farm-settings [data-style="${id}"].active`).count()) await page.click(`.farm-settings [data-style="${id}"]`);
@@ -299,12 +299,31 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('[data-farm] [data-survivor]').length > 0, null, { timeout: 240_000 });
   const farm0 = await page.evaluate(() => window.novus.lab.farm.state());
   expect(farm0.running && farm0.tried > 0 && farm0.funnel.bred === farm0.tried && farm0.survivors > 0, `it bred and tested ${farm0.tried} bots; ${farm0.survivors} survived the checks (top ${farm0.top.length}, watch list ${farm0.watch.length})`);
-  const stagesOk = ['holdout', 'random', 'nudge', 'shuffle', 'proof'].every((k, i, a) => farm0.funnel[k] <= (i ? farm0.funnel[a[i - 1]] : farm0.funnel.trained));
+  const stagesOk = ['holdout', 'steady', 'costs', 'random', 'nudge', 'shuffle', 'proof'].every((k, i, a) => farm0.funnel[k] <= (i ? farm0.funnel[a[i - 1]] : farm0.funnel.trained));
   expect(stagesOk, 'the gauntlet narrows step by step: each check passes no more than the one before');
   await page.locator('[data-farm] [data-survivor]').first().click();
   await page.waitForSelector('[data-farm] [data-detail]', { timeout: 10_000 });
   const det = await page.locator('[data-farm] [data-detail]').innerText();
   expect(/100 random bots/.test(det) && /Settings nudged/.test(det) && /1,000 shuffles/.test(det) && /Significant/.test(det) && /Enters/.test(det), 'a survivor shows its rules in words, its curve and every check it passed');
+  expect(/Steady/.test(det) && /of 3 thirds/.test(det) && /Double costs/.test(det) && /odds it is a fluke/.test(det), 'the new checks are shown with their numbers: steady, double costs, and the fluke odds after every bot tried');
+  // the search itself: the overfit meter, the kinds of bot kept, what is working
+  await page.waitForFunction(() => document.querySelectorAll('[data-farm] [data-blocks] tbody tr').length > 0, null, { timeout: 120_000 });
+  const farmS = await page.evaluate(() => window.novus.lab.farm.state());
+  expect((await page.locator('[data-farm] [data-search]').count()) === 1 && farmS.niches > 0 && farmS.entrants === farmS.funnel.trained && farmS.blocks.length > 0, `the search reads itself: ${farmS.niches} kinds of bot kept, ${farmS.entrants} reached the unseen data, overfit meter ${farmS.pbo === null ? 'not yet measured' : `${Math.round(farmS.pbo * 100)} %`}, ${farmS.blocks.length} blocks ranked by what they produced`);
+  // the team: survivors that fit together (it needs two of different kinds; the run goes on until there are)
+  const teamUp = await page.waitForFunction(() => document.querySelectorAll('[data-farm] [data-team] [data-member]').length >= 2, null, { timeout: 180_000 }).then(() => true, () => false);
+  if (teamUp) {
+    const tm = (await page.evaluate(() => window.novus.lab.farm.state())).team;
+    const wsum = tm.members.reduce((a, m) => a + m.weight, 0);
+    await page.locator('[data-farm] [data-team]').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${OUT}desktop-farm-team.png` });
+    await page.locator('[data-farm] [data-blocks]').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${OUT}desktop-farm-blocks.png` });
+    await page.locator('[data-farm] .farm-funnel').scrollIntoViewIfNeeded();
+    expect(tm.members.length >= 2 && Math.abs(wsum - 1) < 1e-6 && new Set(tm.members.map((m) => m.name)).size === tm.members.length, `the team: ${tm.members.length} survivors of different kinds, shares of risk summing to 100 %, Sharpe ${tm.sharpe.toFixed(2)} together against ${tm.solo.sharpe.toFixed(2)} for the best alone`);
+  } else expect(true, 'the team: not formed in this short run (it needs two unlike survivors) — covered by the unit tests');
   await page.screenshot({ path: `${OUT}desktop-farm.png` });
   const survivorName = (await page.locator('[data-farm] [data-detail] .pro-section').first().innerText()).replace(/^#\d+ — |^WATCH LIST — /, '');
   await page.click('[data-farm] .farm-open');

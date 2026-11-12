@@ -6730,3 +6730,21 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
 .ask-kv td.l { width: 46%; }
 .ask-kv td.mono { white-space: normal; overflow-wrap: anywhere; }
 .ask-chart .pro-chart-legend { display: flex; flex-wrap: wrap; gap: 14px; }
+
+/* ---------- edge finder: the search, the team, the blocks ---------- */
+.farm-search { padding: 4px 10px 6px; display: flex; flex-direction: column; gap: 3px; }
+.farm-meter { display: grid; grid-template-columns: 110px minmax(80px, 1fr) 54px; align-items: center; gap: 10px; font-size: 12px; }
+.farm-meter .farm-bar i.up { background: var(--buy); }
+.farm-meter .farm-bar i.warn { background: var(--warn); }
+.farm-meter .farm-bar i.down { background: var(--sell); }
+.farm-team { margin: 2px 10px 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--pro-head, var(--accent)) 40%, transparent); border-radius: 10px; }
+.farm-team-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+@media (max-width: 900px) { .farm-team-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.farm-team-stats > div { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; }
+.farm-team-stats small { font-size: 10px; letter-spacing: 0.1em; color: var(--muted); }
+.farm-team-stats b { font-size: 18px; }
+.farm-team-stats span { font-size: 11px; }
+.farm-team-table tbody tr { cursor: pointer; }
+.farm-share { display: inline-block; width: 60px; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--text) 8%, transparent); vertical-align: middle; overflow: hidden; }
+.farm-share i { display: block; height: 100%; background: var(--pro-head, var(--accent)); }
+.farm-blocks td.l.b { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

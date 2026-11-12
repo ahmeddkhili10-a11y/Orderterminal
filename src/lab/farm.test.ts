@@ -1,10 +1,15 @@
 // The edge finder: bots bred from the bot builder's blocks, trained on the
-// first 70 %, and only kept if they survive the holdout, 100 random bots,
-// their settings nudged and 1,000 shuffles — then forward-tested on fresh data.
+// first 70 %, and only kept if they survive the holdout, the steadiness and
+// double-cost checks, 100 random bots, their settings nudged and 1,000
+// shuffles — then ranked for significance allowing for every bot tried,
+// forward-tested on fresh data, and put together as a team.
 import { describe, expect, it } from 'vitest';
 import { checkFlow, buildSpec, FLOW_DEFAULT, type Flow } from './flow';
-import { Farm, farmKey, ladderOf, scoreOf, STAGES, type Survivor } from './farm';
-import type { Market } from './library';
+import { dailyOf, Farm, farmKey, farmNiche, ladderOf, scoreOf, STAGES, type FarmSave, type Survivor } from './farm';
+import { COSTS } from './backtest';
+import { ctxOf, type Market } from './library';
+import { runAll, withBench } from './research';
+import { perf } from './stats';
 import { rngOf } from './ml';
 
 const HOUR = 3_600_000;
@@ -53,6 +58,43 @@ describe('breeding', () => {
       expect([a.strategies.join(), b.strategies.join()]).toContain(c.strategies.join());
     }
   });
+  it('a mutation never empties a bot, and merging two bots joins the strategies of both', () => {
+    const a = flow({ strategies: ['tsmom', 'donchian'], combine: 'all' });
+    for (let i = 0; i < 80; i++) {
+      const m = farm.mutate(a);
+      expect(m.strategies.length).toBeGreaterThanOrEqual(1);
+      expect(m.strategies.length).toBeLessThanOrEqual(3);
+      expect(new Set(m.strategies).size).toBe(m.strategies.length);
+    }
+    const x = flow({ strategies: ['tsmom'], models: ['trend'] });
+    const y = flow({ strategies: ['volbrk'], tunes: { 'strategy:volbrk': { n: 4 } } });
+    let merged = 0;
+    for (let i = 0; i < 20; i++) {
+      const m = farm.merge(x, y);
+      expect(checkFlow(m).some((f) => f.tone === 'clash')).toBe(false);
+      if (m.strategies.length === 2) {
+        merged++;
+        expect([...m.strategies].sort()).toEqual(['tsmom', 'volbrk']);
+        expect(m.tunes?.['strategy:volbrk']).toEqual({ n: 4 });
+        expect([x.models.join(), y.models.join()]).toContain(m.models.join());
+      }
+    }
+    expect(merged).toBeGreaterThan(10);
+    // a trend rule merged with a dip rule is joined by the regime switch or by “all must agree” — never a clash
+    const z = farm.merge(flow({ strategies: ['tma'] }), flow({ strategies: ['rsi2'] }));
+    if (z.strategies.length === 2) expect(['switch', 'all']).toContain(z.combine);
+  });
+  it('the order of the strategies only matters for “setup, then trigger”; the kind of a bot is its pace, families and sides', () => {
+    const ab = flow({ strategies: ['donchian', 'volbrk'], combine: 'all' });
+    const ba = flow({ strategies: ['volbrk', 'donchian'], combine: 'all' });
+    expect(farmKey(ab)).toBe(farmKey(ba));
+    expect(farmKey({ ...ab, combine: 'then' })).not.toBe(farmKey({ ...ba, combine: 'then' }));
+    // one strategy: how it would be joined is no difference
+    expect(farmKey(flow({ strategies: ['tsmom'], combine: 'all' }))).toBe(farmKey(flow({ strategies: ['tsmom'], combine: 'any' })));
+    expect(farmNiche(flow({ strategies: ['tsmom'] }))).toBe(farmNiche(flow({ strategies: ['vsmom'], stopWidth: 'wide' })));
+    expect(farmNiche(flow({ strategies: ['tsmom'] }))).not.toBe(farmNiche(flow({ strategies: ['zrev'] })));
+    expect(farmNiche(flow({ strategies: ['tsmom'] }))).not.toBe(farmNiche(flow({ strategies: ['tsmom'], sides: 'long' })));
+  });
   it('nudges every setting one step each way', () => {
     const n = farm.neighbours(flow({ strategies: ['tsmom'], stopWidth: 'normal', hold: 'normal', takeProfit: 'r2', tunes: { 'strategy:tsmom': { lookback: 72 } } }));
     const looks = n.map((x) => buildSpec(x).spec.signal.p.lookback).filter((v) => v !== 72);
@@ -76,6 +118,69 @@ describe('training never reads the unseen data', () => {
   });
 });
 
+describe('the training score', () => {
+  it('a bot carried by one half of the training years scores well below its Sharpe ratio', () => {
+    // a trend through the first 2,000 hours only; the training bars are the first 4,200
+    const g = gauss(rngOf(17));
+    const mk = (coin: string, seed: number): Market => {
+      const h = gauss(rngOf(seed));
+      let p = 100;
+      let mu = 0;
+      const bars = Array.from({ length: 6000 }, (_, i) => {
+        mu = i < 2000 ? 0.997 * mu + 3 * 0.00045 * h() : 0;
+        const o = p;
+        p *= Math.exp(mu + 0.005 * h());
+        return { time: Date.UTC(2024, 0, 1) + i * HOUR, open: o, high: Math.max(o, p) * 1.0015, low: Math.min(o, p) * 0.9985, close: p, volume: 100 };
+      });
+      return { coin, tfH: 1, bars, funding: null };
+    };
+    void g;
+    const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
+    farm.setMarkets({ '1h': [mk('BTC', 3), mk('ETH', 4)] });
+    const half = farm.train(flow({ strategies: ['tsmom'], tunes: { 'strategy:tsmom': { lookback: 72 } } }));
+    const whole = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
+    whole.setMarkets(trending());
+    const all = whole.train(flow({ strategies: ['tsmom'], tunes: { 'strategy:tsmom': { lookback: 72 } } }));
+    expect(half.is!.sharpe).toBeGreaterThan(0.5);
+    expect(half.fit).toBeLessThan(0.7 * half.is!.sharpe);
+    // steady through the whole of training: the score stays close to the Sharpe ratio
+    expect(all.fit).toBeGreaterThan(0.6 * all.is!.sharpe);
+    // and it reports the eight stretches the overfit meter reads
+    expect(all.blocks!.length).toBe(8);
+    expect(all.tf).toBe('1h');
+  });
+  it('a learned rule is scored on training bars its model never saw — not on the ones it learned from', () => {
+    const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
+    farm.setMarkets(noise());
+    const f = flow({ strategies: ['rf'], takeProfit: 'r2' });
+    const honest = farm.train(f);
+    // on the bars the forest learned from it looks like an edge; there is none in this market
+    const x = buildSpec(f);
+    const ctxs = withBench(noise()['1h']).map((m, k) => ctxOf(m, Math.floor(m.bars.length * 0.7), 42 + k));
+    const flattered = runAll(ctxs, x.spec, 'is', COSTS);
+    const inSample = perf(flattered.rets, flattered.trades, 24 * 365).sharpe;
+    expect(inSample).toBeGreaterThan(1.5);
+    expect(honest.is ? honest.is.sharpe : -1).toBeLessThan(inSample - 1);
+    expect(honest.fit).toBeLessThan(0.7);
+    // no part of its score reads the unseen 30 %: another future, the same score
+    const cut = Math.floor(6000 * 0.7);
+    const other = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
+    other.setMarkets({ '1h': noise()['1h'].map((m) => ({ ...m, bars: m.bars.map((b, i) => (i >= cut ? { ...b, close: b.close * 0.6, open: b.open * 0.6, high: b.high * 0.6, low: b.low * 0.5 } : b)) })) });
+    expect(other.train(f).fit).toBe(honest.fit);
+  }, 60_000);
+  it('more blocks for the same result score lower', () => {
+    const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
+    farm.setMarkets(trending());
+    const lean = flow({ strategies: ['tsmom'], tunes: { 'strategy:tsmom': { lookback: 72 } } });
+    // the same rule twice over: the second copy changes nothing about the trades
+    const fat = { ...lean, strategies: ['tsmom', 'vsmom'], combine: 'any' as const, risks: ['garchstop'], models: ['weekdays', 'hmm-calm'] };
+    const a = farm.train(lean);
+    const b = farm.train(fat);
+    if (b.is && Math.abs(b.is.sharpe - a.is!.sharpe) < 0.05) expect(b.fit).toBeLessThan(a.fit);
+    expect(a.fit).toBeGreaterThan(0.7);
+  });
+});
+
 describe('the gauntlet', () => {
   it('a trend rule in a trending market survives every check, with the numbers to show it', () => {
     const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
@@ -94,7 +199,59 @@ describe('the gauntlet', () => {
     expect(g.s.curve.length).toBeGreaterThan(50);
     expect(g.s.stage).toBe('new');
     expect(g.s.seenTo).toBe(trending()['1h'][0].bars[5999].time);
+    // the steadiness and cost checks, with their numbers
+    expect(g.s.checks!.thirds).toBeGreaterThanOrEqual(2);
+    expect(g.s.checks!.coinsUp).toBeGreaterThanOrEqual(1);
+    expect(g.s.checks!.noBest).toBeGreaterThan(0);
+    expect(g.s.checks!.cost2).toBeGreaterThan(0);
+    expect(g.s.checks!.cost2).toBeLessThan(g.s.oos.sharpe);
+    expect(g.s.p!).toBeLessThan(0.05);
+    // a return for every day of the unseen stretch (1,800 hours = 75 days)
+    expect(g.s.daily!.r.length).toBeGreaterThanOrEqual(75);
+    expect(Math.abs(g.s.daily!.r.reduce((a, b) => a + b, 0) - Math.log(1 + g.s.oos.totalReturn))).toBeLessThan(0.15);
   });
+
+  it('an edge thinner than its costs is thrown out at the cost check, after it has passed the holdout and the steadiness check', () => {
+    const f = flow({ strategies: ['tsmom'], tunes: { 'strategy:tsmom': { lookback: 72 } }, takeProfit: 'trail', sides: 'both' });
+    // the same bot and the same fees; only the multiple of the costs it must survive differs
+    const at = (stress: number) => {
+      const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2, stress });
+      farm.setMarkets(trending());
+      const g = farm.gauntlet(f, farm.train(f).is!);
+      return g.ok ? 'ok' : `${g.at}: ${g.why}`;
+    };
+    expect(at(2)).toBe('ok');
+    expect(at(40)).toMatch(/^costs: loses at double the fees and slippage/);
+  }, 60_000);
+
+  it('a result carried by one stretch of the unseen data is thrown out as not steady', () => {
+    // trending through training and the first quarter of the unseen stretch, then a choppy market with no trend
+    const mk = (coin: string, seed: number): Market => {
+      const h = gauss(rngOf(seed));
+      let p = 100;
+      let mu = 0;
+      const bars = Array.from({ length: 6000 }, (_, i) => {
+        mu = i < 4700 ? 0.997 * mu + 0.00045 * h() : 0;
+        const o = p;
+        p *= Math.exp(mu + (i < 4700 ? 0.005 : 0.007) * h());
+        return { time: Date.UTC(2024, 0, 1) + i * HOUR, open: o, high: Math.max(o, p) * 1.0015, low: Math.min(o, p) * 0.9985, close: p, volume: 100 };
+      });
+      return { coin, tfH: 1, bars, funding: null };
+    };
+    const stages: string[] = [];
+    for (const [a, b] of [[3, 4], [13, 14], [23, 24], [33, 34], [43, 44], [53, 54]]) {
+      const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
+      farm.setMarkets({ '1h': [mk('BTC', a), mk('ETH', b)] });
+      const f = flow({ strategies: ['tsmom'], tunes: { 'strategy:tsmom': { lookback: 72 } }, takeProfit: 'trail' });
+      const t = farm.train(f);
+      if (!t.is) continue;
+      const g = farm.gauntlet(f, t.is);
+      stages.push(g.ok ? 'ok' : g.at);
+    }
+    // it never survives; it is stopped at the holdout or — when the early run was big enough to pass that — at the steadiness check
+    expect(stages).not.toContain('ok');
+    expect(stages.every((x) => x === 'holdout' || x === 'steady')).toBe(true);
+  }, 60_000);
 
   it('in a market with no edge, almost nothing gets through — and where they fail is recorded', () => {
     const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 9 });
@@ -106,13 +263,17 @@ describe('the gauntlet', () => {
     // each stage holds no more than the one before
     const counts = STAGES.map((s) => st.funnel[s.id]);
     for (let i = 1; i < counts.length; i++) expect(counts[i]).toBeLessThanOrEqual(counts[i - 1]);
-    // the video's four checks let a few lucky ones through when hundreds are tried; significance stops them reaching the top five
+    // the checks let a few lucky ones through when hundreds are tried; significance — allowing for all of them — stops them reaching the top five
     expect(st.funnel.shuffle).toBeLessThanOrEqual(Math.max(3, st.tried * 0.05));
     expect(st.funnel.proof).toBe(0);
     expect(st.top).toEqual([]);
     for (const w of st.watch) expect(w.sig).toBe(false);
     expect(st.gen).toBeGreaterThan(2);
     for (const r of st.recent) expect(r.why.length).toBeGreaterThan(10);
+    // the overfit meter: with no edge to find, the best bot in training is no better than the rest on other data
+    expect(st.entrants).toBe(st.funnel.trained);
+    expect(st.pbo === null || (st.pbo! > 0.3 && st.pbo! <= 1), `pbo ${st.pbo}`).toBe(true);
+    expect(st.niches!).toBeGreaterThan(3);
   }, 60_000);
 
   it('in a trending market the loop finds survivors and keeps a top five of different families', () => {
@@ -200,4 +361,138 @@ describe('it survives a restart', () => {
     for (let i = 0; i < 20; i++) again.step();
     expect(again.tried).toBeGreaterThan(farm.tried);
   }, 60_000);
+});
+
+describe('significance allows for every bot tried', () => {
+  const fake = (id: string, t: number, strategies: string[], extra: Partial<Survivor> = {}): Survivor =>
+    ({ id, key: id, flow: flow({ strategies }), name: id, style: 'intraday', tfH: 1, coins: ['BTC'], foundAt: 0, seenTo: 0, is: { sharpe: 2 }, oos: { sharpe: 2, trades: 40, t, maxDD: 0.05 }, beat: 90, nudge: { kept: 8, tried: 10 }, mc: { dd95: 0.1, pLoss: 0.1 }, periods: { unit: 'month', list: [], up: 1, worst: 0, avg: 0 }, dsr: 0.9, tried: 1, score: 1, forward: null, stage: 'new', summary: [], sig: true, curve: [], split: 0, ...extra }) as unknown as Survivor;
+
+  it('the bar rises with the number of bots that reached the unseen data', () => {
+    const farm = new Farm({ coins: ['BTC'], styles: ['intraday'] }, { seed: 1 });
+    // t of 3.3, 3.0, 2.1 and 0.8: one-sided p of about 0.0005, 0.0013, 0.018 and 0.21
+    farm.survivors = [fake('a', 3.3, ['tsmom']), fake('b', 3.0, ['donchian']), fake('c', 2.1, ['zrev']), fake('d', 0.8, ['macd'])];
+    farm.funnel.trained = 100;
+    farm.rank();
+    expect(farm.survivors.map((s) => s.sig)).toEqual([true, true, false, false]);
+    // q: the false-discovery rate at which each would be called significant
+    expect(farm.survivors[0].q!).toBeCloseTo(0.0484, 2);
+    expect(farm.survivors[1].q!).toBeGreaterThan(farm.survivors[0].q!);
+    expect(farm.survivors[3].q!).toBe(1);
+    expect(farm.top().map((s) => s.id)).toEqual(['a', 'b']);
+    expect(farm.watch().map((s) => s.id).sort()).toEqual(['c', 'd']);
+    expect(farm.state(false).funnel.proof).toBe(2);
+    // ten times as many bots tried: what was significant no longer is — unless it has proved itself on fresh data
+    farm.funnel.trained = 1000;
+    farm.survivors[1].stage = 'proven';
+    farm.rank();
+    expect(farm.survivors.map((s) => s.sig)).toEqual([false, false, false, false]);
+    expect(farm.top().map((s) => s.id)).toEqual(['b']);
+    // with only a handful tried, t = 2.1 is enough
+    farm.funnel.trained = 4;
+    farm.rank();
+    expect(farm.survivors.map((s) => s.sig)).toEqual([true, true, true, false]);
+  });
+
+  it('a save from before (significant at t ≥ 2) is ranked again when restored', () => {
+    const save: FarmSave = { v: 1, cfg: { coins: ['BTC'], styles: ['intraday'], sides: 'both', pace: 'gentle', maxDD: 0.2 }, gen: 9, tried: 4000, funnel: { bred: 4000, trained: 600, holdout: 30, random: 20, nudge: 12, shuffle: 10, proof: 6 } as FarmSave['funnel'], survivors: [fake('old', 2.2, ['tsmom'])], population: [], seen: [], startedAt: 1, recent: [] };
+    const farm = new Farm(save.cfg, { seed: 1, save: JSON.parse(JSON.stringify(save)) });
+    expect(farm.survivors[0].sig).toBe(false);
+    expect(farm.survivors[0].p!).toBeCloseTo(0.0139, 3);
+    const st = farm.state(false);
+    expect(st.funnel.steady).toBe(0);
+    expect(st.funnel.proof).toBe(0);
+    expect(st.watch.map((s) => s.id)).toEqual(['old']);
+    expect(farm.save().v).toBe(2);
+  });
+
+  it('the team: survivors that fit together, weighted by risk — never two of a kind, never two that move as one', () => {
+    const g = gauss(rngOf(5));
+    // noise with exactly the mean asked for (the draws' own average is taken out)
+    const series = (mu: number, sd: number) => {
+      const e = Array.from({ length: 120 }, () => g());
+      const m = e.reduce((a, b) => a + b, 0) / e.length;
+      return e.map((x) => mu + sd * (x - m));
+    };
+    const A = series(0.002, 0.01);
+    const B = series(0.004, 0.02);
+    const C = A.map((x) => x * 1.01 + 0.00001 * g());
+    const D = series(-0.001, 0.01);
+    const farm = new Farm({ coins: ['BTC'], styles: ['intraday'] }, { seed: 1 });
+    const d = (r: number[], d0 = 20_000) => ({ daily: { d0, r } });
+    farm.survivors = [
+      fake('a', 3, ['tsmom'], { ...d(A), score: 3 }),
+      fake('b', 3, ['zrev'], { ...d(B, 20_010), score: 2 }),
+      fake('c', 3, ['donchian'], { ...d(C), score: 2.5 }),
+      fake('d', 3, ['macd'], { ...d(D), score: 1 }),
+      fake('twin', 3, ['tsmom'], { ...d(series(0.0003, 0.01)), score: 1.5, flow: flow({ strategies: ['tsmom'], stopWidth: 'wide' }) }),
+      fake('gone', 3, ['rsi2'], { ...d(series(0.004, 0.01)), score: 9, stage: 'faded' }),
+    ];
+    const t = farm.team()!;
+    const ids = t.members.map((m) => m.id);
+    expect(ids).toContain('a');
+    expect(ids).toContain('b');
+    // c moves with a; d loses; the twin is the same family as a; the faded one is out
+    expect(ids).not.toContain('c');
+    expect(ids).not.toContain('d');
+    expect(ids).not.toContain('twin');
+    expect(ids).not.toContain('gone');
+    // inverse volatility: a (half as volatile) carries about two thirds
+    const wa = t.members.find((m) => m.id === 'a')!.weight;
+    expect(wa).toBeGreaterThan(0.55);
+    expect(wa).toBeLessThan(0.75);
+    expect(t.members.reduce((x, m) => x + m.weight, 0)).toBeCloseTo(1, 6);
+    // together they beat the best of them alone, on the days both have
+    expect(t.sharpe).toBeGreaterThan(t.solo.sharpe);
+    expect(t.days).toBe(110);
+    expect(Math.abs(t.corr)).toBeLessThan(0.4);
+    expect(farm.state(false).team!.members.length).toBe(t.members.length);
+    // one survivor is no team
+    farm.survivors = farm.survivors.slice(0, 1);
+    farm.rank();
+    expect(farm.team()).toBeNull();
+  });
+
+  it('daily returns from bar returns', () => {
+    const t0 = Date.UTC(2025, 0, 1);
+    const times = Array.from({ length: 72 }, (_, i) => t0 + i * HOUR);
+    const d = dailyOf(times.map(() => 0.001), times)!;
+    expect(d.d0).toBe(Math.floor(t0 / 86_400_000));
+    expect(d.r).toEqual([0.024, 0.024, 0.024]);
+    expect(dailyOf([], [])).toBeUndefined();
+  });
+});
+
+describe('the farm learns which blocks work', () => {
+  it('blocks that keep passing are drawn more often, ones that never do less — but never dropped', () => {
+    const save: FarmSave = { v: 2, cfg: { coins: ['BTC', 'ETH'], styles: ['intraday'], sides: 'both', pace: 'gentle', maxDD: 0.2 }, gen: 1, tried: 400, funnel: { bred: 400, trained: 60, holdout: 0, steady: 0, costs: 0, random: 0, nudge: 0, shuffle: 0, proof: 0 }, survivors: [], population: [], seen: [], startedAt: 1, recent: [], stats: { 'strategy:tsmom': [120, 50, 4], 'strategy:zrev': [120, 0, 0], 'strategy:donchian': [3, 1, 0] } };
+    const farm = new Farm(save.cfg, { seed: 11, save });
+    farm.setMarkets(trending());
+    const count: Record<string, number> = {};
+    for (let i = 0; i < 600; i++) for (const id of farm.randomFlow()!.strategies) count[id] = (count[id] ?? 0) + 1;
+    expect(count.tsmom).toBeGreaterThan(4 * count.zrev);
+    expect(count.zrev).toBeGreaterThan(0);
+    const blocks = farm.blocks();
+    expect(blocks[0]).toMatchObject({ id: 'tsmom', kind: 'strategy', tried: 120, passed: 50, survived: 4 });
+    // too few tries, or nothing passed: not listed yet
+    expect(blocks.some((b) => b.id === 'zrev' || b.id === 'donchian')).toBe(false);
+  });
+
+  it('running it fills the block table, the niches and the overfit meter, and all of it survives a restart', () => {
+    const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 4 });
+    farm.setMarkets(trending());
+    for (let i = 0; i < 260; i++) farm.step();
+    const st = farm.state(true);
+    expect(st.blocks!.length).toBeGreaterThan(2);
+    for (const b of st.blocks!) expect(b.passed).toBeLessThanOrEqual(b.tried);
+    expect(st.niches!).toBeGreaterThan(5);
+    expect(st.pbo).not.toBeNull();
+    // where there IS an edge to find, the best bot in training usually stays ahead on other data
+    expect(st.pbo!, `pbo ${st.pbo}`).toBeLessThan(0.4);
+    const again = new Farm(st.cfg, { seed: 5, save: JSON.parse(JSON.stringify(farm.save())) });
+    again.setMarkets(trending());
+    const st2 = again.state(false);
+    expect(st2.blocks).toEqual(st.blocks);
+    expect(st2.niches).toBe(Math.min(80, st.niches!));
+    expect(st2.pbo).toBeCloseTo(st.pbo!, 9);
+  }, 120_000);
 });

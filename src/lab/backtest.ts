@@ -10,6 +10,7 @@ import { errQuantile } from './garch';
 import type { MetaModel } from './ml';
 import { atr14, barsPerYear, benchBeta, garchOf, garchSigma, EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Ctx, type ExitSpec, type Params } from './library';
 import { volTargetWeight } from './quant';
+import { adx } from './series';
 
 export interface RuleRef {
   id: string;
@@ -21,8 +22,10 @@ export interface StrategySpec {
   signal: RuleRef;
   /** more entry rules, read with `signal` and joined by `combine` (the bot builder's stacked strategies) */
   also?: RuleRef[];
-  /** all: every rule must point the same way · majority: more than half do, none against · any: one does and none disagrees */
+  /** all: every rule must point the same way · majority: more than half do, none against · any: one does and none disagrees · switch: trend rules while the market trends, dip rules while it ranges · then: the first rule sets up, the others trigger within `window` bars */
   combine?: Combine;
+  /** "then": how many bars after the setup the trigger may come */
+  window?: number;
   filters: RuleRef[];
   exit: ExitSpec;
   sides: 'both' | 'long' | 'short';
@@ -48,7 +51,7 @@ export interface StrategySpec {
   /** the split, once tested: coin → share of the money (sums to 1) */
   coinWeights?: Record<string, number>;
 }
-export type Combine = 'all' | 'majority' | 'any';
+export type Combine = 'all' | 'majority' | 'any' | 'switch' | 'then';
 export interface Sizing {
   /** kelly: risk the target fraction of capital per trade at the stop (the target is a half-Kelly fraction found in sample; 0 = find it when tested) */
   mode: 'unit' | 'vol' | 'var' | 'kelly';
@@ -121,8 +124,12 @@ function weightsOf(c: Ctx, s: StrategySpec, z: Sizing | undefined): Float64Array
 export function rawSignal(c: Ctx, s: StrategySpec): Int8Array {
   const first = SIGNAL_MAP[s.signal.id].compute(c, s.signal.p);
   if (!s.also?.length) return first;
+  const refs = [s.signal, ...s.also];
   const all = [first, ...s.also.map((r) => SIGNAL_MAP[r.id].compute(c, r.p))];
-  return combineSignals(all, s.combine ?? 'all');
+  const how = s.combine ?? 'all';
+  if (how === 'switch') return switchSignals(all, refs.map((r) => regimeSide(SIGNAL_MAP[r.id].family)), trendRegime(c));
+  if (how === 'then') return thenSignals(all, s.window ?? Math.max(2, Math.round(12 / c.m.tfH)));
+  return combineSignals(all, how);
 }
 
 export function combineSignals(all: Int8Array[], how: Combine): Int8Array {
@@ -139,6 +146,75 @@ export function combineSignals(all: Int8Array[], how: Combine): Int8Array {
     if (how === 'all') out[i] = up === k ? 1 : dn === k ? -1 : 0;
     else if (how === 'majority') out[i] = up > k / 2 && !dn ? 1 : dn > k / 2 && !up ? -1 : 0;
     else out[i] = up && !dn ? 1 : dn && !up ? -1 : 0;
+  }
+  return out;
+}
+
+/** which market a rule is made for: rules that follow moves trade the trending regime, rules that fade them the ranging one, the rest both */
+export const regimeSide = (family: string): 'trend' | 'range' | 'both' => (family === 'momentum' || family === 'trend' || family === 'breakout' ? 'trend' : family === 'reversion' ? 'range' : 'both');
+
+/**
+ * The market's regime at each bar, from Wilder's ADX with hysteresis: trending
+ * (1) once ADX rises through 25, ranging (0) once it falls through 20, and
+ * unchanged in between — so the regime does not flicker at one threshold.
+ * Known at each bar's close.
+ */
+export function trendRegime(c: Ctx): Uint8Array {
+  const key = 'trendRegime';
+  if (!c.cache.has(key)) {
+    const a = adx(c.m.bars, 14);
+    const out = new Uint8Array(a.length);
+    let r = 0;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] >= 25) r = 1;
+      else if (a[i] <= 20) r = 0;
+      out[i] = r;
+    }
+    c.cache.set(key, out);
+  }
+  return c.cache.get(key) as Uint8Array;
+}
+
+/**
+ * Regime switch: each bar, only the rules made for the market's regime are
+ * read — trend rules while it trends, dip rules while it ranges, the others
+ * always — and those are joined as "any one, unless another disagrees".
+ */
+export function switchSignals(all: Int8Array[], sides: ('trend' | 'range' | 'both')[], regime: Uint8Array): Int8Array {
+  const n = all[0].length;
+  const out = new Int8Array(n);
+  for (let i = 0; i < n; i++) {
+    const want = regime[i] ? 'trend' : 'range';
+    let up = 0;
+    let dn = 0;
+    for (let k = 0; k < all.length; k++) {
+      if (sides[k] !== 'both' && sides[k] !== want) continue;
+      if (all[k][i] > 0) up++;
+      else if (all[k][i] < 0) dn++;
+    }
+    out[i] = up && !dn ? 1 : dn && !up ? -1 : 0;
+  }
+  return out;
+}
+
+/**
+ * Setup, then trigger: the first rule sets the direction; the trade is taken
+ * when the other rules (all of them) point the same way on a bar within
+ * `window` bars of the setup last pointing that way. A breakout and the
+ * volume that confirms it need not land on the same candle.
+ */
+export function thenSignals(all: Int8Array[], window: number): Int8Array {
+  const n = all[0].length;
+  const out = new Int8Array(n);
+  const setup = all[0];
+  const trig = all.length > 2 ? combineSignals(all.slice(1), 'all') : all[1];
+  let lastUp = -Infinity;
+  let lastDn = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (setup[i] > 0) lastUp = i;
+    else if (setup[i] < 0) lastDn = i;
+    if (trig[i] > 0 && i - lastUp <= window && lastUp > lastDn) out[i] = 1;
+    else if (trig[i] < 0 && i - lastDn <= window && lastDn > lastUp) out[i] = -1;
   }
   return out;
 }

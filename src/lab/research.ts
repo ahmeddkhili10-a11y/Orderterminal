@@ -304,7 +304,7 @@ function describeExit(e: ExitSpec, tfH: number): string {
 
 export function rulesOf(s: StrategySpec, tfH: number): string[] {
   const sig = SIGNAL_MAP[s.signal.id];
-  const joined = s.combine === 'any' ? 'or' : s.combine === 'majority' ? 'by majority with' : 'and';
+  const joined = s.combine === 'any' ? 'or' : s.combine === 'majority' ? 'by majority with' : s.combine === 'switch' ? 'switching by regime with' : s.combine === 'then' ? 'then' : 'and';
   return [
     `Entry: ${sig.describe(s.signal.p)}${(s.also ?? []).map((r) => ` ${joined} ${SIGNAL_MAP[r.id].describe(r.p)}`).join('')}${s.sides === 'long' ? ' (longs only)' : s.sides === 'short' ? ' (shorts only)' : ''}`,
     ...s.filters.map((f) => `Filter: ${FILTER_MAP[f.id].describe(f.p)}`),
