@@ -160,7 +160,13 @@ English (tick **Explain** to see what each one does). A block can hold
 2. **Strategies** — every entry rule in the library (trend following,
    breakouts, buy the dip / sell the rip, timing, funding, AI — the neural
    network included). Pick one or several; several are joined: **all must
-   agree**, **majority vote**, or **any one** (unless another disagrees).
+   agree**, **majority vote**, **any one** (unless another disagrees), the
+   **regime switch** (Wilder's ADX with hysteresis — trending once it rises
+   through 25, ranging once it falls through 20: trend, momentum and breakout
+   rules are read only while the market trends, reversion rules only while
+   it ranges, the rest always) or **setup, then trigger** (the first pick
+   sets the direction; the others must confirm it within a quarter of the
+   style's look-back, 2 to 24 candles).
 3. **Market models** — when it may trade: the big trend, ADX trend or range,
    the variance-ratio, Hurst and hidden-Markov regimes, GARCH volatility, calm
    or busy days, volume, trading hours, crowded funding. Every filter picked
@@ -228,6 +234,9 @@ with the US session at 13:00):
 | Opening range breakout | breakout | Zarattini & Aziz (2023); Zarattini, Barbon & Aziz (2024); Crabel (1990) | the first hour or two set a range; trade the first close beyond it for the rest of the day |
 | Intraday momentum beyond the noise | momentum | Zarattini, Aziz & Barbon (2024) | trade a move from the day's open bigger than the average move by that time of day over the last 14 days |
 | Fade a stretched candle | reversion | Kitron & Wengrowicz (2026, preprint); Wen et al. (2022) | after one candle of more than k ATR (on heavy volume), trade against it for an hour |
+| Volatility squeeze breakout | breakout | Bollinger (2001); Crabel (1990); Bollerslev (1986) |
+| ATR trend line (Supertrend) | trend | Wilder (1978); Faith (2007); Hudson & Urquhart (2021) |
+| Relative strength against bitcoin | relative | Liu, Tsyvinski & Wu (2022); Dobrynskaya (2023); Fieberg et al. (2025) |
 
 The first three were published on US index funds and stocks by authors with a
 trading business; the fourth is a crypto preprint whose own finding is that the
@@ -318,7 +327,7 @@ because the swarm already held the coin.
 
 ## The library
 
-Thirty-three entry rules and thirteen filters, each written from its paper:
+Thirty-six entry rules and thirteen filters, each written from its paper:
 
 | Rule | Family | Papers |
 |---|---|---|
