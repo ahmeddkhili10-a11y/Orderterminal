@@ -6777,3 +6777,10 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
 .lock-terms section:first-child b { margin-top: 0; }
 .lock-terms p { margin: 0 0 6px; }
 .lock-key label.lock-check { display: flex; gap: 8px; align-items: flex-start; font: 400 12px/1.5 var(--sans, system-ui); letter-spacing: 0; padding: 0; color: #c7cbd1; text-align: left; max-width: 640px; }
+
+/* first launch: a smaller emblem so the steps fit, and each step appears at once */
+.lock.first-run .lock-emblem { width: min(22vh, 190px); }
+.lock.first-run .lock-center { padding-top: 2vh; gap: 6px; }
+.lock.first-run .lock-title { margin-top: 8px; }
+.lock-key.lock-first { animation: lock-fade 0.45s both; padding-bottom: 7vh; gap: 10px; }
+.lock-terms { height: min(30vh, 270px); width: min(600px, 62vw); }

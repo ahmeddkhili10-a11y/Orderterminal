@@ -25,7 +25,7 @@ describe('ledger key', () => {
   it('ships only a digest, never the key itself', () => {
     const src = readFileSync(new URL('../src/shared/ledger.ts', import.meta.url), 'utf8');
     if (KEY) expect(src).not.toContain(KEY);
-    expect(src).toMatch(/LEDGER_DIGEST = '[0-9a-f]{64}'/);
+    expect(src).toMatch(/LEDGER_DIGEST: string = __NOVUS_EDITION__ === 'commercial' \? '' : '[0-9a-f]{64}'/);
   });
 
   it('lets the owner set their own key; the old one stops working', async () => {

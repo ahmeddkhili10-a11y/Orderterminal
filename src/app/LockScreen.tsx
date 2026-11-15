@@ -181,7 +181,7 @@ export function LockScreen({ onUnlocked, onGone }: { onUnlocked: () => void; onG
   const pct = done ? 100 : Math.round((finished / (total + 2)) * 100);
 
   return (
-    <div className={`lock ${leaving ? 'leaving' : ''}`} onMouseDown={() => setTimeout(() => input.current?.focus(), 0)}>
+    <div className={`lock ${leaving ? 'leaving' : ''} ${step === 'license' || step === 'terms' || step === 'setup' ? 'first-run' : ''}`} onMouseDown={() => setTimeout(() => step === 'unlock' && input.current?.focus(), 0)}>
       <div className="lock-ring">{relocked ? <RunningBar /> : <BootRing />}</div>
       <div className="lock-corner tr">
         {clock.toISOString().slice(0, 19).replace('T', ' ')} UTC · NODE {sid}

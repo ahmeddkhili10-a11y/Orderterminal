@@ -40,7 +40,8 @@ run('node', ['scripts/build-main.mjs']);
 
 // 2 — nothing of the personal edition in it
 const ledgerSrc = readFileSync(join(root, 'src/shared/ledger.ts'), 'utf8');
-const digest = ledgerSrc.match(/LEDGER_DIGEST = '([0-9a-f]{64})'/)?.[1];
+const digest = ledgerSrc.match(/LEDGER_DIGEST[^\n]*'([0-9a-f]{64})'/)?.[1];
+if (!digest) throw new Error('could not find the personal key digest to check for');
 const files = (dir) => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? files(join(dir, f)) : [join(dir, f)]));
 for (const f of [...files(join(root, 'dist')), ...files(join(root, 'dist-electron'))]) {
   if (f.endsWith('.map')) throw new Error(`a source map was built (${f}) — the commercial edition ships none`);
