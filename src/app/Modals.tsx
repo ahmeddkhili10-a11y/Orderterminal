@@ -2,7 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { switchUi } from '../pro/ProBar';
 import type { IJsonModel } from 'flexlayout-react';
 import { byodInfo, type ByodInfo } from '../history/byod';
-import { desktop, isDesktop } from '../desktop/bridge';
+import { desktop, isDesktop, type AppStatus } from '../desktop/bridge';
+import { COMMERCIAL } from '../shared/edition';
 import { LEDGER_LENGTH } from '../shared/ledger';
 import { changeLedgerKey, sealTerminal } from './LockScreen';
 import { ADAPTERS } from '../exchanges';
@@ -374,7 +375,53 @@ function LedgerKeySettings() {
         </div>
       </div>
       <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
-        Only a salted SHA-256 digest of the key is stored{desktop ? ' (in the app database, checked by the desktop process)' : ' (in this browser)'}. If you forget it, the built-in key stops working too — keep it somewhere safe.
+        Only a salted SHA-256 digest of the key is stored{desktop ? ' (in the app database, checked by the desktop process)' : ' (in this browser)'}. {COMMERCIAL ? 'It cannot be recovered if you forget it' : 'If you forget it, the built-in key stops working too'} — keep it somewhere safe.
+      </div>
+    </div>
+  );
+}
+
+/** a purchased copy's licence: what it is, and moving it to another computer */
+function LicenseSettings() {
+  const [st, setSt] = useState<AppStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void desktop?.app.status().then(setSt).catch(() => undefined);
+  }, []);
+  const L = st?.license;
+  if (!COMMERCIAL || !desktop || !L?.required) return null;
+  const deactivate = async () => {
+    if (!confirm('Deactivate Novus Ordo on this computer?\n\nIts licence seat is given back, so you can activate the licence on another computer. This copy locks, and asks for the licence key again the next time it opens. Your keys and settings stay on this computer.')) return;
+    setBusy(true);
+    try {
+      await desktop!.app.deactivate();
+    } catch (e) {
+      alert(String((e as Error).message ?? e));
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="ledger-settings">
+      <div className="section-title">Licence</div>
+      <div className="form-row">
+        <span>Licence key</span>
+        <span className="mono">{L.key ?? '—'}</span>
+      </div>
+      {L.email && (
+        <div className="form-row">
+          <span>Licensed to</span>
+          <span>{L.email}</span>
+        </div>
+      )}
+      <div className="form-row">
+        <span>Last checked</span>
+        <span className="muted">{L.verifiedAt ? new Date(L.verifiedAt).toLocaleString() : '—'}{typeof L.uses === 'number' ? ` · active on ${L.uses} computer${L.uses === 1 ? '' : 's'}` : ''}</span>
+      </div>
+      <div className="form-row">
+        <span />
+        <button className="btn" disabled={busy} onClick={() => void deactivate()} title="Give this computer's licence seat back, to use the licence on another computer">
+          Deactivate this computer
+        </button>
       </div>
     </div>
   );
@@ -404,6 +451,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       </div>
       <AppearanceSettings />
       <LedgerKeySettings />
+      <LicenseSettings />
       <div className="section-title">Display</div>
       <div className="form-row">
         <span>FPS counter</span>

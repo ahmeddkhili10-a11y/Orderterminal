@@ -112,4 +112,7 @@ if (want.has('mac')) {
     console.log(`✓ ${zip}`);
   }
 }
+// the buyer's install guide, beside the installers
+const ver = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+writeFileSync(join(out, 'INSTALL.txt'), readFileSync(join(root, 'build', 'INSTALL.txt'), 'utf8').replaceAll('<version>', ver).replace(/\n/g, '\r\n'));
 console.log(`\nDone — the installers are in ${out}`);

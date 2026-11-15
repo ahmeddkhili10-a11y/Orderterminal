@@ -128,17 +128,26 @@
 <section class="chapter" data-ch="2">
   <div class="ch-head"><div class="ch-num">Chapter 2</div><h1>Getting started</h1><p class="ch-lead">Install the terminal, unlock it, and find your way around the screen in a few minutes.</p></div>
   <h2 data-toc>Installing</h2>
-  <p>Novus Ordo comes in two forms. Use one of them, not both.</p>
+  <p>Novus Ordo runs on Windows, macOS and Linux. Download the file for your computer from your purchase page.</p>
   <table>
-    <tr><th style="width:30%">Download</th><th>How to use it</th></tr>
-    <tr><td><b>Zip</b> (recommended)<br /><span class="small">NovusOrdo-…-win-x64.zip</span></td><td>Extract it once to a folder such as <code>C:\Novus Ordo</code> (not inside the zip viewer), then run <b>Novus Ordo.exe</b>. Pin it to the taskbar. It opens in seconds.</td></tr>
-    <tr><td><b>Portable</b><br /><span class="small">NovusOrdo-…-portable.exe</span></td><td>A single file you can run from anywhere. It unpacks itself on every launch, so it starts more slowly, especially while Windows Defender scans it.</td></tr>
+    <tr><th style="width:30%">Download</th><th>How to install it</th></tr>
+    <tr><td><b>Windows — Setup</b> (recommended)<br /><span class="small">NovusOrdo-…-Windows-Setup.exe</span></td><td>Run it, accept the licence agreement, choose where to install, and start Novus Ordo from the desktop or Start-menu shortcut.</td></tr>
+    <tr><td><b>Windows — Portable</b><br /><span class="small">NovusOrdo-…-Windows-Portable.exe</span></td><td>A single file that runs without installing — from a USB stick, for example. It unpacks itself on every launch, so it starts more slowly.</td></tr>
+    <tr><td><b>macOS</b><br /><span class="small">…-macOS-AppleSilicon.zip (M1–M4)<br />…-macOS-Intel.zip</span></td><td>Open the zip and drag <b>Novus Ordo</b> into <b>Applications</b>. The first time, see the box below.</td></tr>
+    <tr><td><b>Linux</b><br /><span class="small">…-Linux-x86_64.AppImage<br />…-Linux-amd64.deb</span></td><td><b>AppImage:</b> make it executable (right-click → Properties → Allow executing, or <code>chmod +x</code>) and double-click it. <b>Debian / Ubuntu:</b> <code>sudo apt install ./NovusOrdo-…-Linux-amd64.deb</code>.</td></tr>
   </table>
-  <div class="box tip"><b>First launch on Windows</b>If Windows SmartScreen shows "Windows protected your PC", choose <b>More info → Run anyway</b>. This appears for new applications that are not yet widely downloaded.</div>
-  <h2 data-toc>The lock screen and your ledger key</h2>
-  <p>Novus Ordo opens on a black lock screen with the emblem and the prompt <b>ENTER LEDGER KEY</b>. While it waits, the terminal loads in the background — the database, the key vault, the exchange connectors and the market feeds — and lists each item in the bottom-right corner as it arrives.</p>
+  <div class="box tip"><b>The first launch on Windows and macOS</b><b>Windows:</b> if SmartScreen shows "Windows protected your PC", choose <b>More info → Run anyway</b> — it appears for applications that are new or not yet widely downloaded.<br /><b>macOS:</b> if it says the app "cannot be opened" or "is damaged", open <b>Terminal</b> and run <code>xattr -cr "/Applications/Novus Ordo.app"</code>; on an Apple Silicon Mac also run <code>codesign --force --deep --sign - "/Applications/Novus Ordo.app"</code>. Then open it again (right-click → Open the first time).</div>
+  <h2 data-toc>The first launch, the lock screen and your ledger key</h2>
+  <p>Novus Ordo opens on a black lock screen with the emblem. While it waits, the terminal loads in the background — the database, the key vault, the exchange connectors and the market feeds — and lists each item in the bottom-right corner as it arrives.</p>
+  <p>The very first time, it asks for three things, once:</p>
   <ol class="steps">
-    <li>Type your 8-digit <b>ledger key</b>. The terminal opens as soon as the eighth digit is entered.</li>
+    <li><b>Your licence key</b> — from your Gumroad receipt (it is also in your Gumroad library). One licence runs on up to three of your computers; to move it, use <b>Deactivate this computer</b> in Settings on the old one.</li>
+    <li><b>The licence agreement and risk disclosure</b> — scroll to the end, tick the box and accept.</li>
+    <li><b>Your ledger key</b> — choose eight digits and enter them twice. They unlock the terminal and protect the exchange keys you keep in it. No one else has them and they cannot be recovered, so keep them somewhere safe.</li>
+  </ol>
+  <p>After that, the lock screen simply asks: <b>ENTER LEDGER KEY</b>.</p>
+  <ol class="steps">
+    <li>Type your 8-digit ledger key. The terminal opens as soon as the eighth digit is entered.</li>
     <li>Until the key is entered, nothing private is available: API keys, trading, bots, wallets and Telegram stay sealed by the desktop process itself.</li>
     <li>Five wrong attempts lock the input for 30 seconds, doubling after each further miss.</li>
     <li>To change the key: <b>⚙ Settings → Ledger key</b>. You need the current key; the new one must be 8 digits and not a simple pattern.</li>
