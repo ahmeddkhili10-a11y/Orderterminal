@@ -6761,3 +6761,19 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
 .farm-board-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .farm-board-head .muted { font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 11px; }
 .farm-none { padding: 2px 10px 8px; }
+
+/* ---------- the commercial edition's first launch ---------- */
+.lock-first { max-width: min(640px, 92vw); text-align: center; }
+.lock-first-text { margin: 0; font: 400 12.5px/1.6 var(--sans, system-ui); color: #9da2aa; max-width: 520px; }
+.lock-license { width: min(520px, 88vw); padding: 11px 14px; border-radius: 8px; border: 1px solid #2a2d32; background: #07080a; color: #e9ecf0; font-size: 14px; letter-spacing: 0.08em; text-align: center; outline: none; }
+.lock-license:focus { border-color: #c9ced6; box-shadow: 0 0 0 3px rgba(201, 206, 214, 0.08); }
+.lock-btn { padding: 10px 22px; border-radius: 8px; border: 1px solid #ffc23d; background: rgba(255, 194, 61, 0.12); color: #ffd36e; font: 700 11px var(--mono, ui-monospace, monospace); letter-spacing: 0.3em; cursor: pointer; }
+.lock-btn:disabled { opacity: 0.4; cursor: default; }
+.lock-btn:not(:disabled):hover { background: rgba(255, 194, 61, 0.22); }
+.lock-msg-wrap { height: auto; min-height: 14px; max-width: 560px; line-height: 1.5; letter-spacing: 0.12em; }
+.lock-terms-step { padding-bottom: 5vh; }
+.lock-terms { width: min(640px, 92vw); height: min(34vh, 320px); overflow-y: auto; text-align: left; padding: 12px 16px; border: 1px solid #2a2d32; border-radius: 8px; background: #07080a; font: 400 12px/1.55 var(--sans, system-ui); color: #b8bdc5; }
+.lock-terms b { display: block; margin: 10px 0 4px; color: #eef0f3; font-weight: 600; }
+.lock-terms section:first-child b { margin-top: 0; }
+.lock-terms p { margin: 0 0 6px; }
+.lock-key label.lock-check { display: flex; gap: 8px; align-items: flex-start; font: 400 12px/1.5 var(--sans, system-ui); letter-spacing: 0; padding: 0; color: #c7cbd1; text-align: left; max-width: 640px; }

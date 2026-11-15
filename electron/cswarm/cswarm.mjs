@@ -17,6 +17,7 @@
 //
 // Trades the council turned down are followed anyway (the shadow book), so the
 // forest learns from paper, live and refused trades alike.
+import { COMMERCIAL } from '../../src/shared/edition.ts';
 import { randomUUID } from 'node:crypto';
 import { AmtEngine, INTRADAY_PRESET } from '../amt/engine.mjs';
 import { AGENT_NAME, CCOUNCIL_DEFAULTS, councilR, dirOf, features, MARK, oddsR, PROPOSERS, rClass, trainForest } from './brain.mjs';
@@ -33,7 +34,8 @@ export const CSWARM_DEFAULTS = {
   coins: ['BTC', 'ETH', 'SOL'],
   agents: { auction: true, trend: true, lab: true },
   /** the paper account starts with this (USDC) */
-  paperStartUsd: 30,
+  // paper money to start with: the owner's own account size in the personal edition, a round $1,000 in the copy that is sold
+  paperStartUsd: COMMERCIAL ? 1000 : 30,
   /** taker fee and slippage per side, bps (Hyperliquid base tier: 4.5 bps taker) */
   feeBps: 4.5,
   slippageBps: 2,

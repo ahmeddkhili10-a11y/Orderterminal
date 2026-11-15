@@ -2,7 +2,12 @@
  * Ledger key that unlocks the terminal. Only a salted SHA-256 digest is
  * stored here; the desktop process checks it again before it releases API
  * keys, trading, bots, wallets or Telegram.
+ *
+ * The personal edition has a built-in key until the owner sets their own. The
+ * commercial edition has none: each buyer creates their own key on first
+ * launch, and the built-in digest is not in its build at all.
  */
+import { COMMERCIAL } from './edition';
 
 const SALT = 'novus-ordo/ledger/v1:';
 export const LEDGER_DIGEST = 'a8a5170c2d6e88c3f597fd89a2765c28f87c3d77ad8afeaa310b697cd10f5fd7';
@@ -19,8 +24,8 @@ export interface LedgerRecord {
   digest: string;
 }
 
-/** Built-in key, used until the owner sets their own in Settings. */
-export const DEFAULT_LEDGER: LedgerRecord = { salt: SALT, digest: LEDGER_DIGEST };
+/** Built-in key, used until the owner sets their own in Settings (personal edition only). */
+export const DEFAULT_LEDGER: LedgerRecord | undefined = COMMERCIAL ? undefined : { salt: SALT, digest: LEDGER_DIGEST };
 
 export function isLedgerRecord(x: unknown): x is LedgerRecord {
   const r = x as LedgerRecord;
@@ -29,7 +34,9 @@ export function isLedgerRecord(x: unknown): x is LedgerRecord {
 
 type Sha = (s: string) => Promise<string> | string;
 
-export async function ledgerMatches(input: string, sha256Hex: Sha, rec: LedgerRecord = DEFAULT_LEDGER): Promise<boolean> {
+export async function ledgerMatches(input: string, sha256Hex: Sha, rec: LedgerRecord | undefined = DEFAULT_LEDGER): Promise<boolean> {
+  // no key at all (a commercial copy before its owner has created one): nothing matches
+  if (!rec) return false;
   const digits = normalizeKey(input);
   if (digits.length !== LEDGER_LENGTH) return false;
   const h = await sha256Hex(rec.salt + digits);
@@ -85,6 +92,10 @@ export class AttemptGate {
 export const PUBLIC_CHANNELS = new Set([
   'app:seal',
   'app:status',
+  // the commercial edition's first launch: they check their own conditions
+  'app:activate',
+  'app:acceptTerms',
+  'app:setupKey',
   'app:fullscreen',
   'app:isFullscreen',
   'app:log',

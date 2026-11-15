@@ -5,6 +5,33 @@ import type { FarmCfg, FarmState } from '../lab/farm';
 
 /** the edge finder's state as the desktop process reports it */
 export type FarmView = FarmState & { starting?: boolean; wanted?: boolean };
+
+/** a commercial copy's licence (never the full key) */
+export interface LicenseState {
+  required: boolean;
+  ok: boolean;
+  reason?: 'none' | 'revoked' | 'offline';
+  message?: string;
+  key?: string;
+  email?: string;
+  verifiedAt?: number;
+  uses?: number;
+}
+/** what stands between a commercial copy and the terminal */
+export interface AppGate {
+  needsLicense: boolean;
+  needsTerms: boolean;
+  needsSetup: boolean;
+  license?: LicenseState;
+}
+export interface AppStatus extends AppGate {
+  locked: boolean;
+  sealedAt: number | null;
+  botsRunning: number;
+  botsLive: number;
+  edition?: 'personal' | 'commercial';
+  termsVersion?: number;
+}
 import type { StrategySpec } from '../lab/backtest';
 import type { Kline } from '../core/types';
 import type { TokenInfo, WalletActivity, WalletBalances } from '../shared/solana';
@@ -691,7 +718,7 @@ export interface WalletRecord {
 
 export interface NovusApi {
   desktop: true;
-  app: { info(): Promise<{ version: string; platform: string; userData: string; db: DbInfo; vaultBackend: string; retentionDays: number; safeMode?: boolean }>; openExternal(url: string): Promise<void>; locked(): Promise<boolean>; unlock(code: string): Promise<boolean>; seal(): Promise<boolean>; changeKey(current: string, next: string): Promise<boolean>; leaveSafeMode(): Promise<void>; fullscreen(on?: boolean): Promise<boolean>; isFullscreen(): Promise<boolean>; onFullscreen(fn: (on: boolean) => void): () => void; status(): Promise<{ locked: boolean; sealedAt: number | null; botsRunning: number; botsLive: number }>; onSealed(fn: (reason: string) => void): () => void };
+  app: { info(): Promise<{ version: string; platform: string; userData: string; db: DbInfo; vaultBackend: string; retentionDays: number; safeMode?: boolean }>; openExternal(url: string): Promise<void>; locked(): Promise<boolean>; unlock(code: string): Promise<boolean>; seal(): Promise<boolean>; changeKey(current: string, next: string): Promise<boolean>; leaveSafeMode(): Promise<void>; fullscreen(on?: boolean): Promise<boolean>; isFullscreen(): Promise<boolean>; onFullscreen(fn: (on: boolean) => void): () => void; status(): Promise<AppStatus>; activate(key: string): Promise<AppGate>; acceptTerms(version: number): Promise<AppGate>; setupKey(next: string, again: string): Promise<boolean>; deactivate(): Promise<LicenseState>; onSealed(fn: (reason: string) => void): () => void };
   net: { fetchJson<T = any>(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<T> };
   vault: {
     list(): Promise<SecretRecord[]>;
