@@ -54,6 +54,8 @@ export function mergeCfg(p = {}) {
   return c;
 }
 
+/** a fee charged in dollars (or a dollar coin) can be added up with the rest */
+const isUsdish = (c) => !c || /^(USD|USDC|USDT)$/i.test(String(c));
 export const symbolFor = (coin, exchangeId = 'hyperliquid') => (exchangeId === 'hyperliquid' ? `${coin}/USDC:USDC` : `${coin}/USDT:USDT`);
 const tidy = (v) => (Number.isFinite(v) ? Number(v.toPrecision(6)) : v);
 const usd = (v) => `${v < 0 ? '−' : ''}$${Math.abs(v).toFixed(2)}`;
@@ -64,8 +66,10 @@ export class CryptoSwarm {
    * @param o.db { get(key), set(key, value) }
    * @param o.emit (channel, payload) => void — 'state' and 'event' to the app
    */
-  constructor({ ccxt, db, emit = () => {}, now = Date.now, log = () => {}, labDeployed = () => [] }) {
+  constructor({ ccxt, db, emit = () => {}, now = Date.now, log = () => {}, labDeployed = () => [], onClosed = () => {} }) {
     this.ccxt = ccxt;
+    /** each closed position, for the trade journal */
+    this.onClosed = onClosed;
     /** the Strategy Lab's strategies deployed into this swarm */
     this.labDeployed = labDeployed;
     this.db = db;
@@ -613,6 +617,7 @@ export class CryptoSwarm {
   openPaper(pos) {
     const c = this.cfg;
     const dir = dirOf(pos.side);
+    pos.askEntry = pos.entry;
     this.filledAt(pos, pos.entry * (1 + (dir * c.slippageBps) / 1e4));
     this.paper.cash -= pos.fees;
   }
@@ -620,10 +625,17 @@ export class CryptoSwarm {
   async openLive(pos) {
     const c = this.cfg;
     const dir = dirOf(pos.side);
+    // the price the decision was made at: the gap to the fill is the real slippage (the journal measures it)
+    pos.askEntry = pos.entry;
     const r = await this.ccxt.placeOrder(this.secretId, { symbol: pos.symbol, side: pos.side, type: 'market', sizeMode: 'base', size: pos.qty });
     pos.qty = r.baseQty ?? pos.qty;
     pos.amount = r.amount ?? pos.qty;
     this.filledAt(pos, r.price ?? pos.entry);
+    pos.fillsReal = r.average !== null && r.average !== undefined;
+    if (r.fee && isUsdish(r.fee.currency)) {
+      pos.fees = r.fee.cost;
+      pos.feeReal = true;
+    }
     this.liveFlow = (this.liveFlow ?? 0) - pos.fees;
     // the exchange-side disaster stop, half a risk unit beyond the swarm's own stop
     pos.stopTrigger = pos.stop - dir * 0.5 * pos.risk;
@@ -663,17 +675,23 @@ export class CryptoSwarm {
     const cs = this.coins.get(pos.coin);
     const e = pos.owner === 'engine' ? cs?.engines[pos.agent] : null;
     let exit = Number.isFinite(price) ? price : cs?.price ?? pos.entry;
+    pos.askExit = exit;
+    let exitFeeReal = null;
     try {
       if (pos.mode === 'live') {
         try {
           const r = await this.ccxt.placeOrder(this.secretId, { symbol: pos.symbol, side: dir > 0 ? 'sell' : 'buy', type: 'market', sizeMode: 'contracts', size: pos.amount, reduceOnly: true });
           exit = r.price ?? exit;
+          if (!(r.average > 0)) pos.fillsReal = false;
+          if (r.fee && isUsdish(r.fee.currency) && pos.feeReal) exitFeeReal = r.fee.cost;
         } catch (err) {
           // the exchange stop may already have closed it
           const left = await this.ccxt.positionContracts(this.secretId, pos.symbol).catch(() => null);
           if (left !== 0) throw err;
           exit = pos.stopTrigger ?? exit;
           reason = 'exchange stop';
+          // the exchange's stop filled it at a price this side never saw: not a measurable fill
+          pos.fillsReal = false;
           pos.stopOrderId = null;
         }
         if (pos.stopOrderId) await this.ccxt.cancelOrder(this.secretId, pos.stopOrderId, pos.symbol).catch((err) => this.say('risk', `${pos.coin}: could not cancel the exchange stop: ${err?.message ?? err}`, 'warn'));
@@ -685,7 +703,8 @@ export class CryptoSwarm {
       return;
     }
     const gross = (exit - pos.entry) * pos.qty * dir;
-    const exitFee = (exit * pos.qty * c.feeBps) / 1e4;
+    const exitFee = exitFeeReal ?? (exit * pos.qty * c.feeBps) / 1e4;
+    if (exitFeeReal === null) pos.feeReal = false;
     pos.fees += exitFee;
     pos.exit = exit;
     pos.pnl = gross - pos.fees;
@@ -708,6 +727,11 @@ export class CryptoSwarm {
       });
     this.say(pos.agent, `${pos.coin}: closed (${reason}) @ ${tidy(exit)} — ${pos.pnl >= 0 ? '+' : '−'}${usd(Math.abs(pos.pnl))} (${pos.r >= 0 ? '+' : ''}${pos.r.toFixed(2)}R)`, pos.pnl >= 0 ? 'win' : 'loss');
     this.notify('result', pos);
+    try {
+      this.onClosed(pos);
+    } catch (err) {
+      this.logFn('warn', `journal: ${err?.message ?? err}`);
+    }
     if (pos.mode === 'live') void this.refreshEquity();
     this.persist();
   }

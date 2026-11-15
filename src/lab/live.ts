@@ -16,10 +16,16 @@ export interface Deployed {
   /** where it runs */
   targets: { crypto: boolean; meme: boolean };
   /** the out-of-sample numbers it was deployed on */
-  stats: { sharpe: number; t: number; dsr: number; trades: number; verdict: string };
+  stats: { sharpe: number; t: number; dsr: number; trades: number; verdict: string; winRate?: number; avgR?: number; perYear?: number; maxDD?: number };
   deployedAt: number;
   on: boolean;
   authority?: 'council' | 'tested';
+}
+
+/** what the strategy health checks compare its live trades with: its test's win rate, average trade and pace */
+export function testedStats(oos: { winRate?: number; avgR?: number; trades: number; bars?: number; maxDD?: number }, tfH: number) {
+  const years = oos.bars ? oos.bars / ((24 * 365) / tfH) : 0;
+  return { winRate: oos.winRate, avgR: oos.avgR, perYear: years > 0 ? oos.trades / years : undefined, maxDD: oos.maxDD };
 }
 
 export interface LiveSignal {

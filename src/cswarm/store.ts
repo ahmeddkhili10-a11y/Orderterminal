@@ -17,13 +17,17 @@ export function refreshCSwarm() {
     .catch((e) => useCSwarm.setState({ error: String((e as Error)?.message ?? e) }));
 }
 
-export function startCryptoSwarmLink() {
+/**
+ * Follow the swarm in this window. Only the main window tells (Telegram, pop-ups): a
+ * popped-out window passes tell=false, or each trade would be sent once per window.
+ */
+export function startCryptoSwarmLink({ tell = true }: { tell?: boolean } = {}) {
   if (!desktop || linked) return;
   linked = true;
   desktop.cswarm.onState((state) => useCSwarm.setState({ state, lines: state.lines }));
   desktop.cswarm.onEvent((e) => {
     if (e.kind === 'line') useCSwarm.setState((s) => ({ lines: [...s.lines, e.line].slice(-200) }));
-    else if (e.kind === 'notify') void tellTrade(e).catch(() => undefined);
+    else if (e.kind === 'notify' && tell) void tellTrade(e).catch(() => undefined);
   });
   // the exchange services start a moment after the window: ask until they answer
   const first = () => {

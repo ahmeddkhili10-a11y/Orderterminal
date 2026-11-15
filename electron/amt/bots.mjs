@@ -45,8 +45,10 @@ export class BotManager {
    * @param db    Db (bot configs in kv, recorded trades for backtests)
    * @param emit  (channel: 'status'|'event', payload) → sends to the UI
    */
-  constructor({ ccxt, db, emit, now = Date.now, makeWorker }) {
+  constructor({ ccxt, db, emit, now = Date.now, makeWorker, onClosed = () => {} }) {
     this.ccxt = ccxt;
+    /** each closed trade, for the trade journal */
+    this.onClosed = onClosed;
     this.db = db;
     this.emit = emit;
     this.now = now;
@@ -315,6 +317,14 @@ export class BotManager {
       } catch (err) {
         console.warn('amt trade log', err?.message ?? err);
       }
+      try {
+        // limit orders fill at their own price: only market fills measure slippage
+        const ask = b.ask && b.ask.exit !== undefined ? b.ask : null;
+        this.onClosed({ ...last, askEntry: ask?.entry ?? null, askExit: ask?.exit ?? null, fillsReal: !!(ask?.real && b.cfg.mode === 'live') }, { id, name: b.cfg.name, symbol: b.cfg.symbol, mode: b.cfg.mode, exchangeId: b.exchangeId, lane: b.exchangeId === 'luno' && b.cfg.name?.startsWith('Luno lane · ') });
+      } catch (err) {
+        console.warn('journal', err?.message ?? err);
+      }
+      b.ask = null;
     }
     // the trade manager's reason for this exit, when it made the call (it thinks just before it exits)
     const th = e.brain?.thoughts.at(-1);
@@ -343,10 +353,13 @@ export class BotManager {
     if (intent.order === 'limit' && (intent.type === 'enter' || contract)) return this.placeLimit(b, intent);
     try {
       if (intent.type === 'enter') {
+        // the price the decision was made at: the gap to the fill is the real slippage
+        b.ask = { entry: e.last, real: true };
         const r = await this.ccxt.placeOrder(secretId, { symbol, side: intent.side, type: 'market', sizeMode: 'base', size: intent.qty });
         b.amount = r.amount;
         const qty = r.baseQty ?? intent.qty;
         const price = r.price ?? e.last;
+        if (!(r.average > 0)) b.ask.real = false;
         e.filled({ price, qty, fee: feeOf(price, qty) });
         this.report(b, { ...intent, qty }, price);
         if (b.stopping) {
@@ -379,9 +392,12 @@ export class BotManager {
           req = { symbol, side: intent.side, type: 'market', sizeMode: 'contracts', size: Math.min(b.amount, held), closeSpot: true };
         }
         let r;
+        if (b.ask) b.ask.exit = e.last;
         try {
           r = await this.ccxt.placeOrder(secretId, req);
+          if (b.ask && !(r?.average > 0)) b.ask.real = false;
         } catch (err) {
+          if (b.ask) b.ask.real = false;
           // the exchange stop may already have closed the position
           const left = contract ? await this.ccxt.positionContracts(secretId, symbol).catch(() => null) : null;
           if (left !== 0) throw err;

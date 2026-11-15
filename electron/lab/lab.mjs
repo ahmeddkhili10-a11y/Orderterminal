@@ -29,6 +29,15 @@ export const LAB_DEFAULTS = {
 export const TF_H = { '15m': 0.25, '1h': 1, '4h': 4, '1d': 24 };
 /** the most history worth downloading per timeframe, in years (a year of 15-minute candles is 35,000 of them) */
 export const MAX_YEARS = { '15m': 1 };
+/**
+ * The edge finder reads more history for its slow paces than a single test needs: a swing or
+ * position strategy trades a few times a month, and only years of candles give it enough trades
+ * to pass the checks — so their top fives fill instead of waiting. (Six years of 4-hour candles
+ * is 13,000 of them; eight years of daily ones, 2,900.)
+ */
+export const FARM_YEARS = { '4h': 6, '1d': 8 };
+/** the most coins the edge finder breeds on at once */
+export const FARM_MAX_COINS = 12;
 const SOURCES = ['binance', 'okx', 'bybit', 'hyperliquid'];
 const HOUR = 3_600_000;
 
@@ -62,6 +71,8 @@ export class LabService {
     this.emit = o.emit;
     this.makeWorker = o.makeWorker;
     this.now = o.now ?? Date.now;
+    /** the costs measured on your live trades (assumed costs in, the costs to test with out) */
+    this.costsFn = o.costs ?? null;
     mkdirSync(join(this.dir, 'cache'), { recursive: true });
     this.cfg = { ...LAB_DEFAULTS, ...this.read('config.json', {}) };
     this.deployedList = this.read('deployed.json', []);
@@ -76,7 +87,13 @@ export class LabService {
     this.farmCfg = { ...FARM_DEFAULTS, ...(farm?.cfg ?? {}) };
     // settings saved before each pace had its own top five: scalping joins intraday and swing (it trades the same 1-hour candles as intraday)
     if (farm?.cfg && !(farm.cfg.v >= 2) && !this.farmCfg.styles.some((x) => x === 'scalp' || x === 'scalp15')) this.farmCfg.styles = ['scalp', ...this.farmCfg.styles];
-    this.farmCfg.v = 2;
+    // settings from before the slow paces had their own history: the position pace joins, and the
+    // three default coins become six (more coins, more trades, top fives that fill faster)
+    if (farm?.cfg && !(farm.cfg.v >= 3)) {
+      if (!this.farmCfg.styles.includes('position')) this.farmCfg.styles = [...this.farmCfg.styles, 'position'];
+      if (this.farmCfg.coins.join() === 'BTC,ETH,SOL') this.farmCfg.coins = [...FARM_DEFAULTS.coins];
+    }
+    this.farmCfg.v = 3;
     this.farmSnap = farm?.state ? { ...farm.state, running: false } : null;
     this.farmW = null;
     this.farmTimer = null;
@@ -121,7 +138,7 @@ export class LabService {
     const years = {};
     for (const id of cfg.styles) {
       const st = STYLE_MAP[id];
-      if (st) years[st.timeframe] = Math.max(years[st.timeframe] ?? 0, st.years);
+      if (st) years[st.timeframe] = Math.max(years[st.timeframe] ?? 0, st.years, FARM_YEARS[st.timeframe] ?? 0);
     }
     const out = {};
     const stale = [];
@@ -208,7 +225,7 @@ export class LabService {
   /** start the edge finder (it carries on from where it was); settings that change its candles start it over on them */
   async farmStart(patch = {}) {
     const next = { ...this.farmCfg, ...patch };
-    if (Array.isArray(next.coins)) next.coins = [...new Set(next.coins.map((c) => String(c).toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean))].slice(0, 8);
+    if (Array.isArray(next.coins)) next.coins = [...new Set(next.coins.map((c) => String(c).toUpperCase().replace(/[^A-Z0-9]/g, '')).filter(Boolean))].slice(0, FARM_MAX_COINS);
     next.styles = (next.styles ?? []).filter((s) => STYLE_MAP[s]);
     if (!next.coins.length || !next.styles.length) throw new Error('choose at least one coin and one pace');
     if (this.farmW || this.farmStarting) await this.farmStop(false);
@@ -253,7 +270,7 @@ export class LabService {
       };
       w.on('error', (err) => died(String(err?.message ?? err)));
       w.on('exit', (code) => died(`its thread stopped (code ${code})`));
-      w.postMessage({ type: 'start', cfg: next, save: this.farmSaved, markets: plainMarkets(r.markets), deployed: this.fleetOf() });
+      w.postMessage({ type: 'start', cfg: next, save: this.farmSaved, markets: plainMarkets(r.markets), deployed: this.fleetOf(), costs: this.testCosts() });
       this.farmBegan = this.now();
       // fresher candles every so often: the survivors' and the fleet's forward tests move on
       this.farmSchedule();
@@ -399,9 +416,26 @@ export class LabService {
     }
   }
 
+  /** what a test charges for fees and slippage: the assumed costs, raised to what your live trades measured once there are enough */
+  testCosts(cfg = this.cfg) {
+    const c = this.costInfo(cfg);
+    return { feeBps: c.feeBps, slipBps: c.slipBps };
+  }
+  costInfo(cfg = this.cfg) {
+    const assumed = { feeBps: cfg.feeBps, slipBps: cfg.slipBps };
+    try {
+      const m = this.costsFn?.(assumed);
+      if (m && m.measured) return m;
+      return { ...assumed, measured: false, n: m?.n ?? 0, why: m?.why ?? 'the assumed costs' };
+    } catch {
+      return { ...assumed, measured: false, n: 0, why: 'the assumed costs' };
+    }
+  }
+
   status() {
     const last = this.read('result.json', null);
     return {
+      costs: this.costInfo(),
       running: !!this.worker,
       progress: this.progress,
       error: this.error,
@@ -548,7 +582,7 @@ export class LabService {
       const result = await this.inWorker({
         type: 'research',
         markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })),
-        cfg: { isShare: cfg.isShare, combos: cfg.combos, sides: cfg.sides, meta: cfg.meta, costs: { feeBps: cfg.feeBps, slipBps: cfg.slipBps } },
+        cfg: { isShare: cfg.isShare, combos: cfg.combos, sides: cfg.sides, meta: cfg.meta, costs: this.testCosts(cfg) },
       });
       result.notes = [...notes, ...result.notes];
       result.sources = markets.map((m) => ({ coin: m.coin, source: m.source }));
@@ -572,7 +606,7 @@ export class LabService {
     if (!markets.length) throw new Error('no history downloaded');
     this.progress = null;
     this.push();
-    return this.inWorker({ type: 'evaluate', markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })), spec, isShare: cfg.isShare, costs: { feeBps: cfg.feeBps, slipBps: cfg.slipBps } });
+    return this.inWorker({ type: 'evaluate', markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })), spec, isShare: cfg.isShare, costs: this.testCosts(cfg) });
   }
 
   /**
@@ -585,7 +619,7 @@ export class LabService {
     const { markets } = await this.markets(cfg);
     if (!markets.length) throw new Error('no history downloaded');
     try {
-      return await this.inWorker({ type: 'score', markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })), specs: specs.slice(0, 120), isShare: cfg.isShare, costs: { feeBps: cfg.feeBps, slipBps: cfg.slipBps } });
+      return await this.inWorker({ type: 'score', markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })), specs: specs.slice(0, 120), isShare: cfg.isShare, costs: this.testCosts(cfg) });
     } finally {
       this.progress = null;
       this.push();
@@ -637,7 +671,8 @@ export class LabService {
       if (!t) throw new Error('no such strategy in the last research');
       s = t.spec;
       tf = r.tfH;
-      st = { sharpe: t.oos.sharpe, t: t.oos.t, dsr: t.dsr, trades: t.oos.trades, verdict: t.verdict };
+      const yrs = t.oos.bars / ((24 * 365) / (r.tfH ?? 1));
+      st = { sharpe: t.oos.sharpe, t: t.oos.t, dsr: t.dsr, trades: t.oos.trades, verdict: t.verdict, winRate: t.oos.winRate, avgR: t.oos.avgR, perYear: yrs > 0 ? t.oos.trades / yrs : undefined, maxDD: t.oos.maxDD };
     }
     if (!s) throw new Error('nothing to deploy');
     const d = { id: randomUUID(), spec: s, tfH: tf ?? 1, coins: coins ?? this.cfg.coins, targets, stats: st ?? { sharpe: 0, t: 0, dsr: 0, trades: 0, verdict: 'untested' }, deployedAt: this.now(), on: true, authority: authority === 'tested' ? 'tested' : 'council' };

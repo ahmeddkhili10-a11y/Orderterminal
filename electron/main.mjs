@@ -1,6 +1,6 @@
 // Novus Ordo desktop shell (Electron main process).
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, screen, shell } from 'electron';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,12 @@ import { AttemptGate, isLedgerRecord, ledgerMatches, makeLedger, PUBLIC_CHANNELS
 import { createHash, randomBytes } from 'node:crypto';
 import { COMMERCIAL, EDITION, GUMROAD_PRODUCT_ID, LICENSE_SEATS, TERMS_VERSION } from '../src/shared/edition.ts';
 import { Licenses } from './license.mjs';
+import { fromBot, fromSwarm, TradeJournal } from './care/journal.mjs';
+import { Care } from './care/care.mjs';
+import { costsForTests, measureCosts } from './care/costs.mjs';
+import { journalCsv, ratesFromChart, taxCsv, taxYearOf, taxYearRange } from './care/tax.mjs';
+import { collectBackup, openBackup, passwordProblem, peekBackup, restoreBackup, sealBackup } from './care/backup.mjs';
+import { YAHOO_HEADERS } from '../src/shared/yahoo.ts';
 import { Vault } from './vault.mjs';
 import { LIMIT_DEFAULTS, MemeTrader, MIN_SWEEP, rpcWithFallback } from './memetrade.mjs';
 import { exportSecret, newKeypair, parseSecret } from './solana-tx.mjs';
@@ -162,6 +168,12 @@ let cswarm;
 let lab;
 let screens = null;
 let services = null;
+/** every finished trade, kept for good (care/journal.mjs) */
+let journal = null;
+/** Novus Ordo looking after itself while you are away (care/care.mjs) */
+let care = null;
+/** how the main window is doing, for the "still alive" checks */
+let screenState = 'ok';
 
 function createWindow() {
   // opens maximised (or where it was last left), always within the screen:
@@ -227,13 +239,21 @@ function createWindow() {
   wc.on('did-fail-load', (_e, code, desc, url) => log('error', `page failed to load (${code} ${desc}) ${url}`));
   wc.on('render-process-gone', (_e, d) => {
     log('error', `window renderer gone: ${d.reason} (exit ${d.exitCode})`);
+    if (d.reason !== 'clean-exit') screenState = 'gone';
     if (d.reason !== 'clean-exit' && !w.isDestroyed()) {
       if ((w.__crashes = (w.__crashes ?? 0) + 1) <= 1) wc.reload();
       else relaunchSafe(`renderer ${d.reason}`);
     }
   });
-  wc.on('unresponsive', () => log('warn', 'window unresponsive'));
-  wc.on('responsive', () => log('info', 'window responsive again'));
+  wc.on('unresponsive', () => {
+    log('warn', 'window unresponsive');
+    screenState = 'frozen';
+  });
+  wc.on('responsive', () => {
+    log('info', 'window responsive again');
+    screenState = 'ok';
+  });
+  wc.on('did-finish-load', () => (screenState = 'ok'));
   wc.on('console-message', (e) => {
     const level = e.level ?? e.params?.level;
     if (level === 'error' || level === 3) log('error', `renderer: ${e.message ?? e.params?.message} (${e.sourceId ?? ''}:${e.lineNumber ?? ''})`);
@@ -247,6 +267,7 @@ function createWindow() {
   win.on('leave-full-screen', sendFs);
   win.on('closed', () => {
     win = null;
+    screenState = 'gone';
     ccxtSvc?.closeAll();
     // the popped-out panels go with the terminal (and come back next time)
     if (screens) {
@@ -326,6 +347,15 @@ const httpsOnly = (url) => {
   return u.toString();
 };
 
+/** the exchange a key belongs to (the swarm's live venue) */
+function venueOf(secretId) {
+  try {
+    return (secretId && db.getSecret(secretId)?.exchange) || 'hyperliquid';
+  } catch {
+    return 'hyperliquid';
+  }
+}
+
 function retentionDays() {
   return db.get('retentionDays') ?? 3;
 }
@@ -371,6 +401,8 @@ function gate() {
 }
 function afterUnlock() {
   unlocked = true;
+  // the daily message, the warnings and the weekly report start once the ledger key has been entered
+  care?.start();
   // popped-out panels come back (and, the first time, the ones left open last session)
   if (screens) {
     screens.setVisible(true);
@@ -578,6 +610,7 @@ function registerIpc() {
   handle('amt:stop', (_e, id, flatten) => bots.stop(id, { flatten: Boolean(flatten), reason: flatten ? 'stopped and flattened by you' : 'stopped by you' }));
   handle('amt:stopAll', async () => {
     // the kill switch stops the crypto swarm too (its positions keep their exchange stops)
+    care?.setWanted('swarm', false);
     await cswarm?.stop().catch(() => undefined);
     return bots.stopAll('kill switch');
   });
@@ -623,8 +656,16 @@ function registerIpc() {
   handle('lab:toggle', (_e, id, on) => lab.toggle(String(id), Boolean(on)));
   handle('lab:authority', (_e, id, a) => lab.setAuthority(String(id), a === 'tested' ? 'tested' : 'council'));
   handle('cswarm:state', () => cswarm.state());
-  handle('cswarm:start', () => cswarm.start());
-  handle('cswarm:stop', (_e, flatten) => cswarm.stop({ flatten: Boolean(flatten) }));
+  handle('cswarm:start', async () => {
+    const r = await cswarm.start();
+    care?.setWanted('swarm', true);
+    return r;
+  });
+  handle('cswarm:stop', (_e, flatten) => {
+    // stopped by you: not a warning
+    care?.setWanted('swarm', false);
+    return cswarm.stop({ flatten: Boolean(flatten) });
+  });
   handle('cswarm:config', (_e, patch) => cswarm.setConfig(patch ?? {}));
   handle('cswarm:resetPaper', () => cswarm.resetPaper());
   handle('cswarm:mode', async (_e, mode, secretId) => {
@@ -1115,6 +1156,116 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
   handle('telegram:setStatus', (_e, snap) => {
     tgStatus = snap;
   });
+
+  // ---- while you are away: the daily message, warnings, the weekly report, strategy health, real costs ----
+  handle('care:status', () => care.status());
+  handle('care:config', (_e, patch) => care.setConfig(patch ?? {}));
+  handle('care:sendNow', async (_e, kind) => {
+    if (!care.cfg.secretId) throw new Error('choose the Telegram bot first (Telegram panel)');
+    if (!(await care.sendNow(kind === 'weekly' ? 'weekly' : 'daily'))) throw new Error('could not send — check the Telegram bot and its chat on the Telegram panel');
+    return true;
+  });
+  handle('care:health', async () => {
+    await services;
+    return care.health();
+  });
+  handle('care:costs', () => care.costs());
+
+  // ---- the trade journal and the tax export ----
+  handle('journal:list', (_e, q) => journal.list({ ...(q ?? {}), limit: Math.min(5000, Number(q?.limit) || 2000) }));
+  handle('journal:note', (_e, id, note) => journal.setNote(id, note));
+  handle('journal:taxYears', () => {
+    const rows = journal.list({ mode: 'live', limit: 1e6 });
+    const ys = new Set(rows.map((r) => taxYearOf(r.closed)));
+    ys.add(taxYearOf(Date.now()));
+    return [...ys].sort((a, b) => b - a);
+  });
+  handle('journal:export', async (e) => {
+    const parent = BrowserWindow.fromWebContents(e.sender) ?? win;
+    const r = await dialog.showSaveDialog(parent, { title: 'Save the trade journal', defaultPath: `novus-ordo-journal-${new Date().toISOString().slice(0, 10)}.csv`, filters: [{ name: 'Spreadsheet (CSV)', extensions: ['csv'] }] });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, journalCsv(journal.list({ limit: 1e6 })));
+    return r.filePath;
+  });
+  handle('journal:tax', async (e, year0) => {
+    const year = Math.round(Number(year0)) || taxYearOf(Date.now());
+    const [from, to] = taxYearRange(year);
+    // the dollar in rands, day by day, from Yahoo Finance (kept, so a second export needs no download)
+    const rates = db.get('fx:USDZAR') ?? {};
+    let fxError = '';
+    try {
+      const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/ZAR=X?period1=${Math.floor(from / 1000) - 14 * 86400}&period2=${Math.min(Math.floor(to / 1000), Math.floor(Date.now() / 1000)) + 86400}&interval=1d`, { headers: YAHOO_HEADERS, signal: AbortSignal.timeout(20_000) });
+      if (!res.ok) throw new Error(`Yahoo Finance answered ${res.status}`);
+      Object.assign(rates, ratesFromChart(await res.json()));
+      db.set('fx:USDZAR', rates);
+    } catch (err) {
+      fxError = String(err?.message ?? err);
+    }
+    const out = taxCsv(journal.list({ mode: 'live', from, to, limit: 1e6 }), rates, year);
+    const parent = BrowserWindow.fromWebContents(e.sender) ?? win;
+    const r = await dialog.showSaveDialog(parent, { title: `Save the ${year - 1}/${String(year).slice(2)} tax-year export`, defaultPath: `novus-ordo-tax-${year - 1}-${String(year).slice(2)}.csv`, filters: [{ name: 'Spreadsheet (CSV)', extensions: ['csv'] }] });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, out.csv);
+    return { path: r.filePath, trades: out.trades, totals: out.totals, missingRates: out.missingRates, fxError };
+  });
+
+  // ---- backups ----
+  const labDir = () => join(app.getPath('userData'), 'lab');
+  handle('backup:create', async (e, password, storage) => {
+    const why = passwordProblem(password);
+    if (why) throw new Error(why);
+    await services;
+    const files = {};
+    try {
+      for (const f of readdirSync(labDir())) if (f.endsWith('.json')) files[f] = JSON.parse(readFileSync(join(labDir(), f), 'utf8'));
+    } catch {
+      /* no Lab files yet */
+    }
+    // the swarm's latest book, written before it is read
+    cswarm?.persist();
+    const { contents, summary } = collectBackup({ sql: db.db, vault, journal, labFiles: files, storage: storage && typeof storage === 'object' ? storage : {} });
+    const parent = BrowserWindow.fromWebContents(e.sender) ?? win;
+    const r = await dialog.showSaveDialog(parent, { title: 'Save the backup', defaultPath: `novus-ordo-backup-${new Date().toISOString().slice(0, 10)}.novus`, filters: [{ name: 'Novus Ordo backup', extensions: ['novus'] }] });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, sealBackup(contents, password, { app: app.getVersion(), summary }));
+    log('info', `backup saved (${summary.keys} keys, ${summary.trades} trades)`);
+    return { path: r.filePath, summary };
+  });
+  handle('backup:restore', async (e, password) => {
+    const parent = BrowserWindow.fromWebContents(e.sender) ?? win;
+    const pick = await dialog.showOpenDialog(parent, { title: 'Choose a backup to restore', properties: ['openFile'], filters: [{ name: 'Novus Ordo backup', extensions: ['novus'] }] });
+    if (pick.canceled || !pick.filePaths[0]) return null;
+    const text = readFileSync(pick.filePaths[0], 'utf8');
+    const head = peekBackup(text);
+    const { contents } = openBackup(text, password);
+    const sum = head.summary ?? {};
+    const ok = await dialog.showMessageBox(parent, {
+      type: 'warning',
+      buttons: ['Cancel', 'Restore and restart'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Restore a backup',
+      message: `Restore the backup from ${new Date(head.created).toLocaleString()}?`,
+      detail: `It holds ${sum.keys ?? '?'} keys, ${sum.trades ?? '?'} journal trades and ${sum.strategies ?? '?'} deployed strategies.\n\nThe crypto swarm, the bots and the edge finder stop first (open live trades keep their exchange stops). Your settings, keys, strategies and the swarm's book are replaced by the backup's; trades in the journal are added to. Novus Ordo then restarts — the ledger key is the one in the backup.`,
+    });
+    if (ok.response !== 1) return null;
+    care?.stop();
+    care?.setWanted('swarm', false);
+    await cswarm?.stop().catch(() => undefined);
+    await bots?.stopAll('restoring a backup').catch?.(() => undefined);
+    lab?.shutdownFarm();
+    const r = restoreBackup(contents, { sql: db.db, vault, journal, writeLab: (name, v) => writeFileSync(join(labDir(), name), JSON.stringify(v)) });
+    // the swarm is stopped now: after the restart that is not a warning (start it again when you are ready)
+    care?.setWanted('swarm', false);
+    log('info', `backup restored (${r.keys} keys, ${r.kv} settings, ${r.trades} trades added, ${r.files} Lab files)`);
+    return { storage: r.storage, keys: r.keys, trades: r.trades };
+  });
+  handle('app:restart', () => {
+    const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+    app.relaunch(portable ? { execPath: portable, args: [] } : { args: process.argv.slice(1) });
+    setTimeout(() => app.exit(0), 300);
+    return true;
+  });
 }
 
 app.whenReady().then(async () => {
@@ -1147,6 +1298,23 @@ app.whenReady().then(async () => {
     app.exit(1);
     return;
   }
+  journal = new TradeJournal(db.db);
+  care = new Care({
+    db,
+    journal,
+    send: (id, html) => {
+      const s = vault.reveal(id);
+      if (s.kind !== 'telegram' || !s.fields.token) throw new Error('choose a Telegram bot key');
+      if (!s.fields.chatId) throw new Error('the Telegram bot has no chat yet — detect it on the Telegram panel');
+      return tgSendLong(s.fields.token, s.fields.chatId, html);
+    },
+    swarm: () => cswarm?.state() ?? null,
+    lab: () => (lab ? { farm: lab.farmState(), deployed: lab.deployedList.map((d) => ({ id: d.id, name: d.spec.name, stats: d.stats, deployedAt: d.deployedAt, on: d.on })), labBook: cswarm?.labBook ?? {} } : null),
+    bots: () => (bots ? bots.list().map((b) => ({ name: b.name, mode: b.mode, running: b.running, feed: b.feed })) : []),
+    screen: () => screenState,
+    assumedCosts: () => ({ feeBps: lab?.cfg.feeBps ?? 4.5, slipBps: lab?.cfg.slipBps ?? 2 }),
+    log,
+  });
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
@@ -1192,12 +1360,15 @@ app.whenReady().then(async () => {
         emit: (ch, payload) => {
           for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(`amt:${ch}`, payload);
         },
+        onClosed: (t, b) => journal.record(fromBot(t, b)),
       });
       lab = new LabService({
         ccxt: ccxtSvc,
         dir: join(app.getPath('userData'), 'lab'),
         makeWorker: () => new Worker(labWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
         makeFarmWorker: () => new Worker(farmWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
+        // tests charge what your live trades really cost, once there are enough of them (never less than assumed)
+        costs: (assumed) => costsForTests(measureCosts(journal.list({ mode: 'live' }), { assumedFeeBps: assumed.feeBps }), assumed),
         emit: (ch, payload) => {
           for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(ch, payload);
         },
@@ -1208,9 +1379,32 @@ app.whenReady().then(async () => {
         labDeployed: () => lab.deployed('crypto'),
         emit: (ch, payload) => {
           for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send(`cswarm:${ch}`, payload);
+          // a failed exit or entry is told at once, even with the window closed
+          if (ch === 'event' && payload?.kind === 'line' && payload.line?.kind === 'error') care?.error(`${payload.line.agent}:${payload.line.text.slice(0, 40)}`, `Crypto swarm: ${payload.line.text}`);
         },
         log: (level, msg) => (level === 'warn' ? log('warn', msg) : undefined),
+        onClosed: (p) => journal.record(fromSwarm(p, { labName: p.labId ? lab.deployedList.find((d) => d.id === p.labId)?.spec.name : null, venue: venueOf(cswarm.secretId) })),
       });
+      // the trades from before the journal existed join it, once
+      if (!db.get('journal:imported')) {
+        try {
+          const cfgs = new Map(bots.configs().map((c) => [c.id, c]));
+          const n = journal.importOld({
+            positions: cswarm.positions,
+            amtRows: db.amtTrades(0, 8.64e15),
+            labName: (id) => lab.deployedList.find((d) => d.id === id)?.spec.name ?? null,
+            venueOf: (p) => (p.mode === 'live' ? venueOf(cswarm.secretId) : 'paper'),
+            botOf: (a) => {
+              const c = cfgs.get(a.bot_id);
+              return c ? { exchangeId: c.exchangeId, lane: c.exchangeId === 'luno' && String(c.name).startsWith('Luno lane · ') } : null;
+            },
+          });
+          db.set('journal:imported', Date.now());
+          if (n) log('info', `trade journal: ${n} earlier trades added`);
+        } catch (e) {
+          log('warn', 'trade journal import failed', e);
+        }
+      }
       // the edge finder carries on by itself a while after the terminal opens (unless it was stopped)
       if (process.env.NOVUS_NO_FARM !== '1') lab.farmAuto(90_000);
       log('info', 'exchange services ready');

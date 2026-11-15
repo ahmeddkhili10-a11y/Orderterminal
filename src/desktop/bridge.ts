@@ -718,7 +718,7 @@ export interface WalletRecord {
 
 export interface NovusApi {
   desktop: true;
-  app: { info(): Promise<{ version: string; platform: string; userData: string; db: DbInfo; vaultBackend: string; retentionDays: number; safeMode?: boolean }>; openExternal(url: string): Promise<void>; locked(): Promise<boolean>; unlock(code: string): Promise<boolean>; seal(): Promise<boolean>; changeKey(current: string, next: string): Promise<boolean>; leaveSafeMode(): Promise<void>; fullscreen(on?: boolean): Promise<boolean>; isFullscreen(): Promise<boolean>; onFullscreen(fn: (on: boolean) => void): () => void; status(): Promise<AppStatus>; activate(key: string): Promise<AppGate>; acceptTerms(version: number): Promise<AppGate>; setupKey(next: string, again: string): Promise<boolean>; deactivate(): Promise<LicenseState>; onSealed(fn: (reason: string) => void): () => void };
+  app: { info(): Promise<{ version: string; platform: string; userData: string; db: DbInfo; vaultBackend: string; retentionDays: number; safeMode?: boolean }>; openExternal(url: string): Promise<void>; locked(): Promise<boolean>; unlock(code: string): Promise<boolean>; seal(): Promise<boolean>; changeKey(current: string, next: string): Promise<boolean>; leaveSafeMode(): Promise<void>; fullscreen(on?: boolean): Promise<boolean>; isFullscreen(): Promise<boolean>; onFullscreen(fn: (on: boolean) => void): () => void; status(): Promise<AppStatus>; activate(key: string): Promise<AppGate>; acceptTerms(version: number): Promise<AppGate>; setupKey(next: string, again: string): Promise<boolean>; deactivate(): Promise<LicenseState>; restart(): Promise<boolean>; onSealed(fn: (reason: string) => void): () => void };
   net: { fetchJson<T = any>(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<T> };
   vault: {
     list(): Promise<SecretRecord[]>;
@@ -876,6 +876,110 @@ export interface NovusApi {
     commands(id: string | null): Promise<boolean>;
     setStatus(snap: { price: string; status: string }): Promise<void>;
   };
+  care: {
+    status(): Promise<CareStatus>;
+    config(patch: Partial<CareConfig>): Promise<CareStatus>;
+    sendNow(kind: 'daily' | 'weekly'): Promise<boolean>;
+    health(): Promise<StrategyHealth[]>;
+    costs(): Promise<{ measured: Record<string, MeasuredCosts>; forTests: TestCosts }>;
+  };
+  journal: {
+    list(q?: { from?: number; to?: number; mode?: 'live' | 'paper'; source?: JournalRow['source']; strategy?: string; limit?: number }): Promise<JournalRow[]>;
+    note(id: string, note: string): Promise<void>;
+    taxYears(): Promise<number[]>;
+    exportCsv(): Promise<string | null>;
+    tax(year: number): Promise<{ path: string; trades: number; totals: { gainsZar: number; lossesZar: number; feesZar: number; netZar: number }; missingRates: number; fxError: string } | null>;
+  };
+  backup: {
+    create(password: string, storage: Record<string, string>): Promise<{ path: string; summary: { keys: number; trades: number; strategies: number; settings: number } } | null>;
+    restore(password: string): Promise<{ storage: Record<string, string>; keys: number; trades: number } | null>;
+  };
+}
+
+/** while you are away: the daily message, warnings and the weekly report (electron/care) */
+export interface CareConfig {
+  secretId: string;
+  daily: boolean;
+  dailyHour: number;
+  weekly: boolean;
+  /** 0 = Sunday */
+  weekday: number;
+  weeklyHour: number;
+  warnings: boolean;
+  health: boolean;
+}
+export interface CareStatus {
+  cfg: CareConfig;
+  running: boolean;
+  lastDaily: string;
+  lastWeekly: string;
+  sentAt: number | null;
+  nextDaily: number;
+  problems: { key: string; text: string }[];
+}
+export interface StrategyHealth {
+  id: string;
+  name: string;
+  on: boolean;
+  deployedAt: number | null;
+  status: 'early' | 'ok' | 'behind' | 'stopped' | 'quiet';
+  words: string;
+  trades: number;
+  wins: number;
+  winRate: number | null;
+  avgR: number | null;
+  totalR: number;
+  pnl: number;
+  ddR: number;
+  tested: { winRate: number | null; avgR: number | null; sharpe: number | null; perYear: number | null };
+  blocked: { n: number; shadowN: number; shadowR: number } | null;
+  lastAt: number | null;
+}
+export interface MeasuredCosts {
+  n: number;
+  slips: number;
+  slipBps: number | null;
+  slipAvgBps: number | null;
+  feeBps: number | null;
+  feeTrades: number;
+  roundTripBps: number | null;
+}
+export interface TestCosts {
+  feeBps: number;
+  slipBps: number;
+  measured: boolean;
+  n: number;
+  venue: string | null;
+  why: string;
+}
+export interface JournalRow {
+  id: string;
+  source: 'swarm' | 'lab' | 'bot' | 'lane';
+  who: string | null;
+  strategy_id: string | null;
+  mode: 'live' | 'paper';
+  venue: string | null;
+  symbol: string | null;
+  coin: string | null;
+  quote: string | null;
+  side: 'buy' | 'sell';
+  qty: number | null;
+  entry: number | null;
+  exit: number | null;
+  ask_entry: number | null;
+  ask_exit: number | null;
+  fees: number;
+  fee_real: number;
+  fills_real: number;
+  pnl: number;
+  r: number | null;
+  risk_usd: number | null;
+  opened: number | null;
+  closed: number;
+  reason: string | null;
+  why: string | null;
+  detail: string | null;
+  note: string | null;
 }
 
 /** Present only inside the Electron desktop app. */

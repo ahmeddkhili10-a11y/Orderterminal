@@ -60,7 +60,8 @@ export function createFarmRunner(post, o = {}) {
   return {
     async onMessage(msg) {
       if (msg.type === "start") {
-        farm = new Farm(msg.cfg, { save: msg.save ?? null, now });
+        // the costs to test with: measured on your live trades once there are enough of them
+        farm = new Farm(msg.cfg, { save: msg.save ?? null, now, ...(msg.costs ? { costs: msg.costs } : {}) });
         farm.setMarkets(toMarkets(msg.markets));
         deployed = msg.deployed ?? [];
         farm.checkFleet(deployed);

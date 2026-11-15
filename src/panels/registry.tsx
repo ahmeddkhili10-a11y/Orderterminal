@@ -18,6 +18,7 @@ import { FootprintChart, FOOTPRINT_DEFAULTS } from './FootprintChart';
 import { FundingMonitor, FUNDING_DEFAULTS } from './FundingMonitor';
 import { HistoricalChart, HISTORICAL_DEFAULTS } from './HistoricalChart';
 import { Journal, JOURNAL_DEFAULTS } from './Journal';
+import { TradeJournal, TRADE_JOURNAL_DEFAULTS } from './TradeJournal';
 import { LiquidityHeatmap, HEATMAP_DEFAULTS } from './LiquidityHeatmap';
 import { Liquidations, LIQ_DEFAULTS } from './Liquidations';
 import { NewsFeed, NEWS_DEFAULTS } from './NewsFeed';
@@ -117,6 +118,7 @@ export const PANELS: PanelDef[] = [
   { id: 'amt', title: 'AMT Bots', category: 'Algo', component: AmtScalper, defaults: { ...AMT_DEFAULTS }, description: 'Auction Market Theory bots for any symbol — Scalp (rolling value, order flow, minutes) or Intraday (initial balance, prior-day value, holds for hours). Paper or live, on/off switch, backtest on recorded trades.' },
   { id: 'telegram', title: 'Telegram Bot', category: 'Tools', component: TelegramPanel, defaults: { ...TELEGRAM_DEFAULTS }, description: 'Send alerts to Telegram and answer /price and /status from your chat.' },
   { id: 'alerts', title: 'Alerts', category: 'Tools', component: AlertsPanel, defaults: { ...ALERTS_DEFAULTS }, description: 'Twelve alert types evaluated in your browser against the live feed.' },
+  { id: 'tradebook', title: 'Trade journal', category: 'Account', component: TradeJournal, defaults: { ...TRADE_JOURNAL_DEFAULTS }, description: 'Every finished trade — the crypto swarm, deployed strategies, the bots and the Luno lane — with why it was taken, how it went and your notes; what trading really costs; the journal as a spreadsheet and a tax year in rands for SARS.' },
   { id: 'journal', title: 'Journal', category: 'Tools', component: Journal, defaults: { ...JOURNAL_DEFAULTS }, description: 'Timestamped trading notes stored in your browser.' },
   { id: 'calculator', title: 'Calculator', category: 'Tools', component: Calculator, defaults: { ...CALC_DEFAULTS }, description: 'Position size, risk/reward, liquidation estimate and market-cap math.' },
 ];

@@ -7,7 +7,7 @@
 import { AuthoritySwitch, LabBookLine } from '../lab/Authority';
 import { useEffect, useMemo, useState } from 'react';
 import { useCSwarm } from '../cswarm/store';
-import { desktop } from '../desktop/bridge';
+import { desktop, type StrategyHealth } from '../desktop/bridge';
 import type { StrategySpec } from '../lab/backtest';
 import { EXIT_DEFAULT, FILTER_MAP, FILTERS, SIGNAL_MAP, SIGNALS, type ExitSpec } from '../lab/library';
 import { PAPERS, type Paper } from '../lab/papers';
@@ -830,6 +830,39 @@ export function LabBuilder({ config: c, setConfig }: PanelProps<BuilderConfig>) 
 
 // ---------- DEPL ----------
 
+/** each deployed strategy's health (electron/care/health.mjs), fetched every minute */
+function useHealth(n: number) {
+  const [h, setH] = useState<Record<string, StrategyHealth>>({});
+  useEffect(() => {
+    if (!desktop?.care) return;
+    let live = true;
+    const load = () => void desktop!.care.health().then((xs) => live && setH(Object.fromEntries(xs.map((x) => [x.id, x])))).catch(() => undefined);
+    load();
+    const t = setInterval(load, 60_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [n]);
+  return h;
+}
+
+const HEALTH_WORD: Record<StrategyHealth['status'], string> = { early: 'too early', ok: 'on track', behind: 'behind its test', stopped: 'may have stopped working', quiet: 'quiet' };
+function HealthBadge({ h }: { h?: StrategyHealth }) {
+  if (!h) return <span className="muted">—</span>;
+  return (
+    <span className={`health-badge health-${h.status}`} title={h.words}>
+      {HEALTH_WORD[h.status]}
+      <span className="muted">
+        {' '}
+        · {h.trades} trade{h.trades === 1 ? '' : 's'}
+        {h.winRate !== null ? `, ${Math.round(h.winRate * 100)}% won` : ''}
+        {h.tested.winRate !== null ? ` (test ${Math.round(h.tested.winRate * 100)}%)` : ''}
+      </span>
+    </span>
+  );
+}
+
 export function LabDeployed() {
   const { status } = useLabLink();
   const lines = useCSwarm((s) => s.lines);
@@ -837,6 +870,7 @@ export function LabDeployed() {
   const L = desktop.lab;
   const dep = status?.deployed ?? [];
   const said = lines.filter((l) => l.agent === 'lab').slice(-30).reverse();
+  const health = useHealth(dep.length);
   return (
     <div className="pro-panel">
       <div className="pro-scroll">
@@ -851,6 +885,7 @@ export function LabDeployed() {
               <th>SR</th>
               <th>t</th>
               <th className="l">VERDICT</th>
+              <th className="l" title="Its real trades since it was deployed, against what its test promised">HEALTH</th>
               <th className="l" title="Who decides its trades: the swarm's council, or the strategy as tested (only Guardian and Risk can stop it)">WHO DECIDES</th>
               <th />
             </tr>
@@ -872,6 +907,9 @@ export function LabDeployed() {
                 <td className="l">
                   <span className={`lab-verdict ${verdictCls(d.stats.verdict)}`}>{d.stats.verdict}</span>
                 </td>
+                <td className="l" data-health={health[d.id]?.status ?? 'none'}>
+                  <HealthBadge h={health[d.id]} />
+                </td>
                 <td className="l">
                   <AuthoritySwitch d={d} compact />
                   <div>
@@ -888,6 +926,12 @@ export function LabDeployed() {
           </tbody>
         </table>
         {!dep.length && <div className="pro-empty">Nothing deployed. Run research (RSCH) or build a strategy (BT) and deploy it.</div>}
+        {status?.costs && (
+          <div className="lab-line muted" data-costs>
+            Costs in every test: {status.costs.feeBps} bps fees + {status.costs.slipBps} bps slippage a fill — {status.costs.why}.
+          </div>
+        )}
+        <div className="lab-line muted">HEALTH compares each strategy's real trades (paper and live) since it was deployed with its test. It tells you on Telegram when one falls behind; switching it off stays your decision.</div>
         <div className="pro-section">WHAT THE LAB AGENT HAS SAID</div>
         {said.map((l) => (
           <div key={l.t} className="lab-line mono">

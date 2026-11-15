@@ -42,7 +42,7 @@ import {
 } from '../lab/flow';
 import { applySend, takeSends, tuneWords, useLabInbox } from '../lab/bridge';
 import type { Params } from '../lab/library';
-import { specNeeds } from '../lab/live';
+import { specNeeds, testedStats } from '../lab/live';
 import { ncdf } from '../lab/stats';
 import { startLabLink, useLab, type LabTest } from '../lab/store';
 import { Check, type PanelProps } from '../ui/controls';
@@ -289,7 +289,7 @@ export function BotBuilder({ config: raw, setConfig }: PanelProps<BotConfig>) {
     if (v.tone === 'bad' && !confirm('This bot did not hold up on data it never saw. Deploy it anyway?')) return;
     const spec = res.spec ?? built.spec;
     void desktop!.lab
-      .deploy({ spec: { ...spec, name: built.spec.name }, tfH: style.tfH, stats: { sharpe: res.oos.sharpe, t: res.oos.t, dsr: res.oos.psr, trades: res.oos.trades, verdict: `bot builder · ${v.tone === 'good' ? 'strong' : v.tone === 'ok' ? 'promising' : 'weak'}` }, authority: c.authority }, { crypto: true, meme: false }, built.coins)
+      .deploy({ spec: { ...spec, name: built.spec.name }, tfH: style.tfH, stats: { sharpe: res.oos.sharpe, t: res.oos.t, dsr: res.oos.psr, trades: res.oos.trades, ...testedStats(res.oos, style.tfH), verdict: `bot builder · ${v.tone === 'good' ? 'strong' : v.tone === 'ok' ? 'promising' : 'weak'}` }, authority: c.authority }, { crypto: true, meme: false }, built.coins)
       .then(() => {
         setDeployed(true);
         setMsg(c.authority === 'tested' ? 'Deployed to the crypto swarm, to trade as tested: the council advises, only Guardian and Risk can stop a trade. Switch it on or off, or change who decides, in the swarm view (⇢ Deploy) or in DEPL.' : 'Deployed to the crypto swarm. It proposes when its rules fire; the council, the forest and the risk manager decide every trade. Switch it on or off, or change who decides, in the swarm view (⇢ Deploy) or in DEPL.');

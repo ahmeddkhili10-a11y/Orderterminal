@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SecretRecord } from '../desktop/bridge';
+import { desktop, type CareConfig, type CareStatus, type SecretRecord } from '../desktop/bridge';
 import { telegram } from '../desktop/telegram';
 import { vault } from '../desktop/vault';
 import { openConnections } from '../app/connect';
@@ -81,14 +81,14 @@ export function TelegramPanel(_: PanelProps<TelegramConfig>) {
             {chatId && <span className="muted mono"> chat {chatId}</span>}
           </li>
           <li>
-            <button className="chip" disabled={!chatId} onClick={() => void run('test sent', () => telegram.send(bot!.id, '✅ <b>Novus Ordo</b> is connected.\n\nThe swarm will tell you here when it buys a coin, when a coin hits a new multiple, and when it sells.'))}>
+            <button className="chip" disabled={!chatId} onClick={() => void run('test sent', () => telegram.send(bot!.id, '✅ <b>Novus Ordo</b> is connected.\n\nThe crypto swarm, the bots and the Luno lane will tell you here when they open and close trades, with the result.'))}>
               Send test message
             </button>
           </li>
         </ol>
         <div className="section-title">Swarm notifications</div>
         <Check checked={s.telegramSwarm} onChange={(telegramSwarm) => s.set({ telegramSwarm })}>
-          <b>Swarm trades on Telegram</b> <span className="muted">— every buy with the coin's chart and why it bought, each new multiple (2×, 5×, 10× …), and every sell with the result</span>
+          <b>Luno lane trades on Telegram</b> <span className="muted">— each buy and sell the Luno lane makes in rands, with its result, and any failure</span>
         </Check>
         <Check checked={s.telegramCrypto} onChange={(telegramCrypto) => s.set({ telegramCrypto })}>
           <b>Crypto swarm trades on Telegram</b> <span className="muted">— each trade three times, with its chart: the setup (potential gain, positioning, the council's votes), how it is being managed, and the result in green or red</span>
@@ -103,6 +103,7 @@ export function TelegramPanel(_: PanelProps<TelegramConfig>) {
           <input type="checkbox" checked={s.telegramCommands} disabled={!chatId} onChange={(e) => s.set({ telegramCommands: e.target.checked })} /> Answer <span className="mono">/price</span>,{' '}
           <span className="mono">/status</span>, <span className="mono">/help</span> (only in your chat, while the app is open)
         </label>
+        {desktop?.care && <AwaySection chatReady={!!chatId} onNote={note} />}
         {log.length > 0 && (
           <>
             <div className="section-title">Log</div>
@@ -113,6 +114,76 @@ export function TelegramPanel(_: PanelProps<TelegramConfig>) {
             ))}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const HOURS = Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, '0')}:00` }));
+
+/** While you are away: the daily message, warnings, strategy health and the weekly report — sent by the desktop process */
+function AwaySection({ chatReady, onNote }: { chatReady: boolean; onNote: (ok: boolean, text: string) => void }) {
+  const [st, setSt] = useState<CareStatus | null>(null);
+  const [busy, setBusy] = useState('');
+  useEffect(() => {
+    let live = true;
+    const load = () => void desktop!.care.status().then((x) => live && setSt(x)).catch(() => undefined);
+    load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
+  if (!st) return null;
+  const c = st.cfg;
+  const set = (patch: Partial<CareConfig>) => void desktop!.care.config(patch).then(setSt).catch((e) => onNote(false, String(e?.message ?? e)));
+  const send = (kind: 'daily' | 'weekly') => {
+    setBusy(kind);
+    void desktop!.care
+      .sendNow(kind)
+      .then(() => onNote(true, kind === 'daily' ? "today's check-in sent" : "this week's report sent"))
+      .catch((e) => onNote(false, String(e?.message ?? e)))
+      .finally(() => setBusy(''));
+  };
+  return (
+    <div data-care>
+      <div className="section-title">While you are away</div>
+      <p className="muted" style={{ fontSize: 11, margin: '2px 0 6px' }}>
+        Sent by Novus Ordo's background engine, so they keep coming even if the window freezes. Novus Ordo must stay open, and it starts sending once the ledger key has been entered.
+      </p>
+      <Check checked={c.daily} onChange={(daily) => set({ daily })}>
+        <b>Daily check-in</b> <span className="muted">— every day: is everything running, the account, open trades, the last 24 hours, the strategies and the edge finder</span>
+      </Check>
+      <div className="care-row">
+        <span className="muted">at</span>
+        <Select value={String(c.dailyHour)} options={HOURS} onChange={(v) => set({ dailyHour: Number(v) })} width={80} />
+        <button className="chip" disabled={!chatReady || busy !== ''} onClick={() => send('daily')}>
+          {busy === 'daily' ? 'Sending…' : 'Send one now'}
+        </button>
+      </div>
+      <Check checked={c.warnings} onChange={(warnings) => set({ warnings })}>
+        <b>Warn me when something stops</b> <span className="muted">— the swarm stopping by itself, a price feed down, the edge finder down, the window frozen, a failed exit — and the all-clear when it is back. Also when Novus Ordo starts again after being closed.</span>
+      </Check>
+      <Check checked={c.health} onChange={(health) => set({ health })}>
+        <b>Strategy health</b> <span className="muted">— when a deployed strategy falls behind its test or may have stopped working (it is never switched off for you)</span>
+      </Check>
+      <Check checked={c.weekly} onChange={(weekly) => set({ weekly })}>
+        <b>Weekly report card</b> <span className="muted">— each agent, strategy and bot: trades, wins, profit, what it expected against what it got, real costs, the edge finder's best</span>
+      </Check>
+      <div className="care-row">
+        <span className="muted">on</span>
+        <Select value={String(c.weekday)} options={DAYS.map((d, i) => ({ value: String(i), label: d }))} onChange={(v) => set({ weekday: Number(v) })} width={110} />
+        <span className="muted">at</span>
+        <Select value={String(c.weeklyHour)} options={HOURS} onChange={(v) => set({ weeklyHour: Number(v) })} width={80} />
+        <button className="chip" disabled={!chatReady || busy !== ''} onClick={() => send('weekly')}>
+          {busy === 'weekly' ? 'Sending…' : 'Send one now'}
+        </button>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+        {!chatReady ? 'Link a Telegram chat above first.' : `Next check-in ${new Date(st.nextDaily).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}${st.sentAt ? ` · last message ${new Date(st.sentAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
+        {st.problems.length > 0 && <div className="down">Needs a look now: {st.problems.map((p) => p.text).join(' · ')}</div>}
       </div>
     </div>
   );

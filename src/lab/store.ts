@@ -27,7 +27,7 @@ export interface LabDeployed {
   tfH: number;
   coins: string[];
   targets: { crypto: boolean; meme: boolean };
-  stats: { sharpe: number; t: number; dsr: number; trades: number; verdict: string };
+  stats: { sharpe: number; t: number; dsr: number; trades: number; verdict: string; winRate?: number; avgR?: number; perYear?: number; maxDD?: number };
   deployedAt: number;
   on: boolean;
   /** council: the swarm's council can block its signals · tested: only the safety bots (Guardian, Risk) can */
@@ -42,6 +42,8 @@ export interface LabStatus {
   cfg: LabConfig;
   deployed: LabDeployed[];
   last: { at: number; trials: number; top: number; verdicts: string[] } | null;
+  /** the fees and slippage every test charges: assumed, or raised to what your live trades measured */
+  costs?: { feeBps: number; slipBps: number; measured: boolean; n: number; why: string };
 }
 
 export interface LabTest {

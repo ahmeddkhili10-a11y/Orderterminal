@@ -409,7 +409,8 @@ const DRAWER_TABS: { id: string; label: string; panel?: string }[] = [
   { id: 'wallet', label: 'Wallet', panel: 'wallet' },
   { id: 'luno', label: 'Luno', panel: 'luno' },
   { id: 'calculator', label: 'Calculator', panel: 'calculator' },
-  { id: 'journal', label: 'Journal', panel: 'journal' },
+  { id: 'tradebook', label: 'Trade journal', panel: 'tradebook' },
+  { id: 'journal', label: 'Notes', panel: 'journal' },
   { id: 'database', label: 'Database', panel: 'database' },
 ];
 const tabOf = (t: string) => DRAWER_TABS.find((x) => x.id === t || x.panel === t)?.id ?? 'deploy';

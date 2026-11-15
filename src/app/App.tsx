@@ -6,6 +6,7 @@ import { startAlerts, useToasts } from '../alerts/engine';
 import { startAmtService } from '../desktop/amt';
 import { startLunoAlerts } from '../luno/lane';
 import { startBotAlerts } from '../desktop/botAlerts';
+import { startCareLink } from '../desktop/care';
 import { startCryptoSwarmLink } from '../cswarm/store';
 import { CommandCenter } from '../command/CommandCenter';
 import { startTelegramService } from '../desktop/telegram';
@@ -151,6 +152,7 @@ export function App() {
     startCollectors();
     startAlerts();
     startTelegramService();
+    startCareLink();
     startAmtService();
     startLunoAlerts();
     startBotAlerts();

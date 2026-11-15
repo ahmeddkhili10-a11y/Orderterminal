@@ -31,7 +31,12 @@ Novus Ordo ships as a desktop app built with Electron. The desktop app adds:
   - every attempt — placed, rejected or failed — is written to the `orders_log` table in the database and shown in the ticket's order log.
 
   Start on a testnet key. Create exchange keys with trade permission only — never enable withdrawals.
-- **Telegram** (Telegram Bot panel): the crypto swarm's trades, each with its chart — and, if you want them, a pop-up and a sound on the computer too. The order-flow reports and alerts (daily/weekly VAH-POC reports, liquidations, big prints, bot stories, feed-down notices) were removed.
+- **Telegram** (Telegram Bot panel): the crypto swarm's trades, each with its chart (sent once, however many windows are popped out) — and, if you want them, a pop-up and a sound on the computer too. The order-flow reports and alerts (daily/weekly VAH-POC reports, liquidations, big prints, bot stories, feed-down notices) were removed.
+- **While you are away** (Telegram panel; `electron/care/`): the desktop process — not the window — sends a **daily check-in** (everything running? the account, open trades, the last 24 hours, strategy health, the edge finder, the feeds), **warnings** the moment something stops (the swarm stopping by itself, a price feed down, the edge finder down or its data stale, the window frozen, a failed exit) with an all-clear when it is back, a note when the app comes back after being closed, **strategy health** alerts, and a **weekly report card** (each agent's trades and profit against what it expected, each deployed strategy's week and health, bots, the Luno lane, real costs, the edge finder's best).
+- **Trade journal** (`JRNL`; `electron/care/journal.mjs`): every finished trade — swarm agents, deployed strategies, bots, the Luno lane — kept for good in SQLite, with its reasons, the council's votes, what it expected, its real slippage and fees, and your notes; CSV export, and a **tax export** of a South African tax year's live trades in rands (the day's USD/ZAR rate from Yahoo Finance) with a summary.
+- **Strategy health** (DEPL; `electron/care/health.mjs`): each deployed strategy's real trades against its test — too early, on track, behind, may have stopped working, quiet. Told on Telegram; nothing is ever switched off for you.
+- **Real costs** (`electron/care/costs.mjs`): live trades record the decision price and the fill; once there are 10 live fills, every test (bot builder, Research, backtester, edge finder) charges the measured slippage and fees — never less than assumed.
+- **Backups** (⚙ Settings → Backup; `electron/care/backup.mjs`): keys, settings, layouts, the Lab and edge finder, the swarm's book, the journal and the bots in one AES-256-GCM file under a scrypt password key; restore on this or another computer.
 - **AMT Bots** (panel → Algo): Auction Market Theory bots in two styles — **Scalp** (below) and **Intraday** (initial-balance extension, prior-day value acceptance/rejection, 80 % rule; holds for hours with a trailing stop to the session POC and is flat before the session closes). The scalp style is a scalping bot you can run on any symbol of any CCXT exchange, one bot per symbol, each with its own **ON/OFF switch**. It builds a rolling volume profile (POC, 70 % value area), tracks balance → probe → acceptance/rejection, and trades three setups when order flow (aggressor delta, volume intensity, book imbalance) agrees: **responsive fade** of a rejected probe back to POC, **initiative breakout** after acceptance outside value, and the **80 % rule** re-entry into prior value. Size comes from risk per trade; breakeven at 1R, a time stop, cooldown, trades-per-hour and a daily loss limit that switches the bot off. **Paper** mode (default) simulates fills with fees and slippage; **Live** mode trades through the same protected path as the Order Ticket and places a reduce-only exchange stop on derivatives. Any failed live order switches the bot off. The top bar shows **ALGO n · PnL ⏹** while bots run — click it to stop all. **Backtest** replays trades the terminal recorded in its database. Theory, sources and an honest note on what “HFT” means from a laptop: [docs/AMT.md](docs/AMT.md).
 - **Phantom wallet**: **Connect Phantom** in the **Phantom Wallet** panel opens a one-time local page in your default browser (where the Phantom extension lives). You approve the connection and sign a message; the app verifies the ed25519 signature before saving the address. It is read-only — the app never sees a private key and cannot move funds — and shows SOL, SPL tokens and USD value (Jupiter prices). You can also watch any address, and add a private RPC in the vault.
 
@@ -130,7 +135,7 @@ Some venues are geo-restricted (e.g. Binance in the US); pick a venue that works
   - *Live only*.
 - **Layouts** — dockable tabs/splits (drag tabs, double-click a header to maximise). Layout, per-panel settings, alerts, journal and watchlist persist in your browser. A gallery of presets (Terminal, Flow Desk, Scalper, Liquidity, Derivatives, Market Overview, Whale Watch, Options), named saved layouts and JSON import/export are under **▦ Layouts**.
 
-## Panels (31)
+## Panels (32)
 
 | Category | Panel | Highlights |
 |---|---|---|
@@ -163,7 +168,8 @@ Some venues are geo-restricted (e.g. Binance in the US); pick a venue that works
 | Algo | **AMT Bots** | Auction Market Theory bots for any symbol — Scalp or Intraday style: value area, initial balance, prior-day value, acceptance/rejection, order-flow confirmation, paper/live, on/off switch, backtest (desktop) |
 | Tools | **Telegram Bot** | The swarm's trades on Telegram, answer /price and /status |
 | | **Alerts** | 12 types evaluated in-browser: price above/below, large trade, liquidation, liquidation cascade, CVD divergence, absorption, wall appears, wall pulled, volume spike, delta spike, OI change — sound, browser notifications, cooldowns, log |
-| | **Journal** | Timestamped notes with price and tags; export Markdown/JSON |
+| | **Journal** (Notes) | Timestamped notes with price and tags; export Markdown/JSON |
+| Account | **Trade journal** | Every finished trade with its reasons and your notes, real costs, CSV and a ZAR tax-year export |
 | | **Calculator** | Risk-based position size with fees and R:R, isolated liquidation estimate, market-cap ↔ price |
 
 ## URL parameters

@@ -174,7 +174,8 @@ export function PopoutPage({ panelId, storeKey, title, cfg }: { panelId: string;
   useEffect(() => {
     // market data streams to this window directly; the swarm and the Lab come from the desktop process
     hub();
-    startCryptoSwarmLink();
+    // the trades are told by the main window only (one message each, however many windows are open)
+    startCryptoSwarmLink({ tell: false });
     startLabLink();
     void desktop?.screens.self().then(setSelf);
     document.title = `${title} — Novus Ordo`;

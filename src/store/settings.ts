@@ -105,7 +105,7 @@ export interface Settings {
   wallets: SavedWallet[];
   /** Telegram bot (vault key id) and command replies */
   telegramSecretId: string;
-  /** the swarm's trades on Telegram: each buy with its chart and reasoning, new multiples, exits */
+  /** the Luno lane's trades on Telegram (the name is from the old meme swarm, kept so saved settings carry over) */
   telegramSwarm: boolean;
   /** the swarm's buys and exits as a pop-up and a sound on this computer */
   swarmDesktopAlerts: boolean;

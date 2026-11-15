@@ -371,7 +371,7 @@
 <section class="chapter" data-ch="5">
   <div class="ch-head"><div class="ch-num">Chapter 5</div><h1>The Strategy Lab</h1><p class="ch-lead">Strategy Lab (F2): build a strategy, test it honestly on years of data, and deploy it to the crypto swarm.</p></div>
   <h2 data-toc>The edge finder: strategies found for you</h2>
-  <p>The edge finder (<code>FARM</code>) is a strategy farm that runs by itself for as long as the terminal is open — for days, if you leave it. You do not need to build and test bots one at a time: it builds them from the bot builder's blocks — every strategy and filter, and the Quant desk's models — tests them, and keeps a <b>top five for each pace</b>: scalping, intraday and swing. It treats every bot as curve-fitted until the bot proves it is not.</p>
+  <p>The edge finder (<code>FARM</code>) is a strategy farm that runs by itself for as long as the terminal is open — for days, if you leave it. You do not need to build and test bots one at a time: it builds them from the bot builder's blocks — every strategy and filter, and the Quant desk's models — tests them, and keeps a <b>top five for each pace</b>: scalping, intraday, swing and position. It breeds on six coins by default (BTC, ETH, SOL, BNB, XRP and DOGE; up to twelve), and reads six years of 4-hour candles and eight years of daily ones for the slow paces — they trade a few times a month, and only years of history give them enough trades to pass the checks, so their top fives fill instead of waiting. It treats every bot as curve-fitted until the bot proves it is not.</p>
   <ol class="steps">
     <li><b>Breed.</b> Bots are built from the blocks — one to three strategies, joined in any of five ways — and scored on the first part of the history. Each pace has its own population, bred side by side. The best are crossed, <i>merged</i> (the strategies of two bots joined into one) and varied into the next generation, and new random bots keep arriving.</li>
     <li><b>The unseen 30 %.</b> A bot that did well in training is tested on a later stretch of the history, which it never saw. It must make money there, and do at least half as well as in training.</li>
@@ -421,7 +421,7 @@
   <h3>Using it</h3>
   <ul>
     <li>It starts by itself a minute and a half after the terminal opens, and carries on from where it was. Press <b>■ Stop</b> when you are satisfied; it keeps everything it found and stays stopped until you press <b>▶ Start</b>.</li>
-    <li><b>⚙ Settings</b>: the coins, the paces to breed (scalping, intraday and swing by default; one-week, position and the 15-minute styles can be added), long and short or long only, the speed (<i>gentle</i> uses about half of one processor core and keeps the terminal smooth; <i>full</i> tries more bots an hour) and the drawdown limit for the shuffle test.</li>
+    <li><b>⚙ Settings</b>: the coins, the coins (up to twelve), the paces to breed (scalping, intraday, swing and position by default; one-week, long-term hold and the 15-minute styles can be added), long and short or long only, the speed (<i>gentle</i> uses about half of one processor core and keeps the terminal smooth; <i>full</i> tries more bots an hour) and the drawdown limit for the shuffle test.</li>
     <li>Click a top-five strategy to see its rules in words, its curve, and every check it passed, with the numbers. Then <b>Open in the bot builder</b> to see what it is built of, block by block, or <b>Deploy to the crypto swarm</b> — choosing <i>Council decides</i> or <i>Trade as tested</i>. Deploying is always your decision.</li>
     <li><b>The live fleet</b> shows every strategy you deployed, checked on the candles since: healthy, slipping or fading. When one fades, a top-five strategy at the same pace is offered as its replacement.</li>
   </ul>
@@ -541,6 +541,20 @@
       Either way, <b>Guardian</b> (spreads, volatility spikes) and <b>Risk</b> (daily loss, drawdown and the size of every trade) can always stop a trade.</li>
     <li>In <code>DEPL</code> or the swarm's deploy gate: switch each strategy on or off, change who decides, or remove it. Each strategy keeps a record of its signals, trades, and any signals the council blocked — followed anyway, so you can see whether the council saved or cost money.</li>
   </ol>
+  <h3>Strategy health: is it still working?</h3>
+  <p>A strategy that worked in its test can stop working when the market changes. The <b>HEALTH</b> column in <code>DEPL</code> compares each strategy's real trades since it was deployed — paper and live — with what its test promised: how often it won, and its average trade in R.</p>
+  <table>
+    <tr><th style="width:26%">It says</th><th>What it means</th></tr>
+    <tr><td><b>too early</b></td><td>Fewer than 8 trades. Nothing can be told yet.</td></tr>
+    <tr><td><b>on track</b></td><td>Nothing worrying.</td></tr>
+    <tr><td><b>behind its test</b></td><td>Worse than its test, by more than bad luck usually explains. Keep an eye on it.</td></tr>
+    <tr><td><b>may have stopped working</b></td><td>At least 12 trades, and losing — or winning far less often than tested — with evidence. Consider switching it off.</td></tr>
+    <tr><td><b>quiet</b></td><td>No trades for much longer than its test says is normal: the market may not be giving it its setups, or the council is blocking it.</td></tr>
+  </table>
+  <figure><img src="img/depl-health.jpg" /><figcaption>DEPL with the HEALTH column (here on test data): one strategy has won 2 of 14 trades against 58 % in its test, and may have stopped working; the other was just deployed. Below, the costs every test now charges, measured on live trades.</figcaption></figure>
+  <p>When a strategy gets worse, you get one message on Telegram saying so in plain words. <b>Nothing is ever switched off for you</b>: retiring a strategy, like deploying one, is your decision.</p>
+  <h3>Real trading costs</h3>
+  <p>Every test charges fees and slippage. Until you trade live, they are an assumption (4.5 bps fees and 2 bps slippage a fill). Every live trade records the price the decision was made at and the price the exchange actually filled — the gap is the real slippage — and the exchange's own fee where it reports one. After 10 live fills, every test — the bot builder, Research, the backtester and the edge finder — charges what your trades really cost. Never <i>less</i> than the assumption, though: a few lucky fills do not make every future test rosier. <code>DEPL</code> and the trade journal show the costs in use and where they came from.</p>
   <figure><img src="img/bb-13-deploy.jpg" /><figcaption>The Deploy block: choose who decides the bot's trades, then deploy to the crypto swarm.</figcaption></figure>
   <div class="box warn"><b>Honest limits</b>A backtest, however careful, describes the past. Markets change and published edges fade. Out-of-sample results on one history are one draw: more coins, more years and another timeframe make a verdict firmer. Fills in fast markets can be worse than tested. Always run a new strategy on paper first.</div>
 </section>
@@ -600,11 +614,23 @@
     <tr><td class="code">WALL</td><td>Wallet</td><td>Phantom wallet balances and activity (chapter 7).</td></tr>
     <tr><td class="code">LUNO</td><td>Luno lane</td><td>Crypto against South African rands on Luno: daily trend bots.</td></tr>
     <tr><td class="code">CALC</td><td>Calculator</td><td>Position size, risk/reward and liquidation price.</td></tr>
-    <tr><td class="code">NOTE</td><td>Journal</td><td>Timestamped trading notes.</td></tr>
+    <tr><td class="code">JRNL</td><td>Trade journal</td><td>Every trade with its reason and your notes; real costs; the journal and a tax year in rands (CSV).</td></tr>
+    <tr><td class="code">NOTE</td><td>Notes</td><td>Timestamped trading notes.</td></tr>
     <tr><td class="code">DB</td><td>Database</td><td>Recorded trades, retention and CSV export.</td></tr>
   </table>
   <h2 data-toc>Trade reports on your phone</h2>
-  <p>With Telegram connected, every swarm trade sends three messages, each with a chart: <b>the setup</b> (entry, stop, target, the potential against the risk, the odds and the council's votes), <b>managing</b> (the first decision after entry, such as moving the stop to break-even) and <b>the result</b> (profit or loss in dollars and R, how long it was held, fees, and a verdict in plain words).</p>
+  <p>With Telegram connected, every swarm trade sends three messages, each with a chart: <b>the setup</b> (entry, stop, target, the potential against the risk, the odds and the council's votes), <b>managing</b> (the first decision after entry, such as moving the stop to break-even) and <b>the result</b> (profit or loss in dollars and R, how long it was held, fees, and a verdict in plain words). Each trade is sent once, however many windows you have popped out.</p>
+  <h2 data-toc>While you are away: check-ins, warnings and the weekly report</h2>
+  <p>Novus Ordo keeps in touch on Telegram when you are not at the screen. These messages are sent by its background engine, not the window, so they keep coming even if the window freezes. Novus Ordo must stay open, and it starts sending once the ledger key has been entered. Set them on the Telegram panel (<code>TG</code>), under <b>While you are away</b>.</p>
+  <table>
+    <tr><th style="width:26%">Message</th><th>What it says</th></tr>
+    <tr><td><b>Daily check-in</b><br /><span class="muted">at the hour you choose (8:00 by default)</span></td><td>🟢 all running, or 🟠 and what needs a look. The crypto swarm (running or not, paper or live, the account and its change in 24 hours, open trades), the last 24 hours' trades, the deployed strategies' health, the edge finder (bots tried, survivors, whether its data is up to date), any bots, and the price feeds. If it does not arrive, something is wrong with the computer or the connection.</td></tr>
+    <tr><td><b>Warnings</b><br /><span class="muted">as soon as they happen</span></td><td>⚠️ the swarm stopped without you stopping it; no prices for a coin for 5 minutes; the edge finder down for 15 minutes, or its candles out of date for 6 hours; the window frozen or crashed; a failed entry or exit. Each is told once (again after six hours if it lasts), and ✅ <b>back to normal</b> follows when it clears. When Novus Ordo starts again after being closed — or the computer was off — it says for how long.</td></tr>
+    <tr><td><b>Strategy health</b></td><td>When a deployed strategy falls behind its test or may have stopped working (see chapter 5).</td></tr>
+    <tr><td><b>Weekly report card</b><br /><span class="muted">Sunday 18:00 by default</span></td><td>📊 the week's trades, live and paper apart, after fees; the swarm account's change; each agent's trades, wins and profit with <i>what it expected</i> at entry against what it got; each deployed strategy's week and health; the bots and the Luno lane; the best and worst trade; the real costs; the edge finder's week and the best strategy of each pace.</td></tr>
+  </table>
+  <figure><img src="img/telegram-away.jpg" /><figcaption>The Telegram panel: what is sent for each trade, and — under While you are away — the daily check-in, the warnings, strategy health and the weekly report, each with its time.</figcaption></figure>
+  <p><b>Send one now</b> beside each sends today's check-in or this week's report straight away — a quick way to see that it reaches your phone.</p>
 </section>
 
 <!-- ============ 7 wallets & connections ============ -->
@@ -671,6 +697,7 @@
     <li>Paste the token into 🔌 <b>Connect → Telegram bot</b>.</li>
     <li>Open the Telegram panel (<code>TG</code>), press Start in your bot's chat, then <b>Detect chat</b> and <b>Send test message</b>.</li>
     <li>The bot also answers <code>/price</code>, <code>/status</code> and <code>/help</code> — only from your own chat, while the terminal is open.</li>
+    <li>Choose what it sends: the crypto swarm's trades, the order-flow bots' trades, the Luno lane's trades, and — under <b>While you are away</b> — the daily check-in, the warnings, strategy health and the weekly report (chapter 6).</li>
   </ol>
   <h3>Phantom wallet</h3>
   <p><b>Connect Phantom</b> in the Wallet panel opens a one-time page in your browser, where you approve the connection and sign a message. The terminal verifies the signature and then shows the wallet's SOL and token balances, their value and recent activity. It is read-only: the terminal never sees a private key and cannot move funds.</p>
@@ -704,8 +731,27 @@
     <li><code>PORT</code> — balances, positions, open orders and fills; <b>Cancel</b>, <b>Cancel all</b> and <b>Close</b> (reduce-only at market).</li>
     <li><code>CALC</code> — position size from risk, reward-to-risk, and liquidation price before you trade.</li>
     <li><code>ALRT</code> — price and order-flow alerts that pop up on screen.</li>
-    <li><code>NOTE</code> — a timestamped trading journal.</li>
+    <li><code>NOTE</code> — timestamped trading notes.</li>
   </ul>
+  <h2 data-toc>The trade journal and the tax export</h2>
+  <p><code>JRNL</code> keeps every finished trade for good — the crypto swarm's agents, the strategies you deployed, the order-flow bots and the Luno lane — paper and live. (The swarm itself keeps only its last few hundred; trades from before the journal existed were added to it once.)</p>
+  <ul>
+    <li><b>Each line</b>: when it closed, who took it, the coin and side, the result in dollars (or rands) and in R, how it closed, and why it was taken. Filter live or paper and by source, or search for a coin, a reason or a note.</li>
+    <li><b>Click a trade</b> to see why it was taken (the setup and the council's votes), how it went (entry and exit, how long it was held, the decisions made while it was open, what it expected against what it made, the fees, and — for live trades — the slippage against the decision price), and <b>your note</b>. Notes are kept with the trade and go into the exports.</li>
+    <li>At the top: the totals for live and paper, and the <b>real costs</b> the tests now use (chapter 5).</li>
+    <li><b>⇩ Journal (CSV)</b> saves every trade as a spreadsheet.</li>
+    <li><b>⇩ Tax export (ZAR)</b> saves one South African tax year (1 March to the end of February) of <i>live</i> trades, with every profit, loss and fee also in rands at the dollar's rate on the day the trade closed (from Yahoo Finance; USDT and USDC count as dollars; the Luno lane is already in rands), and a summary at the end: profits, losses, net, fees, and each source's total. If a day's rate could not be downloaded, that trade's rand columns are left empty and the summary says how many.</li>
+  </ul>
+  <figure><img src="img/journal.jpg" /><figcaption>The trade journal (here on test data): live and paper totals, the real costs, every trade with its result and reason, and one opened — why it was taken, how it went, its slippage, and a note.</figcaption></figure>
+  <div class="box"><b>Not tax advice</b>The export is a record for you and your tax practitioner. SARS can treat crypto trading as income or as capital, depending on how you trade; a practitioner can tell you which applies, and what else (deposits, withdrawals, holdings) you need to declare.</div>
+  <h2 data-toc>Backups</h2>
+  <p>⚙ <b>Settings → Backup</b> saves your whole setup in one file, locked with a password you choose (at least 10 characters): your keys (exchanges, Telegram, wallets), your settings and layouts, the Strategy Lab and the edge finder's progress, your deployed strategies, the crypto swarm's book and what its forest learned, the trade journal and the bots. Recorded tick history and downloaded candles are left out — they come back from the exchanges.</p>
+  <ul>
+    <li>The file is encrypted (AES-256 with a key made from your password). Without the password it cannot be opened — by anyone, including you: <b>the password cannot be recovered</b>. Keep the file and the password safe, and away from this computer (a USB stick, your cloud storage).</li>
+    <li><b>Restore from a backup</b> asks for the password and the file, shows when it was made and what it holds, and asks you to confirm. The crypto swarm, the bots and the edge finder stop first (open live trades keep their exchange stops); then your keys, settings, strategies and the swarm's book are replaced by the backup's, journal trades are added, and Novus Ordo restarts. The ledger key is the one that was in use when the backup was made.</li>
+    <li>On a new computer, the keys are encrypted again for that computer as they are restored.</li>
+  </ul>
+  <p>Make a backup after anything you would not want to lose — a new key, a deployed strategy, a week of the edge finder's work.</p>
 </section>
 
 <!-- ============ 9 security ============ -->
@@ -730,6 +776,8 @@
     <li>Keep wallet recovery phrases on paper, offline, and never type them into any application.</li>
     <li>Start on paper, then testnet, then live with a small amount; raise size only after a record you trust.</li>
     <li>If you think a key has leaked, delete it on the exchange and in 🔌 Connect, and create a new one.</li>
+    <li>Keep a recent backup (⚙ Settings → Backup), with its password, somewhere other than this computer.</li>
+    <li>When you go away, leave the daily check-in on: if it does not arrive, something needs a look.</li>
   </ul>
 </section>
 
@@ -783,7 +831,7 @@
     <tr><th>Code</th><th>Function</th></tr>
     <tr><td class="code">FARM</td><td>Edge finder</td></tr><tr><td class="code">BOT</td><td>Bot builder</td></tr><tr><td class="code">RSCH</td><td>Research</td></tr><tr><td class="code">LIB</td><td>Strategy library</td></tr><tr><td class="code">BT</td><td>Backtest builder</td></tr><tr><td class="code">DEPL</td><td>Deployed strategies</td></tr>
     <tr><td class="code">VAR</td><td>Value at risk</td></tr><tr><td class="code">CAPM</td><td>CAPM</td></tr><tr><td class="code">EF</td><td>Efficient frontier</td></tr><tr><td class="code">KELLY</td><td>Kelly criterion</td></tr><tr><td class="code">NNET</td><td>Neural network</td></tr><tr><td class="code">PAIR</td><td>Pairs &amp; cointegration</td></tr><tr><td class="code">SEAS</td><td>Seasonality</td></tr><tr><td class="code">MC</td><td>Monte Carlo</td></tr><tr><td class="code">DHG</td><td>Delta hedging</td></tr><tr><td class="code">VTGT</td><td>Volatility targeting</td></tr><tr><td class="code">MOM</td><td>Momentum</td></tr><tr><td class="code">REGM</td><td>Regimes</td></tr>
-    <tr><td class="code">SWRM</td><td>Crypto swarm view</td></tr><tr><td class="code">SWCF</td><td>Swarm rules</td></tr><tr><td class="code">TKT</td><td>Order ticket</td></tr><tr><td class="code">PORT</td><td>Portfolio</td></tr><tr><td class="code">AMT</td><td>AMT bots</td></tr><tr><td class="code">ALRT</td><td>Alerts</td></tr><tr><td class="code">TG</td><td>Telegram</td></tr><tr><td class="code">WALL</td><td>Wallet</td></tr><tr><td class="code">LUNO</td><td>Luno lane</td></tr><tr><td class="code">CALC</td><td>Calculator</td></tr><tr><td class="code">NOTE</td><td>Journal</td></tr><tr><td class="code">DB</td><td>Database</td></tr><tr><td class="code">HELP</td><td>Every function</td></tr>
+    <tr><td class="code">SWRM</td><td>Crypto swarm view</td></tr><tr><td class="code">SWCF</td><td>Swarm rules</td></tr><tr><td class="code">TKT</td><td>Order ticket</td></tr><tr><td class="code">PORT</td><td>Portfolio</td></tr><tr><td class="code">AMT</td><td>AMT bots</td></tr><tr><td class="code">ALRT</td><td>Alerts</td></tr><tr><td class="code">TG</td><td>Telegram</td></tr><tr><td class="code">WALL</td><td>Wallet</td></tr><tr><td class="code">LUNO</td><td>Luno lane</td></tr><tr><td class="code">CALC</td><td>Calculator</td></tr><tr><td class="code">JRNL</td><td>Trade journal</td></tr><tr><td class="code">NOTE</td><td>Notes</td></tr><tr><td class="code">DB</td><td>Database</td></tr><tr><td class="code">HELP</td><td>Every function</td></tr>
   </table>
   </div>
 </section>

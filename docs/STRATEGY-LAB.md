@@ -164,11 +164,26 @@ candles since it was deployed: watching (too few trades), healthy, slipping
 (well short of its test) or fading (losing) — with a top-five strategy at the
 same pace offered as its replacement.
 
-**Settings**: the coins (up to 8), the paces bred (any of the bot builder's
-styles — each needs its candles), long and short or long only, the speed
+**Settings**: the coins (up to 12; BTC, ETH, SOL, BNB, XRP and DOGE by
+default), the paces bred (any of the bot builder's styles — each needs its
+candles; scalping, intraday, swing and position by default), long and short or
+long only, the speed
 (*gentle*, about half of one processor core, the default; or *full*) and
 the shuffle drawdown limit. `FARM` is in the Strategy Lab and on the Quant
 desk; the Research screen shows it at a glance.
+
+The slow paces read more history than a single test: six years of 4-hour
+candles and eight years of daily ones (`FARM_YEARS` in `electron/lab/lab.mjs`),
+so a swing or position strategy has enough trades to pass the checks.
+
+**Costs**: every test — the bot builder, Research, the backtester and the edge
+finder — charges the assumed fees and slippage (4.5 + 2 bps a fill) until your
+live trades have measured them: once there are 10 live fills, the measured
+slippage (decision price against fill) and the exchange's own fees are used,
+never less than assumed (`electron/care/costs.mjs`). DEPL shows the costs in
+use, and each deployed strategy's **health**: its real trades since it was
+deployed against its test's win rate and average trade
+(`electron/care/health.mjs`).
 
 What it cannot do: a bot that survived every check on history can still stop
 working — markets change. The fresh-data ladder and the fleet watch are there

@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('novus', {
     acceptTerms: (version) => call('app:acceptTerms', version),
     setupKey: (next, again) => call('app:setupKey', next, again),
     deactivate: () => call('app:deactivate'),
+    restart: () => call('app:restart'),
     onSealed: (fn) => listen(sealListeners, fn) },
   net: { fetchJson: (url, init) => call('net:fetchJson', url, init) },
   solana: { rpc: (method, params, rpcSecretId) => call('solana:rpc', method, params, rpcSecretId) },
@@ -188,5 +189,23 @@ contextBridge.exposeInMainWorld('novus', {
     sendPhoto: (id, png, caption) => call('telegram:sendPhoto', id, png, caption),
     commands: (id) => call('telegram:commands', id),
     setStatus: (snap) => call('telegram:setStatus', snap),
+  },
+  care: {
+    status: () => call('care:status'),
+    config: (patch) => call('care:config', patch),
+    sendNow: (kind) => call('care:sendNow', kind),
+    health: () => call('care:health'),
+    costs: () => call('care:costs'),
+  },
+  journal: {
+    list: (q) => call('journal:list', q),
+    note: (id, note) => call('journal:note', id, note),
+    taxYears: () => call('journal:taxYears'),
+    exportCsv: () => call('journal:export'),
+    tax: (year) => call('journal:tax', year),
+  },
+  backup: {
+    create: (password, storage) => call('backup:create', password, storage),
+    restore: (password) => call('backup:restore', password),
   },
 });

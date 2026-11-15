@@ -119,8 +119,8 @@ export const PACES: { id: string; name: string; styles: StyleId[] }[] = [
 export const paceIdOf = (style: StyleId): string =>
   PACES.find((p) => p.styles.includes(style))?.id ?? "swing";
 export const FARM_DEFAULTS: FarmCfg = {
-  coins: ["BTC", "ETH", "SOL"],
-  styles: ["scalp", "intraday", "swing"],
+  coins: ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"],
+  styles: ["scalp", "intraday", "swing", "position"],
   sides: "both",
   pace: "gentle",
   maxDD: 0.2,

@@ -287,7 +287,7 @@ try {
   expect((await page.locator('[data-farm] [data-status] > div').count()) === 4, 'a status strip at the top: the engine, its data, what is standing, the search');
   await page.click('[data-farm] button:has-text("Settings")');
   await page.fill('.farm-settings input', 'BTC');
-  for (const id of ['swing']) if (await page.locator(`.farm-settings [data-style="${id}"].active`).count()) await page.click(`.farm-settings [data-style="${id}"]`);
+  for (const id of ['swing', 'position']) if (await page.locator(`.farm-settings [data-style="${id}"].active`).count()) await page.click(`.farm-settings [data-style="${id}"]`);
   if (!(await page.locator('.farm-settings [data-style="intraday"].active').count())) await page.click('.farm-settings [data-style="intraday"]');
   await page.click('.farm-settings .chip:has-text("Full")');
   await page.click('.farm-settings button:has-text("Apply and run")');
@@ -638,7 +638,7 @@ try {
 
   step('Telegram: the swarm\'s trades, no order-flow reports or alerts');
   const tgText = await page.locator('.steps').locator('xpath=..').innerText();
-  expect(/Swarm trades on Telegram/.test(tgText) && /Pop-up and sound here/.test(tgText), 'swarm notification options shown');
+  expect(/Crypto swarm trades on Telegram/.test(tgText) && /Luno lane trades on Telegram/.test(tgText) && /Pop-up and sound here/.test(tgText) && !/each new multiple/.test(tgText), 'notification options shown: the crypto swarm, the Luno lane (no longer labelled as the old meme swarm), pop-ups');
   expect(!/Daily report|Weekly overview|data feed has been down|chart alerts/.test(tgText), 'order-flow reports and alerts are gone');
   expect((await page.locator('.report-when, .report-preview').count()) === 0, 'no report scheduler');
   const alertsLeft = await page.evaluate(() => JSON.parse(localStorage.getItem('oft-settings') ?? '{}').state?.alerts?.length ?? 0);

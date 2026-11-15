@@ -86,6 +86,7 @@ export const FUNCTIONS: Fn[] = [
   { code: 'LUNO', name: 'Luno lane', panel: 'luno', ws: 'swarm', desc: 'Crypto against rands on Luno: daily trend bots' },
   // tools
   { code: 'CALC', name: 'Calculator', panel: 'calculator', ws: 'swarm', desc: 'Size, risk/reward, liquidation' },
+  { code: 'JRNL', name: 'Trade journal', panel: 'tradebook', ws: 'swarm', desc: 'Every trade with its reason and your notes; real costs; the journal and a tax year in rands (CSV)' },
   { code: 'NOTE', name: 'Journal', panel: 'journal', ws: 'swarm', desc: 'Timestamped notes' },
   { code: 'DB', name: 'Database', panel: 'database', ws: 'swarm', desc: 'Recorded trades, retention, export' },
 ];

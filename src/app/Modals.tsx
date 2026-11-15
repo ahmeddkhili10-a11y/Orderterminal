@@ -427,6 +427,99 @@ function LicenseSettings() {
   );
 }
 
+/** everything this window keeps in its own storage (settings, layouts, panel choices), for a backup */
+function windowStorage(): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k) out[k] = localStorage.getItem(k) ?? '';
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  return out;
+}
+
+/** Backups: everything in one password-protected file; restore on this or another computer */
+function BackupSettings() {
+  const [pw, setPw] = useState('');
+  const [again, setAgain] = useState('');
+  const [rpw, setRpw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  if (!desktop?.backup) return null;
+  const create = async () => {
+    setMsg(null);
+    if (pw !== again) return setMsg({ ok: false, text: 'The passwords do not match.' });
+    setBusy(true);
+    try {
+      const r = await desktop!.backup.create(pw, windowStorage());
+      if (r) {
+        setPw('');
+        setAgain('');
+        setMsg({ ok: true, text: `Saved ${r.path} — ${r.summary.keys} keys, ${r.summary.trades} journal trades, ${r.summary.strategies} deployed strategies, your settings and layouts.` });
+      }
+    } catch (e) {
+      setMsg({ ok: false, text: String((e as Error).message ?? e) });
+    }
+    setBusy(false);
+  };
+  const restore = async () => {
+    setMsg(null);
+    setBusy(true);
+    try {
+      const r = await desktop!.backup.restore(rpw);
+      if (r) {
+        // the window's own settings and layouts come back too, then everything starts again from the backup
+        try {
+          localStorage.clear();
+          for (const [k, v] of Object.entries(r.storage)) localStorage.setItem(k, v);
+        } catch {
+          /* settings could not be written: the rest is restored */
+        }
+        setMsg({ ok: true, text: `Restored ${r.keys} keys and ${r.trades} journal trades. Restarting…` });
+        setTimeout(() => void desktop!.app.restart(), 800);
+      }
+    } catch (e) {
+      setMsg({ ok: false, text: String((e as Error).message ?? e) });
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="ledger-settings" data-backup>
+      <div className="section-title">Backup</div>
+      <div className="muted" style={{ fontSize: 11, lineHeight: 1.5, marginBottom: 6 }}>
+        One file with everything: your keys (exchanges, Telegram, wallets), settings and layouts, the Strategy Lab and the edge finder's progress, deployed strategies, the crypto swarm's book and what it learned, the trade journal and the bots. Recorded tick history and downloaded candles are left out (they come back from the exchanges). It is locked with your password — <b>nobody can open it without the password, and the password cannot be recovered</b>. Keep the file and the password somewhere safe, apart from this computer.
+      </div>
+      <div className="form-row">
+        <span>Backup password</span>
+        <input className="ctl" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} style={{ width: 220 }} placeholder="at least 10 characters" />
+      </div>
+      <div className="form-row">
+        <span>Repeat it</span>
+        <input className="ctl" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} style={{ width: 220 }} />
+      </div>
+      <div className="form-row">
+        <span />
+        <button className="btn" disabled={busy || pw.length < 10 || !again} onClick={() => void create()}>
+          Save a backup…
+        </button>
+      </div>
+      <div className="form-row">
+        <span>Restore</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input className="ctl" type="password" autoComplete="off" value={rpw} onChange={(e) => setRpw(e.target.value)} style={{ width: 220 }} placeholder="the backup's password" />
+          <button className="btn ghost" disabled={busy || !rpw} onClick={() => void restore()} title="Choose a backup file; you are asked to confirm before anything changes">
+            Restore from a backup…
+          </button>
+        </div>
+      </div>
+      {msg && <div className={msg.ok ? 'up' : 'down'} style={{ fontSize: 12, marginTop: 4 }}>{msg.text}</div>}
+    </div>
+  );
+}
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const s = useSettings();
   return (
@@ -452,6 +545,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       <AppearanceSettings />
       <LedgerKeySettings />
       <LicenseSettings />
+      <BackupSettings />
       <div className="section-title">Display</div>
       <div className="form-row">
         <span>FPS counter</span>

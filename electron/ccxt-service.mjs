@@ -739,6 +739,9 @@ export class CcxtService {
         amount: o.amount,
         baseQty: o.baseQty,
         price: res?.average ?? o.price ?? res?.price ?? null,
+        // the exchange's own average fill and fee, when it reports them (the trade journal measures real costs from these)
+        average: Number.isFinite(res?.average) && res.average > 0 ? res.average : null,
+        fee: Number.isFinite(res?.fee?.cost) ? { cost: res.fee.cost, currency: res.fee.currency ?? null } : null,
         filled: res?.filled ?? null,
         notionalUsd: o.notionalUsd,
         exchange: ex.name,

@@ -20,6 +20,7 @@ import {
 } from "../lab/farm";
 import { buildSpec, STYLE_MAP, STYLES, type StyleId } from "../lab/flow";
 import { startLabLink, useLab, type Authority } from "../lab/store";
+import { testedStats } from "../lab/live";
 import { Popover, type PanelProps } from "../ui/controls";
 import { Bars, LineChart } from "./charts";
 
@@ -584,6 +585,7 @@ function Detail({
             t: s.oos.t,
             dsr: s.dsr,
             trades: s.oos.trades,
+              ...testedStats(s.oos, s.tfH),
             verdict: `edge finder · ${s.stage}`,
           },
           authority,
@@ -919,6 +921,7 @@ function TeamCard({
               t: m.oos.t,
               dsr: m.dsr,
               trades: m.oos.trades,
+              ...testedStats(m.oos, m.tfH),
               verdict: `edge finder · team · ${m.stage}`,
             },
             authority,
@@ -1073,6 +1076,7 @@ function Fleet({
               t: s.oos.t,
               dsr: s.dsr,
               trades: s.oos.trades,
+              ...testedStats(s.oos, s.tfH),
               verdict: `edge finder · ${s.stage}`,
             },
             authority: "council",
@@ -1173,7 +1177,7 @@ function Settings({
     >
       <div className="farm-settings">
         <label>
-          <span>Coins (up to 8)</span>
+          <span>Coins (up to 12)</span>
           <input
             className="ctl mono"
             value={coins}
