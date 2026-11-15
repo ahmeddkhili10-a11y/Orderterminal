@@ -7,12 +7,11 @@
  * commercial edition has none: each buyer creates their own key on first
  * launch, and the built-in digest is not in its build at all.
  */
-import { COMMERCIAL } from './edition';
-
 const SALT = 'novus-ordo/ledger/v1:';
 // (the build-time constant itself, not COMMERCIAL: the bundler folds it, so the commercial build holds no digest at all)
 declare const __NOVUS_EDITION__: string;
-export const LEDGER_DIGEST: string = __NOVUS_EDITION__ === 'commercial' ? '' : 'a8a5170c2d6e88c3f597fd89a2765c28f87c3d77ad8afeaa310b697cd10f5fd7';
+// (read safely, so plain Node scripts such as the e2e helpers can import this file unbuilt: they get the personal edition)
+export const LEDGER_DIGEST: string = (typeof __NOVUS_EDITION__ === 'undefined' ? 'personal' : __NOVUS_EDITION__) === 'commercial' ? '' : 'a8a5170c2d6e88c3f597fd89a2765c28f87c3d77ad8afeaa310b697cd10f5fd7';
 export const LEDGER_LENGTH = 8;
 
 /** Digits only: spaces, dashes and slashes between the digits are ignored. */
@@ -27,7 +26,7 @@ export interface LedgerRecord {
 }
 
 /** Built-in key, used until the owner sets their own in Settings (personal edition only). */
-export const DEFAULT_LEDGER: LedgerRecord | undefined = COMMERCIAL || !LEDGER_DIGEST ? undefined : { salt: SALT, digest: LEDGER_DIGEST };
+export const DEFAULT_LEDGER: LedgerRecord | undefined = !LEDGER_DIGEST ? undefined : { salt: SALT, digest: LEDGER_DIGEST };
 
 export function isLedgerRecord(x: unknown): x is LedgerRecord {
   const r = x as LedgerRecord;
