@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { defineConfig, type Plugin } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { editionDefines } from './scripts/edition.mjs';
 
 /**
  * Content-Security-Policy for the built app (the desktop window and the web build).
@@ -38,11 +37,8 @@ function csp(): Plugin {
 
 export default defineConfig({
   plugins: [react(), csp()],
-  // which edition this is (personal or commercial): fixed when the app is built
-  define: editionDefines(),
   base: './',
   server: { port: 5173, host: true },
-  // (no source maps in the commercial edition: the code that is sold is not handed out readable)
-  build: { target: 'es2022', sourcemap: process.env.NOVUS_EDITION !== 'commercial', minify: process.env.NOMINIFY ? false : 'esbuild', chunkSizeWarningLimit: 1500 },
+  build: { target: 'es2022', sourcemap: true, minify: process.env.NOMINIFY ? false : 'esbuild', chunkSizeWarningLimit: 1500 },
   test: { environment: 'node', include: ['src/**/*.test.ts', 'server/**/*.test.mjs', 'electron/**/*.test.mjs'] },
 });

@@ -19,7 +19,7 @@ export const BACKUP_FORMAT = 'novus-ordo-backup';
 export const MIN_PASSWORD = 10;
 const KDF = { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 /** database entries that belong to one computer or one session, never carried over */
-const LOCAL_KEYS = new Set(['tradeStatsReady', 'care:lastSeen', 'license', 'safeMode']);
+const LOCAL_KEYS = new Set(['tradeStatsReady', 'care:lastSeen', 'safeMode']);
 
 export function passwordProblem(pw) {
   const p = String(pw ?? '');

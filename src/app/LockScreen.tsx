@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import emblem from '../assets/emblem.png';
-import { desktop, type AppGate } from '../desktop/bridge';
-import { COMMERCIAL, TERMS_VERSION } from '../shared/edition';
-import { TERMS, TERMS_TITLE } from '../shared/terms';
+import { desktop } from '../desktop/bridge';
 import { AttemptGate, isLedgerRecord, LEDGER_LENGTH, ledgerMatches, makeLedger, normalizeKey, type LedgerRecord } from '../shared/ledger';
 import { runBoot, useBoot } from './boot';
 import { lockTerminal, SESSION_FLAG, useLock } from './lock';
@@ -41,43 +39,6 @@ export async function changeLedgerKey(current: string, next: string): Promise<vo
   }
   const salt = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
   localStorage.setItem(WEB_LEDGER, JSON.stringify(await makeLedger(next, sha256Hex, salt)));
-}
-
-// ---------- the commercial edition's first launch (browser builds keep it in this browser) ----------
-const WEB_TERMS = 'novus-terms';
-
-async function gateNow(): Promise<AppGate> {
-  if (!COMMERCIAL) return { needsLicense: false, needsTerms: false, needsSetup: false };
-  if (desktop) {
-    const st = await desktop.app.status();
-    return { needsLicense: !!st.needsLicense, needsTerms: !!st.needsTerms, needsSetup: !!st.needsSetup, license: st.license };
-  }
-  let terms = 0;
-  try {
-    terms = Number(localStorage.getItem(WEB_TERMS) ?? 0);
-  } catch {
-    /* private mode */
-  }
-  return { needsLicense: false, needsTerms: terms < TERMS_VERSION, needsSetup: !webLedger() };
-}
-
-async function acceptTerms(): Promise<void> {
-  if (desktop) await desktop.app.acceptTerms(TERMS_VERSION);
-  else localStorage.setItem(WEB_TERMS, String(TERMS_VERSION));
-}
-
-async function setupKey(next: string, again: string): Promise<void> {
-  if (normalizeKey(next) !== normalizeKey(again)) throw new Error('THE TWO KEYS DO NOT MATCH');
-  if (desktop) await desktop.app.setupKey(next, again);
-  else {
-    const salt = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    localStorage.setItem(WEB_LEDGER, JSON.stringify(await makeLedger(next, sha256Hex, salt)));
-  }
-  try {
-    sessionStorage.setItem(SESSION_FLAG, '1');
-  } catch {
-    /* private mode */
-  }
 }
 
 /** Lock the terminal now and return to the lock screen (see app/lock). */
@@ -135,27 +96,6 @@ export function LockScreen({ onUnlocked, onGone }: { onUnlocked: () => void; onG
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-  // the commercial edition: licence, terms and the buyer's own key come first
-  const [gate, setGate] = useState<AppGate | null>(COMMERCIAL ? null : { needsLicense: false, needsTerms: false, needsSetup: false });
-  useEffect(() => {
-    if (!COMMERCIAL) return;
-    let alive = true;
-    const ask = () =>
-      gateNow()
-        .then((g) => alive && setGate(g))
-        .catch(() => alive && setTimeout(ask, 1000));
-    ask();
-    return () => {
-      alive = false;
-    };
-  }, []);
-  const step = !gate ? 'wait' : gate.needsLicense ? 'license' : gate.needsTerms ? 'terms' : gate.needsSetup ? 'setup' : 'unlock';
-  const granted = () => {
-    setMsg({ kind: 'granted', text: 'ACCESS GRANTED' });
-    setLeaving(true);
-    onUnlocked();
-    setTimeout(onGone, 850);
-  };
 
   const submit = async (value = code) => {
     const digits = normalizeKey(value);
@@ -181,7 +121,7 @@ export function LockScreen({ onUnlocked, onGone }: { onUnlocked: () => void; onG
   const pct = done ? 100 : Math.round((finished / (total + 2)) * 100);
 
   return (
-    <div className={`lock ${leaving ? 'leaving' : ''} ${step === 'license' || step === 'terms' || step === 'setup' ? 'first-run' : ''}`} onMouseDown={() => setTimeout(() => step === 'unlock' && input.current?.focus(), 0)}>
+    <div className={`lock ${leaving ? 'leaving' : ''}`} onMouseDown={() => setTimeout(() => input.current?.focus(), 0)}>
       <div className="lock-ring">{relocked ? <RunningBar /> : <BootRing />}</div>
       <div className="lock-corner tr">
         {clock.toISOString().slice(0, 19).replace('T', ' ')} UTC · NODE {sid}
@@ -197,15 +137,6 @@ export function LockScreen({ onUnlocked, onGone }: { onUnlocked: () => void; onG
         <div className="lock-motto">Classified order-flow terminal · Eyes only · Every session sealed</div>
       </div>
 
-      {step === 'wait' && (
-        <div className="lock-key">
-          <div className="lock-msg">CHECKING THIS COPY…</div>
-        </div>
-      )}
-      {step === 'license' && <LicenseStep gate={gate!} onDone={setGate} />}
-      {step === 'terms' && <TermsStep onDone={() => void gateNow().then(setGate)} />}
-      {step === 'setup' && <SetupStep onDone={granted} />}
-      {step === 'unlock' && (
       <form
         className={`lock-key ${msg?.kind ?? ''}`}
         key={shake}
@@ -244,7 +175,6 @@ export function LockScreen({ onUnlocked, onGone }: { onUnlocked: () => void; onG
           {msg?.text ?? ' '}
         </div>
       </form>
-      )}
 
       <div className="lock-corner bl">
         BUILD 1.0.0 · {desktop ? 'DESKTOP' : 'BROWSER'} · {navigator.platform || 'node'}
@@ -254,7 +184,7 @@ export function LockScreen({ onUnlocked, onGone }: { onUnlocked: () => void; onG
         <div className="now">
           {done ? (
             <>
-              <b>ALL SYSTEMS READY</b> — {step === 'license' ? 'awaiting licence' : step === 'terms' ? 'awaiting your agreement' : step === 'setup' ? 'create your ledger key' : 'awaiting ledger key'}
+              <b>ALL SYSTEMS READY</b> — awaiting ledger key
             </>
           ) : current ? (
             <>
@@ -277,164 +207,5 @@ export function LockScreen({ onUnlocked, onGone }: { onUnlocked: () => void; onG
         </ul>
       </div>
     </div>
-  );
-}
-
-// ---------- first launch of a commercial copy ----------
-
-/** eight PIN cells over a hidden input (the same as the ledger key's) */
-function Pin({ value, onChange, label, autoFocus, inputRef }: { value: string; onChange: (v: string) => void; label: string; autoFocus?: boolean; inputRef: React.RefObject<HTMLInputElement | null> }) {
-  return (
-    <div className="pin" onClick={() => inputRef.current?.focus()}>
-      {Array.from({ length: LEDGER_LENGTH }, (_, i) => (
-        <span key={i} className={`cell ${i < value.length ? 'filled' : ''} ${i === value.length ? 'caret' : ''}`}>
-          {i < value.length ? '•' : ''}
-        </span>
-      ))}
-      <input ref={inputRef} className="pin-input" type="password" inputMode="numeric" autoComplete="off" autoFocus={autoFocus} maxLength={LEDGER_LENGTH + 4} value={value} aria-label={label} onChange={(e) => onChange(normalizeKey(e.target.value).slice(0, LEDGER_LENGTH))} />
-    </div>
-  );
-}
-
-function LicenseStep({ gate, onDone }: { gate: AppGate; onDone: (g: AppGate) => void }) {
-  const [key, setKey] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const L = gate.license;
-  const go = async () => {
-    if (!desktop || busy) return;
-    setBusy(true);
-    setErr('');
-    try {
-      onDone(await desktop.app.activate(key));
-    } catch (e) {
-      setErr(String((e as Error).message ?? e).replace(/^Error:\s*/, ''));
-    }
-    setBusy(false);
-  };
-  return (
-    <form
-      className={`lock-key lock-first ${err ? 'denied' : ''}`}
-      onSubmit={(e) => {
-        e.preventDefault();
-        void go();
-      }}
-    >
-      <label htmlFor="license-key">ACTIVATE YOUR LICENCE</label>
-      <p className="lock-first-text">
-        {L?.reason === 'revoked' || L?.reason === 'offline'
-          ? L.message
-          : 'Enter the licence key from your Gumroad receipt (it is also in your Gumroad library). One licence runs on up to three of your computers.'}
-      </p>
-      <input id="license-key" className="lock-license mono" value={key} autoFocus spellCheck={false} autoComplete="off" placeholder="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX" onChange={(e) => setKey(e.target.value)} aria-label="Licence key" />
-      <button className="lock-btn" type="submit" disabled={busy || key.trim().length < 16}>
-        {busy ? 'CHECKING WITH GUMROAD…' : L?.reason === 'offline' ? 'CHECK AGAIN' : 'ACTIVATE'}
-      </button>
-      <div className="lock-msg lock-msg-wrap" role="status">
-        {err || ' '}
-      </div>
-    </form>
-  );
-}
-
-function TermsStep({ onDone }: { onDone: () => void }) {
-  const [read, setRead] = useState(false);
-  const [ok, setOk] = useState(false);
-  const [err, setErr] = useState('');
-  return (
-    <div className="lock-key lock-first lock-terms-step">
-      <label>{TERMS_TITLE.toUpperCase()}</label>
-      <div
-        className="lock-terms"
-        tabIndex={0}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setRead(true);
-        }}
-      >
-        {TERMS.map((t) => (
-          <section key={t.h}>
-            <b>{t.h}</b>
-            {t.p.map((x, i) => (
-              <p key={i}>{x}</p>
-            ))}
-          </section>
-        ))}
-      </div>
-      <label className="lock-check">
-        <input type="checkbox" checked={ok} disabled={!read} onChange={(e) => setOk(e.target.checked)} /> I have read the licence agreement and the risk disclosure, and I accept them
-      </label>
-      <button
-        className="lock-btn"
-        disabled={!ok}
-        onClick={() =>
-          acceptTerms()
-            .then(onDone)
-            .catch((e) => setErr(String((e as Error).message ?? e)))
-        }
-      >
-        {read ? 'ACCEPT AND CONTINUE' : 'SCROLL TO THE END TO ACCEPT'}
-      </button>
-      <div className="lock-msg lock-msg-wrap">{err || ' '}</div>
-    </div>
-  );
-}
-
-function SetupStep({ onDone }: { onDone: () => void }) {
-  const [a, setA] = useState('');
-  const [b, setB] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const first = useRef<HTMLInputElement>(null);
-  const second = useRef<HTMLInputElement>(null);
-  const done = async (bb: string) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await setupKey(a, bb);
-      onDone();
-    } catch (e) {
-      setErr(
-        String((e as Error).message ?? e)
-          .replace(/^Error:\s*/, '')
-          .replace(/^Choose another key: /i, 'CHOOSE ANOTHER KEY — ')
-          .toUpperCase(),
-      );
-      setA('');
-      setB('');
-      setTimeout(() => first.current?.focus(), 0);
-    }
-    setBusy(false);
-  };
-  return (
-    <form className={`lock-key lock-first ${err ? 'denied' : ''}`} onSubmit={(e) => e.preventDefault()}>
-      <label>CREATE YOUR LEDGER KEY</label>
-      <p className="lock-first-text">Choose eight digits. They unlock this terminal and protect the exchange keys you will keep in it — no one else has them, and they cannot be recovered, so keep them somewhere safe.</p>
-      <Pin
-        value={a}
-        label="New ledger key"
-        autoFocus
-        inputRef={first}
-        onChange={(v) => {
-          setA(v);
-          setErr('');
-          if (v.length === LEDGER_LENGTH) setTimeout(() => second.current?.focus(), 0);
-        }}
-      />
-      <label>ENTER IT AGAIN</label>
-      <Pin
-        value={b}
-        label="Repeat the ledger key"
-        inputRef={second}
-        onChange={(v) => {
-          setB(v);
-          setErr('');
-          if (v.length === LEDGER_LENGTH && a.length === LEDGER_LENGTH) void done(v);
-        }}
-      />
-      <div className="lock-msg lock-msg-wrap" role="status">
-        {busy ? 'SEALING…' : err || ' '}
-      </div>
-    </form>
   );
 }

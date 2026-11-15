@@ -16,8 +16,6 @@ import { TelegramCommands, tgDetectChat, tgMe, tgSendLong, tgSendPhoto } from '.
 import { parseSearch, searchUrl } from '../src/shared/xapi.ts';
 import { AttemptGate, isLedgerRecord, ledgerMatches, makeLedger, PUBLIC_CHANNELS } from '../src/shared/ledger.ts';
 import { createHash, randomBytes } from 'node:crypto';
-import { COMMERCIAL, EDITION, GUMROAD_PRODUCT_ID, LICENSE_SEATS, TERMS_VERSION } from '../src/shared/edition.ts';
-import { Licenses } from './license.mjs';
 import { fromBot, fromSwarm, TradeJournal } from './care/journal.mjs';
 import { Care } from './care/care.mjs';
 import { costsForTests, measureCosts } from './care/costs.mjs';
@@ -102,8 +100,6 @@ const DAY = 86_400_000;
 
 // NOVUS_USER_DATA relocates the database, vault and settings (tests, portable installs)
 if (process.env.NOVUS_USER_DATA) app.setPath('userData', process.env.NOVUS_USER_DATA);
-// the commercial edition keeps its data in a folder of its own: a copy installed beside the owner's never sees the owner's keys
-else if (COMMERCIAL) app.setPath('userData', join(app.getPath('appData'), 'Novus Ordo Terminal'));
 
 const userDataDir = app.getPath('userData');
 initLog(join(userDataDir, 'logs'));
@@ -389,40 +385,6 @@ const ledgerRecord = () => {
   return isLedgerRecord(r) ? r : undefined;
 };
 
-// ---------- the commercial edition's first launch: licence, terms, the buyer's own key ----------
-let licenses = null;
-const lic = () => (licenses ??= new Licenses({ productId: COMMERCIAL ? GUMROAD_PRODUCT_ID : '', seats: LICENSE_SEATS, store: db }));
-/** what stands between this copy and the terminal (nothing, in the personal edition) */
-function gate() {
-  if (!COMMERCIAL) return { needsLicense: false, needsTerms: false, needsSetup: false };
-  const l = lic().state();
-  const terms = db.get('terms');
-  return { needsLicense: !l.ok, needsTerms: !(terms && terms.version >= TERMS_VERSION), needsSetup: !ledgerRecord(), license: l };
-}
-function afterUnlock() {
-  unlocked = true;
-  // the daily message, the warnings and the weekly report start once the ledger key has been entered
-  care?.start();
-  // popped-out panels come back (and, the first time, the ones left open last session)
-  if (screens) {
-    screens.setVisible(true);
-    setTimeout(() => screens?.restore(), 1500);
-  }
-}
-/** a commercial licence is checked again now and then; one that is no longer good seals the terminal */
-function licenseWatch() {
-  if (!COMMERCIAL || !lic().required) return;
-  const check = () =>
-    lic()
-      .recheck()
-      .then((st) => {
-        if (!st.ok) seal('the licence needs attention');
-      })
-      .catch(() => {});
-  setTimeout(check, 20_000).unref?.();
-  setInterval(check, 6 * 3_600_000).unref?.();
-}
-
 // channels that need the exchange services, which load after the window is up
 const NEEDS_SERVICES = /^(ccxt|trade|amt|cswarm|lab):|^vault:test$/;
 
@@ -464,9 +426,6 @@ function registerIpc() {
   handle('app:isFullscreen', (e) => Boolean(BrowserWindow.fromWebContents(e.sender)?.isFullScreen()));
   handle('app:log', () => logFile());
   handle('app:unlock', async (_e, code) => {
-    const g = gate();
-    if (g.needsLicense) throw new Error('ACTIVATE YOUR LICENCE FIRST');
-    if (g.needsTerms) throw new Error('ACCEPT THE TERMS FIRST');
     attempts.check();
     const ok = await ledgerMatches(String(code ?? ''), sha256Hex, ledgerRecord());
     if (!ok) {
@@ -474,46 +433,15 @@ function registerIpc() {
       throw new Error(attempts.waitMs() ? `ACCESS DENIED — locked for ${Math.ceil(attempts.waitMs() / 1000)}s` : 'ACCESS DENIED');
     }
     attempts.success();
-    afterUnlock();
-    return true;
-  });
-  // the commercial edition's first launch (each refuses in the personal edition, and once done)
-  handle('app:activate', async (_e, key) => {
-    if (!COMMERCIAL) throw new Error('not needed in this edition');
-    attempts.check();
-    try {
-      await lic().activate(String(key ?? ''));
-    } catch (err) {
-      attempts.fail();
-      throw err;
+    unlocked = true;
+    // the daily message, the warnings and the weekly report start once the ledger key has been entered
+    care?.start();
+    // popped-out panels come back (and, the first time, the ones left open last session)
+    if (screens) {
+      screens.setVisible(true);
+      setTimeout(() => screens?.restore(), 1500);
     }
-    attempts.success();
-    return gate();
-  });
-  handle('app:acceptTerms', (_e, version) => {
-    if (!COMMERCIAL) throw new Error('not needed in this edition');
-    if (gate().needsLicense) throw new Error('ACTIVATE YOUR LICENCE FIRST');
-    if (Number(version) !== TERMS_VERSION) throw new Error('These terms have been replaced — reopen the terminal.');
-    db.set('terms', { version: TERMS_VERSION, at: Date.now() });
-    return gate();
-  });
-  handle('app:setupKey', async (_e, next, again) => {
-    const g = gate();
-    if (!COMMERCIAL || !g.needsSetup) throw new Error('A ledger key is already set — change it in Settings.');
-    if (g.needsLicense) throw new Error('ACTIVATE YOUR LICENCE FIRST');
-    if (g.needsTerms) throw new Error('ACCEPT THE TERMS FIRST');
-    if (String(next ?? '').replace(/\D/g, '') !== String(again ?? '').replace(/\D/g, '')) throw new Error('THE TWO KEYS DO NOT MATCH');
-    db.set('ledger', await makeLedger(String(next ?? ''), sha256Hex, randomBytes(16).toString('hex')));
-    log('info', 'ledger key created');
-    afterUnlock();
     return true;
-  });
-  // give this computer's licence seat back (to move the licence to another computer)
-  handle('app:deactivate', async () => {
-    if (!COMMERCIAL || !unlocked) throw new Error('not available');
-    const st = await lic().deactivate();
-    seal('the licence was deactivated on this computer');
-    return st;
   });
   // lock again (renderer shows the lock screen); bots keep running in this process
   handle('app:seal', () => {
@@ -524,8 +452,7 @@ function registerIpc() {
   // what the lock screen may show while sealed: counts only, nothing private
   handle('app:status', () => {
     const running = bots ? [...bots.running.values()] : [];
-    const g = gate();
-    return { locked: !unlocked, sealedAt, botsRunning: running.length, botsLive: running.filter((b) => b.cfg.mode === 'live').length, edition: EDITION, termsVersion: TERMS_VERSION, ...g };
+    return { locked: !unlocked, sealedAt, botsRunning: running.length, botsLive: running.filter((b) => b.cfg.mode === 'live').length };
   });
   handle('app:changeKey', async (_e, current, next) => {
     attempts.check();
@@ -1337,7 +1264,6 @@ app.whenReady().then(async () => {
     ]),
   );
   registerIpc();
-  licenseWatch();
   // the window first, everything heavy after it
   createWindow();
   screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow });
