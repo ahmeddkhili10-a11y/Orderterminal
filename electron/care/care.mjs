@@ -20,7 +20,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const REWARN = 6 * HOUR;
 
-export const CARE_DEFAULTS = { secretId: '', daily: true, dailyHour: 8, weekly: true, weekday: 0, weeklyHour: 18, warnings: true, health: true };
+export const CARE_DEFAULTS = { secretId: '', daily: true, dailyHour: 8, weekly: true, weekday: 0, weeklyHour: 18, warnings: true, health: true, offers: true };
 
 export class Care {
   /**
@@ -58,7 +58,7 @@ export class Care {
     c.dailyHour = clampInt(c.dailyHour, 0, 23, 8);
     c.weeklyHour = clampInt(c.weeklyHour, 0, 23, 18);
     c.weekday = clampInt(c.weekday, 0, 6, 0);
-    for (const k of ['daily', 'weekly', 'warnings', 'health']) c[k] = c[k] !== false;
+    for (const k of ['daily', 'weekly', 'warnings', 'health', 'offers']) c[k] = c[k] !== false;
     this.cfg = c;
     this.db.set('care:cfg', c);
     return this.status();

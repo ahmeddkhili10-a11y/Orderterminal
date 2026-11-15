@@ -789,6 +789,8 @@ export interface NovusApi {
       state(): Promise<FarmView>;
       start(patch?: Partial<FarmCfg>): Promise<FarmView>;
       stop(): Promise<FarmView>;
+      /** keep a strategy for good (never pruned or hidden), or let it go */
+      pin(id: string, on: boolean): Promise<FarmView>;
       onState(fn: (s: FarmView) => void): () => void;
     };
   };
@@ -880,6 +882,8 @@ export interface CareConfig {
   weeklyHour: number;
   warnings: boolean;
   health: boolean;
+  /** offer ready teams on the phone, with Deploy buttons */
+  offers: boolean;
 }
 export interface CareStatus {
   cfg: CareConfig;

@@ -32,12 +32,12 @@ export const MAX_YEARS = { '15m': 1 };
 /**
  * The edge finder reads more history for its slow paces than a single test needs: a swing or
  * position strategy trades a few times a month, and only years of candles give it enough trades
- * to pass the checks — so their top fives fill instead of waiting. (Six years of 4-hour candles
- * is 13,000 of them; eight years of daily ones, 2,900.)
+ * to pass the checks — so their top fives fill instead of waiting. (Five years of 4-hour candles
+ * is 11,000 of them; six years of daily ones, 2,200.) A coin younger than that gives what it has.
  */
-export const FARM_YEARS = { '4h': 6, '1d': 8 };
-/** the most coins the edge finder breeds on at once */
-export const FARM_MAX_COINS = 12;
+export const FARM_YEARS = { '4h': 5, '1d': 6 };
+/** the most coins the edge finder breeds on at once (each coin and pace costs memory: more than this can run a laptop out of it) */
+export const FARM_MAX_COINS = 8;
 const SOURCES = ['binance', 'okx', 'bybit', 'hyperliquid'];
 const HOUR = 3_600_000;
 
@@ -94,6 +94,7 @@ export class LabService {
       if (this.farmCfg.coins.join() === 'BTC,ETH,SOL') this.farmCfg.coins = [...FARM_DEFAULTS.coins];
     }
     this.farmCfg.v = 3;
+    this.farmCfg.coins = this.farmCfg.coins.slice(0, FARM_MAX_COINS);
     this.farmSnap = farm?.state ? { ...farm.state, running: false } : null;
     this.farmW = null;
     this.farmTimer = null;
@@ -280,6 +281,21 @@ export class LabService {
       throw err;
     } finally {
       this.farmStarting = false;
+      this.farmPush();
+    }
+    return this.farmState();
+  }
+
+  /** keep a strategy for good, or let it go: the running farm is told; a stopped one has it written into its save */
+  farmPin(id, on) {
+    if (this.farmW) this.farmW.postMessage({ type: 'pin', id, on });
+    else if (this.farmSaved) {
+      const pinned = new Set(this.farmSaved.pinned ?? []);
+      if (on) pinned.add(id);
+      else pinned.delete(id);
+      this.farmSaved = { ...this.farmSaved, pinned: [...pinned] };
+      if (this.farmSnap) this.farmSnap = { ...this.farmSnap, kept: (this.farmSaved.survivors ?? []).filter((s) => pinned.has(s.id)).map((s) => ({ ...s, daily: undefined, forward: s.forward ? { ...s.forward, daily: undefined } : null })) };
+      this.farmPersist();
       this.farmPush();
     }
     return this.farmState();
@@ -487,13 +503,21 @@ export class LabService {
       const key = `cache/${id}-${coin}-${tf}.json`;
       const cached = this.read(key, []);
       const have = cached.filter((b) => b.time >= since);
+      // a coin younger than the history asked for (SOL, DOGE on eight years): its first candle on this exchange, once known
+      const listed = this.read('cache/listed.json', {})[`${id}-${coin}-${tf}`] ?? 0;
       try {
-        const from = have.length && have[0].time <= since + 7 * 24 * HOUR ? have[have.length - 1].time + tfH * HOUR : since;
+        const from = have.length && have[0].time <= Math.max(since, listed) + 7 * 24 * HOUR ? have[have.length - 1].time + tfH * HOUR : since;
         const fresh = from < this.now() - tfH * HOUR ? await this.fetchHistory(id, spotSymbol(id, coin), tf, from, need + 50) : [];
         const bars = [...(from === since ? [] : have), ...fresh.filter((b) => !have.length || b.time > have[have.length - 1].time)];
         // only closed candles
         const closed = bars.filter((b) => b.time + tfH * HOUR <= this.now());
         if (closed.length < 600) throw new Error(`only ${closed.length} candles`);
+        // the whole history was asked for and it starts later: that is when the coin was listed here (later refreshes only top it up)
+        if (from === since && closed[0].time > since + 7 * 24 * HOUR) {
+          const all = this.read('cache/listed.json', {});
+          all[`${id}-${coin}-${tf}`] = closed[0].time;
+          this.write('cache/listed.json', all);
+        }
         // the cache keeps the older candles too: a shorter request must not throw away history a longer one will want
         const older = cached.filter((b) => b.time < closed[0].time);
         this.write(key, older.length ? [...older, ...closed] : closed);

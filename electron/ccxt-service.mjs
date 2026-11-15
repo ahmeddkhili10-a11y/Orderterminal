@@ -187,9 +187,15 @@ export class CcxtService {
     const step = ex.parseTimeframe(timeframe) * 1000;
     const out = [];
     let t = since;
+    let skips = 0;
     while (out.length < max) {
       const rows = await ex.fetchOHLCV(symbol, timeframe, t, 1000);
-      if (!rows?.length) break;
+      if (!rows?.length) {
+        // nothing yet: asked for years before the coin was listed here (OKX and Bybit answer an empty page) — jump ahead a page and look again
+        if (out.length || t + 1000 * step >= Date.now() || ++skips > 60) break;
+        t += 1000 * step;
+        continue;
+      }
       for (const [time, open, high, low, close, volume] of rows) if (!out.length || time > out[out.length - 1].time) out.push({ time, open, high, low, close, volume });
       const last = rows[rows.length - 1][0];
       if (rows.length < 2 || last + step >= Date.now()) break;

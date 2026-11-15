@@ -239,6 +239,8 @@ export interface Forward {
   maxDD: number;
   /** months (or weeks) of fresh data */
   days: number;
+  /** its return each day of the fresh data (teams are read from these and the unseen stretch together) */
+  daily?: { d0: number; r: number[] };
 }
 
 export interface Survivor {
@@ -340,6 +342,10 @@ export interface FarmState {
   blocks?: BlockStat[];
   /** the survivors that fit together best as one portfolio */
   team?: Team | null;
+  /** the pool of teams: up to five, each one scalping, one intraday and one swing strategy */
+  teams?: Team[];
+  /** the strategies you chose to keep (never dropped, whatever happens) */
+  kept?: Survivor[];
   /** the five best still standing at each pace: proven on fresh data first, then significant, then by score */
   tops?: PaceBoard[];
   /** bots that trained well but are copies of a kind already held or already ruled out: not tested again */
@@ -378,9 +384,17 @@ export interface BlockStat {
 }
 
 export interface Team {
+  /** the members' ids, joined: the same team keeps the same key */
+  key: string;
+  /** every member proven on fresh data, and the team strong together: worth deploying */
+  ready: boolean;
   members: {
     id: string;
     name: string;
+    /** scalp, intraday or swing */
+    pace: string;
+    /** its fresh-data record (the vault and the candles since) */
+    fresh: { trades: number; ret: number; maxDD: number } | null;
     /** its share of the risk (inverse volatility) */
     weight: number;
     /** its Sharpe ratio alone, on the team's days */
@@ -391,7 +405,7 @@ export interface Team {
     coins: string[];
     stage: Ladder;
     sig: boolean;
-    oos: { sharpe: number; t: number; trades: number };
+    oos: { sharpe: number; t: number; trades: number; winRate?: number; avgR?: number; bars?: number; maxDD?: number };
     dsr: number;
   }[];
   /** the team as one portfolio over the days every member has */
@@ -408,7 +422,7 @@ export interface Team {
 
 /** what is saved between sessions */
 export interface FarmSave {
-  v: 1 | 2 | 3;
+  v: 1 | 2 | 3 | 4;
   cfg: FarmCfg;
   gen: number;
   tried: number;
@@ -429,6 +443,10 @@ export interface FarmSave {
   entered?: string[];
   dupes?: number;
   kindsFloor?: number;
+  /** the strategies you chose to keep */
+  pinned?: string[];
+  /** the team pool, as member ids */
+  teams?: string[][];
 }
 
 const keyOf = (f: Flow) =>
@@ -571,7 +589,6 @@ export class Farm {
   /** the lists on the screen: worked out again on a steady clock, not at every bot */
   private board: { at: number; ids: Record<string, string[]> } | null = null;
   private boardDirty = true;
-  private teamAt = 0;
   private seen = new Map<string, number>();
   private queue: Ind[] = [];
   survivors: Survivor[] = [];
@@ -605,7 +622,12 @@ export class Farm {
   /** the latest bots that made money in training, by timeframe: each one's mean return in eight stretches of the training years (for the overfit meter) */
   private genBlocks: Record<string, number[][]> = {};
   private pboHist: number[] = [];
-  private teamCache: Team | null = null;
+  /** the strategies you chose to keep: never pruned, never hidden */
+  private pinned = new Set<string>();
+  /** the team pool (member ids), kept steady between recalculations */
+  private poolIds: string[][] = [];
+  private poolCache: Team[] = [];
+  private poolAt = 0;
 
   constructor(
     cfg: Partial<FarmCfg> = {},
@@ -624,7 +646,7 @@ export class Farm {
     this.costs = o.costs ?? COSTS;
     this.stress = o.stress ?? 2;
     this.startedAt = this.now();
-    if (o.save && [1, 2, 3].includes(o.save.v)) this.restore(o.save);
+    if (o.save && [1, 2, 3, 4].includes(o.save.v)) this.restore(o.save);
   }
 
   // ---------- data ----------
@@ -1623,6 +1645,7 @@ export class Farm {
       days: times.length
         ? (times[times.length - 1] - times[0]) / 86_400_000
         : 0,
+      daily: dailyOf(rets, times),
     };
   }
 
@@ -1640,7 +1663,7 @@ export class Farm {
     this.prune();
     this.rank();
     this.boardDirty = true;
-    this.teamAt = 0;
+    this.poolAt = 0;
   }
 
   // ---------- one survivor of a kind ----------
@@ -1837,8 +1860,11 @@ export class Farm {
       this.funnel[st]++;
     this.note(g.flow, "surv");
     // one survivor of a kind: a second bot of the same kind that slipped into the queue is not kept
-    const twin = this.heldKinds.has(kindOf(res.s.flow));
-    if (!twin) this.survivors.push(res.s);
+    // and two bots with the same result on the same candles are one strategy (blocks that change nothing do not make a new one)
+    const rk = resultKey(res.s);
+    const twin = this.heldKinds.has(kindOf(res.s.flow)) || this.survivors.some((x) => resultKey(x) === rk);
+    if (twin) this.dupes++;
+    else this.survivors.push(res.s);
     this.reindex();
     this.prune();
     this.rank();
@@ -1923,9 +1949,10 @@ export class Farm {
         Number(b.sig) - Number(a.sig) ||
         b.score - a.score;
       keep.push(
-        ...mine.filter((s) => s.stage !== "faded").sort(order).slice(0, 40),
+        ...mine.filter((s) => this.pinned.has(s.id)),
+        ...mine.filter((s) => !this.pinned.has(s.id) && s.stage !== "faded").sort(order).slice(0, 40),
         ...mine
-          .filter((s) => s.stage === "faded")
+          .filter((s) => !this.pinned.has(s.id) && s.stage === "faded")
           .sort((a, b) => b.foundAt - a.foundAt)
           .slice(0, 8),
       );
@@ -2019,34 +2046,54 @@ export class Farm {
     return [];
   }
 
-  /**
-   * The team: the survivors that fit together best as one portfolio. Starting
-   * from the best survivor, it adds — one at a time — whichever other survivor
-   * raises the portfolio's Sharpe ratio the most (members weighted by inverse
-   * volatility, so each carries the same risk), as long as it is of a
-   * different family and not closely correlated (under 0.7) with a member.
-   * Read on the days of the unseen stretch every member has. The team is
-   * chosen on that same stretch, so its numbers flatter it a little; the
-   * forward test is the judge.
-   */
+  /** keep a strategy for good (or let it go again): a kept one is never pruned or hidden */
+  pin(id: string, on: boolean) {
+    if (on && this.survivors.some((x) => x.id === id)) this.pinned.add(id);
+    else this.pinned.delete(id);
+    this.boardDirty = true;
+  }
+
+  /** the best team of the pool (what the screen showed before there was a pool) */
   team(fresh = false): Team | null {
-    // worked out at most once a minute (and when fresh candles arrive): its members should not change by the second
+    return this.teams(fresh)[0] ?? null;
+  }
+
+  /**
+   * The team pool: up to five teams, each one scalping, one intraday and one
+   * swing strategy, that fit together as one portfolio. Each candidate team is
+   * read on the days all three members have results on data they were not
+   * trained on (the unseen stretch, the vault and the candles since): the
+   * members weighted by inverse volatility, so each carries the same risk. A
+   * team needs every member in profit on those days and no two members moving
+   * as one (correlation under 0.7). The best five by Sharpe ratio make the
+   * pool; a team already in it keeps its place unless a new one is clearly
+   * better (10 %), so the pool holds still — and it is saved, so it survives a
+   * restart and a reload of the candles. Worked out every few minutes, and at
+   * once when fresh candles arrive.
+   */
+  teams(fresh = false): Team[] {
     const t = this.now();
-    if (!fresh && this.teamAt && t - this.teamAt < 60_000 && t >= this.teamAt)
-      return this.teamCache;
-    this.teamAt = t || 1;
-    this.teamCache = null;
-    const live = this.survivors
-      .filter((s) => s.stage !== "faded" && s.daily && s.daily.r.length >= 45)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 25);
-    if (live.length < 2) return null;
-    const cut = (ms: Survivor[]): number[][] | null => {
-      const a = Math.max(...ms.map((m) => m.daily!.d0));
-      const b = Math.min(...ms.map((m) => m.daily!.d0 + m.daily!.r.length - 1));
-      if (b - a + 1 < 45) return null;
-      return ms.map((m) => m.daily!.r.slice(a - m.daily!.d0, b - m.daily!.d0 + 1));
+    if (!fresh && this.poolAt && t - this.poolAt < 180_000 && t >= this.poolAt) return this.poolCache;
+    this.poolAt = t || 1;
+    const PACE_IDS = ["scalp", "intraday", "swing"];
+    const dailyMap = (x: Survivor) => {
+      const m = new Map<number, number>();
+      for (const d of [x.daily, x.forward?.daily]) if (d) d.r.forEach((r, i) => m.set(d.d0 + i, (m.get(d.d0 + i) ?? 0) + r));
+      return m;
     };
+    const maps = new Map<string, Map<number, number>>();
+    const mapOf = (x: Survivor) => {
+      let m = maps.get(x.id);
+      if (!m) maps.set(x.id, (m = dailyMap(x)));
+      return m;
+    };
+    const live = (x: Survivor) => x.stage !== "faded" && (x.daily || x.forward?.daily);
+    const byPace = PACE_IDS.map((pid) =>
+      this.survivors
+        .filter((x) => paceIdOf(x.style) === pid && live(x))
+        .sort((a, b) => Number(this.pinned.has(b.id)) - Number(this.pinned.has(a.id)) || STAGE_RANK[b.stage] - STAGE_RANK[a.stage] || b.score - a.score)
+        .slice(0, 6),
+    );
     const mean = (x: number[]) => x.reduce((p, q) => p + q, 0) / x.length;
     const sdOf = (x: number[]) => {
       const m = mean(x);
@@ -2065,107 +2112,104 @@ export class Farm {
       }
       return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0;
     };
-    const stat = (ms: Survivor[]) => {
-      const xs = cut(ms);
-      if (!xs) return null;
+    const ddOf = (rs: number[]) => {
+      let e = 1;
+      let pk = 1;
+      let d = 0;
+      for (const r of rs) {
+        e *= 1 + r;
+        pk = Math.max(pk, e);
+        d = Math.max(d, 1 - e / pk);
+      }
+      return d;
+    };
+    const build = (ms: Survivor[]): Team | null => {
+      const mp = ms.map(mapOf);
+      // the days every member has a result on (each strategy trades its own days; a day with no position is a 0)
+      const span = mp.map((m) => {
+        const ks = [...m.keys()];
+        return [Math.min(...ks), Math.max(...ks)];
+      });
+      const a = Math.max(...span.map((x) => x[0]));
+      const b = Math.min(...span.map((x) => x[1]));
+      if (!(b - a + 1 >= 60)) return null;
+      const xs = mp.map((m) => Array.from({ length: b - a + 1 }, (_, i) => m.get(a + i) ?? 0));
       const sds = xs.map(sdOf);
       if (sds.some((v) => !(v > 0))) return null;
+      const each = xs.map((x, k) => ({ sharpe: (mean(x) / sds[k]) * Math.sqrt(365), maxDD: ddOf(x) }));
+      if (each.some((e) => !(e.sharpe > 0))) return null;
+      let cs = 0;
+      let ck = 0;
+      for (let i = 0; i < xs.length; i++)
+        for (let j = i + 1; j < xs.length; j++) {
+          const c = corr(xs[i], xs[j]);
+          if (c >= 0.7) return null;
+          cs += c;
+          ck++;
+        }
       const iv = sds.map((v) => 1 / v);
       const tot = iv.reduce((p, q) => p + q, 0);
       const w = iv.map((v) => v / tot);
       const port = xs[0].map((_, i) => xs.reduce((p, x, k) => p + w[k] * x[i], 0));
       const sd = sdOf(port);
-      let eq = 1;
-      let peak = 1;
-      let dd = 0;
-      for (const r of port) {
-        eq *= 1 + r;
-        peak = Math.max(peak, eq);
-        dd = Math.max(dd, 1 - eq / peak);
-      }
-      let cs = 0;
-      let ck = 0;
-      let cmax = 0;
-      for (let i = 0; i < xs.length; i++)
-        for (let j = i + 1; j < xs.length; j++) {
-          const c = corr(xs[i], xs[j]);
-          cs += c;
-          ck++;
-          cmax = Math.max(cmax, c);
-        }
-      const each = xs.map((x) => {
-        const v = sdOf(x);
-        let e = 1;
-        let pk = 1;
-        let d = 0;
-        for (const r of x) {
-          e *= 1 + r;
-          pk = Math.max(pk, e);
-          d = Math.max(d, 1 - e / pk);
-        }
-        return { sharpe: v > 0 ? (mean(x) / v) * Math.sqrt(365) : 0, maxDD: d };
-      });
+      const sharpe = sd > 0 ? (mean(port) / sd) * Math.sqrt(365) : 0;
+      if (!(sharpe > 0)) return null;
+      const top = each.reduce((p, e, i) => (e.sharpe > each[p].sharpe ? i : p), 0);
       return {
-        w,
-        sharpe: sd > 0 ? (mean(port) / sd) * Math.sqrt(365) : 0,
-        maxDD: dd,
+        key: ms.map((m) => m.id).join("+"),
+        ready: ms.every((m) => m.stage === "proven") && sharpe >= 1,
+        members: ms.map((m, i) => ({
+          id: m.id,
+          name: m.name,
+          pace: paceIdOf(m.style),
+          fresh: m.forward ? { trades: m.forward.trades, ret: m.forward.ret, maxDD: m.forward.maxDD } : null,
+          weight: w[i],
+          sharpe: each[i].sharpe,
+          flow: m.flow,
+          tfH: m.tfH,
+          coins: m.coins,
+          stage: m.stage,
+          sig: m.sig,
+          oos: { sharpe: m.oos.sharpe, t: m.oos.t, trades: m.oos.trades, winRate: m.oos.winRate, avgR: m.oos.avgR, bars: m.oos.bars, maxDD: m.oos.maxDD },
+          dsr: m.dsr,
+        })),
+        sharpe,
+        maxDD: ddOf(port),
         ret: mean(port) * 365,
         corr: ck ? cs / ck : 0,
-        cmax,
         days: port.length,
-        each,
+        solo: { name: ms[top].name, sharpe: each[top].sharpe, maxDD: each[top].maxDD },
       };
     };
-    let best: { ms: Survivor[]; st: NonNullable<ReturnType<typeof stat>> } | null = null;
-    // every survivor in turn as the first member; the best team found is kept
-    for (const seed of live.slice(0, 8)) {
-      const ms = [seed];
-      let cur = stat(ms);
-      // a team is built only from members that made money on the days it is read on
-      if (!cur || !(cur.sharpe > 0)) continue;
-      while (ms.length < 5) {
-        let add: { c: Survivor; st: NonNullable<ReturnType<typeof stat>> } | null = null;
-        for (const c of live) {
-          if (ms.includes(c) || ms.some((m) => familyOf(m.flow) === familyOf(c.flow))) continue;
-          const st = stat([...ms, c]);
-          if (!st || st.cmax >= 0.7 || st.each.some((e) => !(e.sharpe > 0))) continue;
-          if (st.sharpe > (add?.st.sharpe ?? cur.sharpe * 1.03)) add = { c, st };
-        }
-        if (!add) break;
-        ms.push(add.c);
-        cur = add.st;
-      }
-      if (ms.length >= 2 && (!best || cur.sharpe > best.st.sharpe)) best = { ms: [...ms], st: cur };
-    }
-    if (!best) return null;
-    const { ms, st } = best;
-    const top = st.each.reduce((a, b, i) => (b.sharpe > st.each[a].sharpe ? i : a), 0);
-    this.teamCache = {
-      members: ms.map((m, i) => ({
-        id: m.id,
-        name: m.name,
-        weight: st.w[i],
-        sharpe: st.each[i].sharpe,
-        flow: m.flow,
-        tfH: m.tfH,
-        coins: m.coins,
-        stage: m.stage,
-        sig: m.sig,
-        oos: { sharpe: m.oos.sharpe, t: m.oos.t, trades: m.oos.trades },
-        dsr: m.dsr,
-      })),
-      sharpe: st.sharpe,
-      maxDD: st.maxDD,
-      ret: st.ret,
-      corr: st.corr,
-      days: st.days,
-      solo: {
-        name: ms[top].name,
-        sharpe: st.each[top].sharpe,
-        maxDD: st.each[top].maxDD,
-      },
+    const byId = new Map(this.survivors.map((x) => [x.id, x]));
+    const cands: { team: Team; bonus: number }[] = [];
+    const seen = new Set<string>();
+    const add = (ms: Survivor[], bonus: number) => {
+      const key = ms.map((m) => m.id).join("+");
+      if (seen.has(key)) return;
+      seen.add(key);
+      const tm = build(ms);
+      if (tm) cands.push({ team: tm, bonus });
     };
-    return this.teamCache;
+    // the teams already in the pool, read again on today's candles: they keep their place unless clearly beaten
+    for (const ids of this.poolIds) {
+      const ms = ids.map((id) => byId.get(id));
+      if (ms.every((m): m is Survivor => !!m && m.stage !== "faded")) add(ms, 1.1);
+    }
+    if (byPace.every((xs) => xs.length))
+      for (const a of byPace[0]) for (const b of byPace[1]) for (const c of byPace[2]) add([a, b, c], 1);
+    const pool: Team[] = [];
+    const uses = new Map<string, number>();
+    for (const { team } of cands.sort((x, y) => y.team.sharpe * y.bonus - x.team.sharpe * x.bonus)) {
+      // variety: a strategy is in at most two teams of the pool
+      if (team.members.some((m) => (uses.get(m.id) ?? 0) >= 2)) continue;
+      pool.push(team);
+      for (const m of team.members) uses.set(m.id, (uses.get(m.id) ?? 0) + 1);
+      if (pool.length === 5) break;
+    }
+    this.poolIds = pool.map((tm) => tm.members.map((m) => m.id));
+    this.poolCache = pool;
+    return pool;
   }
 
   rate(): number {
@@ -2197,7 +2241,7 @@ export class Farm {
       ),
       funnel: { ...this.funnel },
       ladder,
-      top: this.top(),
+      top: this.top().map(lite),
       watch: this.watch(),
       survivors: this.survivors.length,
       recent: this.recent,
@@ -2209,17 +2253,19 @@ export class Farm {
       entrants: this.funnel.trained,
       kinds: Math.max(this.entered.size, this.kindsFloor),
       dupes: this.dupes,
-      tops: this.tops(),
+      tops: this.tops().map((b) => ({ ...b, rows: b.rows.map(lite) })),
       pbo: this.overfit(),
       niches: this.archive.size,
       blocks: this.blocks(),
       team: this.team(),
+      teams: this.teams(),
+      kept: this.survivors.filter((x) => this.pinned.has(x.id)).map(lite),
     };
   }
 
   save(): FarmSave {
     return {
-      v: 3,
+      v: 4,
       cfg: this.cfg,
       gen: this.gen,
       tried: this.tried,
@@ -2242,6 +2288,8 @@ export class Farm {
       entered: [...this.entered].slice(-50_000),
       dupes: this.dupes,
       kindsFloor: this.kindsFloor,
+      pinned: [...this.pinned],
+      teams: this.poolIds,
     };
   }
 
@@ -2260,7 +2308,17 @@ export class Farm {
       const k = kindOf(x.flow);
       if (!best.has(k)) best.set(k, x);
     }
-    this.survivors = [...best.values()];
+    // copies with the same result under different names (kept by an earlier version): one stays
+    const byResult = new Map<string, Survivor>();
+    for (const x of best.values()) {
+      const rk = resultKey(x);
+      if (!byResult.has(rk) || (s.pinned ?? []).includes(x.id)) byResult.set(rk, x);
+    }
+    this.survivors = [...byResult.values()];
+    this.pinned = new Set((s.pinned ?? []).filter((id) => this.survivors.some((x) => x.id === id)));
+    this.poolIds = (s.teams ?? []).filter((t) => Array.isArray(t) && t.length >= 2);
+    // the ladder is read again with today's rules (an earlier version called every vault result proven)
+    for (const x of this.survivors) x.stage = ladderOf(x);
     this.reindex();
     for (const flow of s.population ?? []) {
       if (!STYLE_MAP[flow?.style]) continue;
@@ -2301,20 +2359,51 @@ export class Farm {
   }
 }
 
-/** where a survivor stands on the incubation ladder, from its forward test */
+/** fresh-data trades before a survivor can be called proven, and before it can be called proving */
+export const PROVEN_TRADES = 25;
+export const PROVING_TRADES = 8;
+
+/**
+ * Where a survivor stands on the incubation ladder, from its forward test (the
+ * vault and the candles since).
+ *   faded       lost over 10 or more trades, or fell much further than it ever
+ *               did in testing (twice its tested drop, and at least 12 %)
+ *   incubating  fewer than 8 trades, or not in profit yet
+ *   proving     8 or more trades and in profit
+ *   proven      25 or more trades, in profit, and a Sharpe ratio of at least
+ *               0.75 (and at least 40 % of its tested Sharpe) — not every
+ *               survivor gets here, so the word means something
+ */
 export function ladderOf(s: Pick<Survivor, "forward" | "oos">): Ladder {
   const f = s.forward;
   if (!f || f.bars < 2) return "new";
-  // fell further than it ever did in testing, or lost over a fair number of trades
   if (
-    (f.trades >= 5 && f.maxDD > Math.max(0.05, 1.5 * s.oos.maxDD)) ||
-    (f.trades >= 10 && f.ret < 0)
+    (f.trades >= 10 && f.ret < 0) ||
+    (f.trades >= PROVING_TRADES && f.maxDD > Math.max(0.12, 2 * s.oos.maxDD))
   )
     return "faded";
-  if (f.trades < 5) return "incubating";
-  if (f.trades < 15) return f.ret >= 0 ? "proving" : "incubating";
-  return f.ret > 0 ? "proven" : "faded";
+  if (f.trades < PROVING_TRADES || f.ret < 0) return "incubating";
+  if (
+    f.trades >= PROVEN_TRADES &&
+    f.ret > 0 &&
+    f.sharpe >= Math.max(0.75, 0.4 * (s.oos.sharpe || 0))
+  )
+    return "proven";
+  return "proving";
 }
+
+/** two survivors with the same result on the same candles are one strategy, whatever their blocks are called */
+export const resultKey = (s: Pick<Survivor, "id" | "tfH" | "oos">) =>
+  Number.isFinite(s.oos?.totalReturn) && Number.isFinite(s.oos?.maxDD)
+    ? `${s.tfH}|${s.oos.trades}|${s.oos.totalReturn.toFixed(4)}|${s.oos.maxDD.toFixed(4)}`
+    : `id:${s.id}`;
+
+/** a survivor without the long series (for the screen: they are not drawn, only used here) */
+const lite = (s: Survivor): Survivor => ({
+  ...s,
+  daily: undefined,
+  forward: s.forward ? { ...s.forward, daily: undefined } : null,
+});
 
 /** the leaderboard score: the unseen Sharpe, worth more when it survived its nudges well, beat more random bots, traded enough and kept its edge at double costs; fresh data counts on top */
 export function scoreOf(

@@ -109,7 +109,9 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
           },
         ]
       : []);
-  const all = boards.flatMap((b) => b.rows);
+  const kept = farm.kept ?? [];
+  const keptIds = new Set(kept.map((x) => x.id));
+  const all = [...kept, ...boards.flatMap((b) => b.rows)];
   const found = all.find((s) => s.id === sel) ?? null;
   if (found) shown.current = found;
   // one that has left the lists since it was picked stays on show until another is clicked
@@ -214,6 +216,15 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
               : "Nothing has survived every check yet. Press Start and leave it running while you use the terminal."}
           </div>
         )}
+        {kept.length > 0 && (
+          <div data-kept>
+            <div className="pro-section farm-board-head">
+              <span>★ KEPT — THE STRATEGIES YOU CHOSE TO KEEP</span>
+              <span className="muted">never dropped · {kept.length}</span>
+            </div>
+            <Table rows={kept} sel={pick?.id ?? null} onSel={setSel} />
+          </div>
+        )}
         {boards.map((b) => (
           <div key={b.id} data-board={b.id}>
             <div className="pro-section farm-board-head">
@@ -244,21 +255,27 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
             rank={rankOf(pick)}
             onMsg={setMsg}
             explain={c.explain}
+            kept={keptIds.has(pick.id)}
           />
         )}
 
-        {farm.team && farm.team.members.length > 1 && (
-          <>
-            <div className="pro-section">
-              THE TEAM — THE SURVIVORS THAT FIT TOGETHER BEST
-            </div>
-            <TeamCard
-              team={farm.team}
-              explain={c.explain}
-              onSel={(id) => all.some((x) => x.id === id) && setSel(id)}
-              onMsg={setMsg}
-            />
-          </>
+        <div className="pro-section">
+          THE TEAM POOL — UP TO FIVE TEAMS: ONE SCALPING, ONE INTRADAY AND ONE SWING STRATEGY EACH
+        </div>
+        {(farm.teams?.length ?? 0) > 0 ? (
+          <TeamPool
+            teams={farm.teams!}
+            explain={c.explain}
+            onSel={(id) => all.some((x) => x.id === id) && setSel(id)}
+            onMsg={setMsg}
+          />
+        ) : (
+          <div className="lab-line muted farm-none" data-team-none>
+            A team needs a strategy standing at each of scalping, intraday and swing whose results fit together (in profit on the same days, not moving as one).
+            {farm.cfg.styles.some((x) => x === "scalp" || x === "scalp15") && farm.cfg.styles.some((x) => x === "intraday" || x === "intraday15") && farm.cfg.styles.some((x) => x === "swing" || x === "week")
+              ? " The pool fills as those paces find survivors."
+              : " Add the scalping, intraday and swing paces under ⚙ Settings."}
+          </div>
         )}
 
         {farm.fleet.length > 0 && (
@@ -487,11 +504,13 @@ function Detail({
   rank,
   onMsg,
   explain,
+  kept,
 }: {
   s: Survivor;
   rank: { n: number; pace: string } | null;
   onMsg: (m: string) => void;
   explain: boolean;
+  kept: boolean;
 }) {
   const [authority, setAuthority] = useState<Authority>("council");
   const [done, setDone] = useState(false);
@@ -677,6 +696,19 @@ function Detail({
           title="Open it in the bot builder: every block shows what it is built of; test it there for the full read-out and the optimizer"
         >
           Open in the bot builder
+        </button>
+        <button
+          className={`btn${kept ? " active" : ""}`}
+          data-keep
+          onClick={() =>
+            void desktop?.lab?.farm
+              ?.pin(s.id, !kept)
+              .then(() => onMsg(kept ? `“${s.name}” is no longer kept: it stays while it holds its place.` : `Kept “${s.name}”: it stays on the KEPT list for good, whatever newer strategies or fresh candles do.`))
+              .catch((e) => onMsg(String(e?.message ?? e)))
+          }
+          title="Keep this strategy for good: it is never dropped from the lists, even when newer ones score higher or the candles reload"
+        >
+          {kept ? "★ Kept" : "☆ Keep"}
         </button>
         <span className="muted">Who decides its trades:</span>
         <button
@@ -883,7 +915,35 @@ function Blocks({ farm, explain }: { farm: FarmView; explain: boolean }) {
   );
 }
 
-/** the team: survivors that fit together as one portfolio */
+/** the team pool: up to five teams to choose from */
+function TeamPool({
+  teams,
+  explain,
+  onSel,
+  onMsg,
+}: {
+  teams: Team[];
+  explain: boolean;
+  onSel: (id: string) => void;
+  onMsg: (m: string) => void;
+}) {
+  const [key, setKey] = useState<string>(teams[0].key);
+  const team = teams.find((t) => t.key === key) ?? teams[0];
+  return (
+    <div data-team-pool>
+      <div className="farm-chips farm-team-picks">
+        {teams.map((t, i) => (
+          <button key={t.key} className={`chip${t.key === team.key ? " active" : ""}`} onClick={() => setKey(t.key)} data-team-pick={i}>
+            Team {i + 1} · Sharpe {num(t.sharpe)} · {pct(t.ret, 0)} a year{t.ready ? " · ✓ ready" : ""}
+          </button>
+        ))}
+      </div>
+      <TeamCard key={team.key} team={team} explain={explain} onSel={onSel} onMsg={onMsg} />
+    </div>
+  );
+}
+
+/** a team: survivors that fit together as one portfolio */
 function TeamCard({
   team,
   explain,
@@ -941,6 +1001,11 @@ function TeamCard({
   const lift = team.solo.sharpe > 0 ? team.sharpe / team.solo.sharpe - 1 : NaN;
   return (
     <div className="farm-team" data-team>
+      {team.ready && (
+        <div className="lab-line up" data-ready>
+          ✓ Ready: every member is proven on fresh data and the team is strong together. With Telegram linked, it is offered on your phone with a Deploy button.
+        </div>
+      )}
       <div className="farm-team-stats">
         <div>
           <small>TOGETHER · SHARPE</small>
@@ -975,6 +1040,7 @@ function TeamCard({
               SHARE OF RISK
             </th>
             <th title="Its Sharpe ratio alone, on the team’s days">ALONE</th>
+            <th title="Its record on fresh data: the vault and the candles since it was found">FRESH DATA</th>
             <th className="l">STAGE</th>
             <th className="l" />
           </tr>
@@ -985,7 +1051,7 @@ function TeamCard({
               <td className="l b farm-name" title={m.name}>
                 {m.name.split(" · ").slice(0, 2).join(" · ")}
               </td>
-              <td className="l muted">{paceOf(m.flow.style)}</td>
+              <td className="l muted">{m.pace ? m.pace[0].toUpperCase() + m.pace.slice(1) : paceOf(m.flow.style)}</td>
               <td className="mono">
                 <span className="farm-share">
                   <i style={{ width: `${m.weight * 100}%` }} />
@@ -993,6 +1059,7 @@ function TeamCard({
                 {pct(m.weight, 0)}
               </td>
               <td className="mono">{num(m.sharpe)}</td>
+              <td className="mono">{m.fresh ? `${pct(m.fresh.ret)} · ${m.fresh.trades} trades` : "—"}</td>
               <td className={`l ${STAGE_TONE[m.stage] ?? ""}`}>
                 {LADDER.find((l) => l.id === m.stage)?.name ?? m.stage}
                 {m.sig ? " · significant" : ""}
@@ -1033,12 +1100,14 @@ function TeamCard({
         <div className="lab-line muted">
           Strategies that make money at different times smooth each other out:
           together they earn more for the same risk than the best of them alone.
-          The farm starts from a strong survivor and adds, one at a time, the
-          survivor that lifts the combined result most — never two of the same
-          kind, never two that move as one. Each member’s share is set so all
-          carry the same risk. The team is picked on the same unseen stretch its
-          numbers are read on, so they flatter it a little: the forward test on
-          fresh data is the judge, and deploying it is your call.
+          Each team is one scalping, one intraday and one swing strategy, read
+          on the days all three have results on data they were not trained on
+          (the unseen stretch, the vault and the candles since). Every member
+          must be in profit on those days and no two may move as one; each
+          member’s share is set so all carry the same risk. The best five make
+          the pool, and a team in it keeps its place unless a new one is clearly
+          better — the pool is saved, so it survives restarts and reloads.
+          Deploying a team is your call.
         </div>
       )}
     </div>
@@ -1177,7 +1246,7 @@ function Settings({
     >
       <div className="farm-settings">
         <label>
-          <span>Coins (up to 12)</span>
+          <span>Coins (up to 8)</span>
           <input
             className="ctl mono"
             value={coins}

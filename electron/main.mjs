@@ -12,12 +12,15 @@ import { Db, isLocked, openWithRetry } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
 import { DEFAULT_RPC, recentActivity, SOL_MINT, tokenInfo, walletBalances } from '../src/shared/solana.ts';
-import { TelegramCommands, tgDetectChat, tgMe, tgSendLong, tgSendPhoto } from '../src/shared/telegram.ts';
+import { TelegramCommands, tgDetectChat, tgMe, tgSendKeyboard, tgSendLong, tgSendPhoto } from '../src/shared/telegram.ts';
 import { parseSearch, searchUrl } from '../src/shared/xapi.ts';
 import { AttemptGate, isLedgerRecord, ledgerMatches, makeLedger, PUBLIC_CHANNELS } from '../src/shared/ledger.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { fromBot, fromSwarm, TradeJournal } from './care/journal.mjs';
 import { Care } from './care/care.mjs';
+import { Approvals } from './care/approve.mjs';
+import { buildSpec } from '../src/lab/flow.ts';
+import { testedStats } from '../src/lab/live.ts';
 import { costsForTests, measureCosts } from './care/costs.mjs';
 import { journalCsv, ratesFromChart, taxCsv, taxYearOf, taxYearRange } from './care/tax.mjs';
 import { collectBackup, openBackup, passwordProblem, peekBackup, restoreBackup, sealBackup } from './care/backup.mjs';
@@ -170,6 +173,10 @@ let journal = null;
 let care = null;
 /** how the main window is doing, for the "still alive" checks */
 let screenState = 'ok';
+/** ready teams offered on Telegram with Deploy buttons (care/approve.mjs) */
+let approvals = null;
+/** start (or restart) the Telegram poller for the chosen bot: set once the IPC handlers exist */
+let ensurePoller = () => {};
 
 function createWindow() {
   // opens maximised (or where it was last left), always within the screen:
@@ -436,6 +443,7 @@ function registerIpc() {
     unlocked = true;
     // the daily message, the warnings and the weekly report start once the ledger key has been entered
     care?.start();
+    ensurePoller();
     // popped-out panels come back (and, the first time, the ones left open last session)
     if (screens) {
       screens.setVisible(true);
@@ -571,6 +579,7 @@ function registerIpc() {
   handle('lab:farm-state', () => lab.farmState());
   handle('lab:farm-start', (_e, patch) => lab.farmStart(patch ?? {}));
   handle('lab:farm-stop', () => lab.farmStop(true));
+  handle('lab:farm-pin', (_e, id, on) => lab.farmPin(String(id), Boolean(on)));
   // candles from the Lab's own history cache (a year of hourly bars for the Quant desk's seasonality map)
   handle('lab:bars', async (_e, coin, tf, years) => {
     const c = String(coin ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
@@ -1040,14 +1049,16 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
   });
   handle('telegram:detect', async (_e, id) => {
     const s = tg(id);
-    const wasRunning = commands;
+    // one reader of the bot's messages at a time: the poller pauses while the chat is detected
     commands?.stop();
+    commands = null;
+    commandsFor = '';
     try {
       const chat = await tgDetectChat(s.fields.token);
       vault.save({ id, label: s.label, kind: s.kind, exchange: null, fields: { chatId: chat.id } });
       return chat;
     } finally {
-      if (wasRunning) startCommands(id);
+      ensurePoller();
     }
   });
   handle('telegram:send', (_e, id, html) => {
@@ -1058,27 +1069,61 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
     const s = tg(id);
     return tgSendPhoto(s.fields.token, s.fields.chatId, new Uint8Array(png), caption);
   });
-  function startCommands(id) {
-    const s = tg(id);
-    if (!s.fields.chatId) throw new Error('detect the chat first');
-    // /wallet: the swarm wallet's address, to paste into Phantom (answered in the configured chat only)
-    const walletReply = () => {
-      try {
-        const a = swarmAddress();
-        const home = swarmHome();
-        return `<b>Swarm wallet</b> — tap the address to copy it, then in Phantom: Send → Solana → paste.\n\n<code>${a}</code>\n\nSolana network only. Send a small test first.${home ? `\nProfits go home to ${home.slice(0, 4)}…${home.slice(-4)}.` : ''}`;
-      } catch {
-        return 'No swarm wallet yet — create one in Novus Ordo (Wallet).';
-      }
-    };
-    commands = new TelegramCommands(s.fields.token, s.fields.chatId, () => ({ ...tgStatus, wallet: walletReply() }), fetch, (e) => console.warn('telegram', e?.message ?? e));
-    void commands.run();
-  }
-  handle('telegram:commands', (_e, id) => {
+  // /wallet: the swarm wallet's address, to paste into Phantom (answered in the configured chat only)
+  const walletReply = () => {
+    try {
+      const a = swarmAddress();
+      const home = swarmHome();
+      return `<b>Swarm wallet</b> — tap the address to copy it, then in Phantom: Send → Solana → paste.\n\n<code>${a}</code>\n\nSolana network only. Send a small test first.${home ? `\nProfits go home to ${home.slice(0, 4)}…${home.slice(-4)}.` : ''}`;
+    } catch {
+      return 'No swarm wallet yet — create one in Novus Ordo (Wallet).';
+    }
+  };
+  // one poller reads the bot's messages: it answers /teams and the Deploy buttons always (from your chat only),
+  // and /price, /status and /wallet when the Telegram panel's tick-box says so
+  let basicsOn = false;
+  let commandsFor = '';
+  ensurePoller = () => {
+    const id = care?.running ? care.cfg.secretId : '';
+    let s = null;
+    try {
+      if (id) s = tg(id);
+    } catch {
+      s = null;
+    }
+    const chat = s?.fields.chatId;
+    if (!chat) {
+      commands?.stop();
+      commands = null;
+      commandsFor = '';
+      return;
+    }
+    const sig = `${id}:${chat}`;
+    if (commands && commandsFor === sig) return;
     commands?.stop();
-    commands = null;
-    if (id) startCommands(id);
-    return Boolean(commands);
+    commandsFor = sig;
+    commands = new TelegramCommands(s.fields.token, chat, () => ({ ...tgStatus, wallet: walletReply() }), fetch, (e) => console.warn('telegram', e?.message ?? e), {
+      answerBasics: () => basicsOn,
+      command: async (cmd) => (cmd === '/teams' ? approvals.pool() : null),
+      callback: (data) => approvals.tap(data),
+    });
+    void commands.run();
+  };
+  // every five minutes: a team that has become ready is offered on the phone, with its Deploy buttons
+  setInterval(async () => {
+    if (!care?.running || care.cfg.offers === false || !commands || !lab) return;
+    try {
+      const s = tg(care.cfg.secretId);
+      for (const r of approvals.check()) await tgSendKeyboard(s.fields.token, s.fields.chatId, r.html, r.keyboard);
+    } catch (err) {
+      log('warn', `team offer: ${err?.message ?? err}`);
+    }
+  }, 5 * 60_000).unref?.();
+  handle('telegram:commands', (_e, id) => {
+    basicsOn = Boolean(id);
+    if (id && care && !care.cfg.secretId) care.setConfig({ secretId: id });
+    ensurePoller();
+    return basicsOn;
   });
   handle('telegram:setStatus', (_e, snap) => {
     tgStatus = snap;
@@ -1086,7 +1131,11 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
 
   // ---- while you are away: the daily message, warnings, the weekly report, strategy health, real costs ----
   handle('care:status', () => care.status());
-  handle('care:config', (_e, patch) => care.setConfig(patch ?? {}));
+  handle('care:config', (_e, patch) => {
+    const st = care.setConfig(patch ?? {});
+    ensurePoller();
+    return st;
+  });
   handle('care:sendNow', async (_e, kind) => {
     if (!care.cfg.secretId) throw new Error('choose the Telegram bot first (Telegram panel)');
     if (!(await care.sendNow(kind === 'weekly' ? 'weekly' : 'daily'))) throw new Error('could not send — check the Telegram bot and its chat on the Telegram panel');
@@ -1241,6 +1290,19 @@ app.whenReady().then(async () => {
     screen: () => screenState,
     assumedCosts: () => ({ feeBps: lab?.cfg.feeBps ?? 4.5, slipBps: lab?.cfg.slipBps ?? 2 }),
     log,
+  });
+  approvals = new Approvals({
+    db,
+    teams: () => lab?.farmState().teams ?? [],
+    deployed: () => (lab ? lab.deployedList.map((d) => d.spec.name) : []),
+    // deploying from the phone: the same as the edge finder's Deploy the team, one member at a time
+    deploy: async (m, authority) => {
+      await services;
+      const built = buildSpec(m.flow);
+      lab.deploy({ spec: { ...built.spec, name: m.name }, tfH: m.tfH, stats: { sharpe: m.oos.sharpe, t: m.oos.t, dsr: m.dsr, trades: m.oos.trades, ...testedStats(m.oos, m.tfH), verdict: `edge finder · team · ${m.stage} · from your phone` }, authority }, { crypto: true, meme: false }, m.coins);
+      log('info', `deployed "${m.name}" from Telegram (${authority})`);
+    },
+    swarm: () => (cswarm ? { running: cswarm.running, mode: cswarm.mode } : null),
   });
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([

@@ -75,6 +75,10 @@ export function createFarmRunner(post, o = {}) {
         farm.checkFleet(deployed);
         send();
         save();
+      } else if (msg.type === "pin" && farm) {
+        farm.pin(msg.id, msg.on);
+        send();
+        save();
       } else if (msg.type === "fleet" && farm) {
         deployed = msg.deployed ?? [];
         farm.checkFleet(deployed);

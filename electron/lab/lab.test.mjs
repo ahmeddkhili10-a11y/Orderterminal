@@ -287,6 +287,23 @@ describe('the optimizer and 15-minute history', () => {
     await expect(lab.optimize([], {})).rejects.toThrow(/nothing to try/);
   });
 
+  it('a coin younger than the history asked for: what it has is used, and later refreshes only top it up', async () => {
+    let now = Date.UTC(2026, 10, 6, 12);
+    const t0 = now;
+    // listed 1,000 hours ago: an exchange answers from its listing, whatever the start asked for
+    const listedAt = now - 1000 * HOUR;
+    const ccxt = { history: vi.fn(async (_id, _sym, _tf, since) => walk(1010, t0 + 10 * HOUR, 5).filter((b) => b.time >= Math.max(since, listedAt) && b.time <= now)) };
+    const lab = new LabService({ ccxt, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const first = await lab.candles('SOL', '1h', 6, 'binance');
+    expect(first.bars.length).toBeGreaterThan(900);
+    expect(first.stale).toBeUndefined();
+    const since0 = ccxt.history.mock.calls[0][3];
+    now += 6 * HOUR;
+    await lab.candles('SOL', '1h', 6, 'binance');
+    // the second time it asks only for what is new, not for six years again
+    expect(ccxt.history.mock.calls[1][3]).toBeGreaterThan(since0 + 900 * HOUR);
+  });
+
   it('a shorter request keeps the longer history in the cache', async () => {
     const now = Date.UTC(2026, 10, 6, 12);
     const ccxt = { history: vi.fn(async (_id, _sym, _tf, since) => walk(Math.floor((now - since) / HOUR), now, 3)) };

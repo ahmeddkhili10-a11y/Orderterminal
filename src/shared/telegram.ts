@@ -84,7 +84,27 @@ export async function tgSendPhoto(token: string, chatId: string, png: Uint8Array
   if (!j.ok) throw new Error(j.description ?? 'Telegram sendPhoto failed');
 }
 
-export const HELP_TEXT = '<b>Novus Ordo bot</b>\n/wallet — the swarm wallet address, to paste into Phantom\n/price — primary instrument price\n/status — price, funding, open interest and feeds\n/help — this message';
+export const HELP_TEXT = '<b>Novus Ordo bot</b>\n/teams — the edge finder\'s team pool, each with a Deploy button\n/wallet — the swarm wallet address, to paste into Phantom\n/price — primary instrument price\n/status — price, funding, open interest and feeds\n/help — this message';
+
+/** a button under a message: its text, and what comes back when it is tapped (at most 64 bytes) */
+export type TgButton = { text: string; callback_data: string };
+
+/** a message with buttons under it; returns its message id */
+export async function tgSendKeyboard(token: string, chatId: string, html: string, keyboard: TgButton[][], fetchImpl?: FetchLike): Promise<number> {
+  if (!chatId) throw new Error('No chat id yet — use “Detect chat” first');
+  const m = await tgApi<{ message_id: number }>(token, 'sendMessage', { chat_id: chatId, text: html.slice(0, 4000), parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } }, fetchImpl);
+  return m.message_id;
+}
+
+/** what the poller does besides the read-only commands */
+export interface TelegramHandlers {
+  /** answer /price, /status, /wallet (the Telegram panel's tick-box); /teams and buttons are always answered */
+  answerBasics?: () => boolean;
+  /** a command the app answers itself (e.g. /teams): a reply, with buttons if any, or null */
+  command?: (cmd: string) => Promise<{ html: string; keyboard?: TgButton[][] }[] | null>;
+  /** a button was tapped: the reply to send, or null */
+  callback?: (data: string) => Promise<string | null>;
+}
 
 /**
  * Long-polls getUpdates and answers /price, /status and /help using the
@@ -100,6 +120,7 @@ export class TelegramCommands {
     private status: () => { price: string; status: string; wallet?: string },
     private fetchImpl: FetchLike = fetch,
     private onError: (e: unknown) => void = () => undefined,
+    private handlers: TelegramHandlers = {},
   ) {}
 
   /** Handle one batch of updates; returns the replies sent (for tests). */
@@ -107,9 +128,38 @@ export class TelegramCommands {
     const replies: string[] = [];
     for (const u of updates) {
       this.offset = Math.max(this.offset, u.update_id + 1);
+      // a button tapped under one of our messages: only in the configured chat
+      const q = u.callback_query;
+      if (q) {
+        if (String(q.message?.chat?.id) !== this.chatId || !this.handlers.callback) continue;
+        let reply: string | null = null;
+        try {
+          reply = await this.handlers.callback(String(q.data ?? ''));
+        } catch (e) {
+          reply = `⚠️ ${escapeHtml(String((e as Error)?.message ?? e))}`;
+        }
+        await tgApi(this.token, 'answerCallbackQuery', { callback_query_id: q.id, text: reply ? 'Done' : '' }, this.fetchImpl).catch(() => undefined);
+        // the buttons go once used: a second tap cannot deploy twice
+        if (q.message?.message_id) await tgApi(this.token, 'editMessageReplyMarkup', { chat_id: this.chatId, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } }, this.fetchImpl).catch(() => undefined);
+        if (reply) {
+          await tgSend(this.token, this.chatId, reply, this.fetchImpl);
+          replies.push(reply);
+        }
+        continue;
+      }
       const msg = u.message;
       if (!msg?.text || String(msg.chat?.id) !== this.chatId) continue;
       const cmd = msg.text.trim().split(/[\s@]/)[0].toLowerCase();
+      const own: { html: string; keyboard?: TgButton[][] }[] | null = this.handlers.command ? await this.handlers.command(cmd).catch((e) => [{ html: `⚠️ ${escapeHtml(String((e as Error)?.message ?? e))}` }]) : null;
+      if (own) {
+        for (const r of own) {
+          if (r.keyboard?.length) await tgSendKeyboard(this.token, this.chatId, r.html, r.keyboard, this.fetchImpl);
+          else await tgSend(this.token, this.chatId, r.html, this.fetchImpl);
+          replies.push(r.html);
+        }
+        continue;
+      }
+      if (this.handlers.answerBasics && !this.handlers.answerBasics() && cmd !== '/help' && cmd !== '/start') continue;
       const snap = this.status();
       const reply = cmd === '/price' ? snap.price : cmd === '/status' ? snap.status : (cmd === '/wallet' || cmd === '/address') && snap.wallet ? snap.wallet : cmd === '/help' || cmd === '/start' ? HELP_TEXT : null;
       if (!reply) continue;
@@ -129,7 +179,7 @@ export class TelegramCommands {
     }
     while (!this.stopped) {
       try {
-        const updates = await tgApi<any[]>(this.token, 'getUpdates', { offset: this.offset, timeout: 25, allowed_updates: ['message'] }, this.fetchImpl);
+        const updates = await tgApi<any[]>(this.token, 'getUpdates', { offset: this.offset, timeout: 25, allowed_updates: ['message', 'callback_query'] }, this.fetchImpl);
         if (!this.stopped) await this.handle(updates);
       } catch (e) {
         if (this.stopped) return;

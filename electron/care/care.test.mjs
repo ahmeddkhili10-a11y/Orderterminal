@@ -6,6 +6,7 @@ import { drawdownR, healthOf, strategyHealth, worsened } from './health.mjs';
 import { rateOn, ratesFromChart, taxCsv, taxYearOf, taxYearRange } from './tax.mjs';
 import { backText, clearedText, dailyText, problemsOf, weeklyText } from './reports.mjs';
 import { Care, localDay } from './care.mjs';
+import { Approvals } from './approve.mjs';
 import { collectBackup, openBackup, passwordProblem, peekBackup, restoreBackup, sealBackup } from './backup.mjs';
 
 const DAY = 86_400_000;
@@ -281,5 +282,66 @@ describe('backups', () => {
     expect(passwordProblem('my own long phrase')).toBeNull();
     expect(() => sealBackup({}, 'short')).toThrow();
     expect(() => peekBackup('{"x":1}')).toThrow(/not a Novus Ordo backup/);
+  });
+});
+
+describe('deploying from the phone', () => {
+  const team = (key, ready = true) => ({
+    key,
+    ready,
+    sharpe: 2.1,
+    ret: 0.34,
+    maxDD: 0.06,
+    days: 210,
+    corr: 0.1,
+    solo: { name: 'x', sharpe: 1.5, maxDD: 0.05 },
+    members: ['scalp', 'intraday', 'swing'].map((pace, i) => ({ id: `${key}${i}`, name: `${pace} ${key}`, pace, fresh: { trades: 30, ret: 0.04, maxDD: 0.02 }, weight: 1 / 3, sharpe: 1.2, flow: {}, tfH: 1, coins: ['BTC'], stage: 'proven', sig: true, oos: { sharpe: 2, t: 3, trades: 40 }, dsr: 0.9 })),
+  });
+  const setup = (teams) => {
+    let t = Date.UTC(2026, 10, 15, 9);
+    const db = memDb();
+    const deployed = [];
+    const a = new Approvals({ db, teams: () => teams, deployed: () => deployed.map((d) => d.name), deploy: async (m, auth) => deployed.push({ name: m.name, auth }), swarm: () => ({ running: true, mode: 'paper' }), now: () => t });
+    return { a, deployed, at: (ms) => (t = ms), get t() {
+      return t;
+    } };
+  };
+  it('offers a ready team once, with its numbers and buttons, and deploys it on a tap', async () => {
+    const s = setup([team('A'), team('B', false)]);
+    const out = s.a.check();
+    expect(out).toHaveLength(1);
+    expect(out[0].html).toMatch(/ready to deploy[\s\S]*Sharpe <b>2\.10<\/b>[\s\S]*Scalping[\s\S]*Intraday[\s\S]*Swing[\s\S]*running \(paper\)/);
+    expect(out[0].keyboard.flat().map((b) => b.text)).toEqual(['✅ Deploy · council decides', '✅ Deploy · trade as tested', '✖ Not now']);
+    // offered once
+    expect(s.a.check()).toHaveLength(0);
+    const tap = out[0].keyboard[1][0].callback_data;
+    const reply = await s.a.tap(tap);
+    expect(reply).toMatch(/Deployed to the crypto swarm.*trade as tested/);
+    expect(s.deployed.map((d) => d.auth)).toEqual(['tested', 'tested', 'tested']);
+    // a second tap does not deploy twice
+    expect(await s.a.tap(tap)).toMatch(/already answered/);
+    expect(s.deployed).toHaveLength(3);
+  });
+  it('"Not now" deploys nothing; an old offer lapses; strangers\' data is ignored', async () => {
+    const s = setup([team('A')]);
+    const kb = s.a.check()[0].keyboard;
+    expect(await s.a.tap(kb[2][0].callback_data)).toMatch(/not deployed/);
+    expect(s.deployed).toHaveLength(0);
+    const kb2 = s.a.pool()[0].keyboard;
+    s.at(s.t + 4 * 86_400_000);
+    expect(await s.a.tap(kb2[0][0].callback_data)).toMatch(/lapsed/);
+    expect(s.deployed).toHaveLength(0);
+    expect(await s.a.tap('nd:zzzz:c')).toBeNull();
+    expect(await s.a.tap('nd:0123456789ab:c')).toMatch(/lapsed/);
+  });
+  it('/teams lists the pool with buttons; members already deployed are not deployed again', async () => {
+    const s = setup([team('A'), team('B', false)]);
+    const pool = s.a.pool();
+    expect(pool.map((p) => p.html.split('\n')[0])).toEqual(['🧩 <b>Team 1 of 2</b> · ✓ ready', '🧩 <b>Team 2 of 2</b> · not every member proven yet']);
+    s.deployed.push({ name: 'scalp B' });
+    const r = await s.a.tap(pool[1].keyboard[0][0].callback_data);
+    expect(r).toMatch(/scalp B \(already deployed\)/);
+    expect(s.deployed.filter((d) => d.name === 'scalp B')).toHaveLength(1);
+    expect(setup([]).a.pool()[0].html).toMatch(/No teams in the pool yet/);
   });
 });

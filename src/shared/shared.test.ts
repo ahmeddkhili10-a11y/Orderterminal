@@ -96,6 +96,36 @@ describe('Telegram', () => {
   });
 });
 
+describe('Telegram buttons and the app’s own commands', () => {
+  it('a tapped button is taken from the configured chat only, answered, and its buttons removed', async () => {
+    const { calls, fetchImpl } = botApi({ sendMessage: {}, answerCallbackQuery: true, editMessageReplyMarkup: true });
+    const taps: string[] = [];
+    const bot = new TelegramCommands(TOKEN, '42', () => ({ price: 'p', status: 's' }), fetchImpl, () => undefined, {
+      callback: async (d) => (taps.push(d), `done ${d}`),
+    });
+    const replies = await bot.handle([
+      { update_id: 1, callback_query: { id: 'q1', data: 'nd:abc:c', message: { message_id: 5, chat: { id: 42 } } } },
+      { update_id: 2, callback_query: { id: 'q2', data: 'nd:abc:t', message: { message_id: 6, chat: { id: 999 } } } },
+    ]);
+    expect(taps).toEqual(['nd:abc:c']);
+    expect(replies).toEqual(['done nd:abc:c']);
+    expect(calls.map((c) => c.method)).toEqual(['answerCallbackQuery', 'editMessageReplyMarkup', 'sendMessage']);
+    expect(calls[1].body).toEqual({ chat_id: '42', message_id: 5, reply_markup: { inline_keyboard: [] } });
+  });
+  it('/teams is the app’s own, with buttons; /price waits for the tick-box', async () => {
+    const { calls, fetchImpl } = botApi({ sendMessage: { message_id: 1 } });
+    let basics = false;
+    const bot = new TelegramCommands(TOKEN, '42', () => ({ price: 'BTC 100', status: 's' }), fetchImpl, () => undefined, {
+      answerBasics: () => basics,
+      command: async (cmd) => (cmd === '/teams' ? [{ html: 'Team 1', keyboard: [[{ text: 'Deploy', callback_data: 'nd:x:c' }]] }] : null),
+    });
+    expect(await bot.handle([{ update_id: 1, message: { chat: { id: 42 }, text: '/teams' } }, { update_id: 2, message: { chat: { id: 42 }, text: '/price' } }])).toEqual(['Team 1']);
+    expect(calls[0].body.reply_markup).toEqual({ inline_keyboard: [[{ text: 'Deploy', callback_data: 'nd:x:c' }]] });
+    basics = true;
+    expect(await bot.handle([{ update_id: 3, message: { chat: { id: 42 }, text: '/price' } }])).toEqual(['BTC 100']);
+  });
+});
+
 describe('Solana activity', () => {
   it('maps signatures to activity rows', async () => {
     const fetchImpl = (async () => ({

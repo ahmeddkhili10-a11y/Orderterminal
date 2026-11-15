@@ -332,13 +332,19 @@ describe('fresh data: forward tests, the ladder and the fleet', () => {
 
   it('the ladder: new, incubating, proving, proven — or faded', () => {
     const oos = { maxDD: 0.08 } as Survivor['oos'];
-    const fw = (trades: number, ret: number, maxDD = 0.02) => ({ forward: { bars: 100, trades, ret, sharpe: ret > 0 ? 1 : -1, maxDD, days: 30 }, oos });
+    const fw = (trades: number, ret: number, maxDD = 0.02, sharpe = ret > 0 ? 1 : -1) => ({ forward: { bars: 100, trades, ret, sharpe, maxDD, days: 30 }, oos });
     expect(ladderOf({ forward: null, oos })).toBe('new');
     expect(ladderOf(fw(2, 0.01))).toBe('incubating');
     expect(ladderOf(fw(8, 0.02))).toBe('proving');
-    expect(ladderOf(fw(20, 0.05))).toBe('proven');
+    // proven takes 25 trades on fresh data, in profit, with a Sharpe of at least 0.75 — the vault alone rarely does it
+    expect(ladderOf(fw(20, 0.05))).toBe('proving');
+    expect(ladderOf(fw(25, 0.05))).toBe('proven');
+    expect(ladderOf(fw(30, 0.01, 0.02, 0.5))).toBe('proving');
     expect(ladderOf(fw(20, -0.02))).toBe('faded');
-    expect(ladderOf(fw(6, 0.01, 0.2))).toBe('faded');
+    expect(ladderOf(fw(9, -0.01))).toBe('incubating');
+    // a drop a little past its tested one is not the end of it (8 % against 8 % tested); a much deeper one is
+    expect(ladderOf(fw(12, 0.04, 0.09))).toBe('proving');
+    expect(ladderOf(fw(12, 0.04, 0.2))).toBe('faded');
     // fresh-data results move the score
     const base = { oos: { sharpe: 1.5, trades: 40 } as Survivor['oos'], nudge: { kept: 8, tried: 10 }, beat: 90 };
     expect(scoreOf({ ...base, forward: { bars: 100, trades: 10, ret: 0.05, sharpe: 2, maxDD: 0.02, days: 30 } })).toBeGreaterThan(scoreOf({ ...base, forward: null }));
@@ -431,55 +437,85 @@ describe('significance allows for every bot tried', () => {
     expect(st.kinds).toBe(600);
     expect(st.top.map((s) => s.id)).toEqual(['old']);
     expect(st.top[0].sig).toBe(false);
-    expect(farm.save().v).toBe(3);
+    expect(farm.save().v).toBe(4);
   });
 
-  it('the team: survivors that fit together, weighted by risk — never two of a kind, never two that move as one', () => {
+  it('the team pool: up to five teams of one scalping, one intraday and one swing strategy, weighted by risk, steady, never two that move as one', () => {
     const g = gauss(rngOf(5));
     // noise with exactly the mean asked for (the draws' own average is taken out)
-    const series = (mu: number, sd: number) => {
-      const e = Array.from({ length: 120 }, () => g());
+    const series = (mu: number, sd: number, n = 160) => {
+      const e = Array.from({ length: n }, () => g());
       const m = e.reduce((a, b) => a + b, 0) / e.length;
       return e.map((x) => mu + sd * (x - m));
     };
-    const A = series(0.002, 0.01);
-    const B = series(0.004, 0.02);
-    const C = A.map((x) => x * 1.01 + 0.00001 * g());
-    const D = series(-0.001, 0.01);
-    const farm = new Farm({ coins: ['BTC'], styles: ['intraday'] }, { seed: 1 });
-    const d = (r: number[], d0 = 20_000) => ({ daily: { d0, r } });
+    const farm = new Farm({ coins: ['BTC'], styles: ['scalp', 'intraday', 'swing'] }, { seed: 1 });
+    const S1 = series(0.002, 0.01);
+    const at = (id: string, style: Survivor['style'], r: number[], extra: Partial<Survivor> = {}) =>
+      fake(id, 3, [id === 'i1' ? 'zrev' : id === 'w1' ? 'donchian' : 'tsmom'], {
+        style,
+        // the unseen stretch, then the vault and fresh candles carry on from it
+        daily: { d0: 20_000, r: r.slice(0, 100) },
+        forward: { bars: 60, trades: 30, ret: 0.05, sharpe: 2, maxDD: 0.02, days: 60, daily: { d0: 20_100, r: r.slice(100) } },
+        stage: 'proven',
+        score: 2,
+        ...extra,
+      });
     farm.survivors = [
-      fake('a', 3, ['tsmom'], { ...d(A), score: 3 }),
-      fake('b', 3, ['zrev'], { ...d(B, 20_010), score: 2 }),
-      fake('c', 3, ['donchian'], { ...d(C), score: 2.5 }),
-      fake('d', 3, ['macd'], { ...d(D), score: 1 }),
-      fake('twin', 3, ['tsmom'], { ...d(series(0.0003, 0.01)), score: 1.5, flow: flow({ strategies: ['tsmom'], stopWidth: 'wide' }) }),
-      fake('gone', 3, ['rsi2'], { ...d(series(0.004, 0.01)), score: 9, stage: 'faded' }),
+      at('s1', 'scalp', S1, { score: 3 }),
+      at('s2', 'scalp', series(0.0015, 0.012), { flow: flow({ strategies: ['macd'] }) }),
+      at('i1', 'intraday', series(0.003, 0.02)),
+      at('i2', 'intraday', S1.map((x) => x * 1.02 + 0.00001 * g()), { flow: flow({ strategies: ['rsi2'] }) }),
+      at('w1', 'swing', series(0.002, 0.015)),
+      at('w2', 'swing', series(-0.001, 0.01), { flow: flow({ strategies: ['kalman'] }) }),
+      at('gone', 'swing', series(0.01, 0.01), { stage: 'faded', score: 9, flow: flow({ strategies: ['ou'] }), forward: { bars: 60, trades: 30, ret: -0.08, sharpe: -1, maxDD: 0.1, days: 60 } }),
     ];
-    const t = farm.team()!;
-    const ids = t.members.map((m) => m.id);
-    expect(ids).toContain('a');
-    expect(ids).toContain('b');
-    // c moves with a; d loses; the twin is the same family as a; the faded one is out
-    expect(ids).not.toContain('c');
-    expect(ids).not.toContain('d');
-    expect(ids).not.toContain('twin');
-    expect(ids).not.toContain('gone');
-    // inverse volatility: a (half as volatile) carries about two thirds
-    const wa = t.members.find((m) => m.id === 'a')!.weight;
-    expect(wa).toBeGreaterThan(0.55);
-    expect(wa).toBeLessThan(0.75);
-    expect(t.members.reduce((x, m) => x + m.weight, 0)).toBeCloseTo(1, 6);
-    // together they beat the best of them alone, on the days both have
-    expect(t.sharpe).toBeGreaterThan(t.solo.sharpe);
-    expect(t.days).toBe(110);
-    expect(Math.abs(t.corr)).toBeLessThan(0.4);
-    expect(farm.state(false).team!.members.length).toBe(t.members.length);
-    // one survivor is no team
-    farm.survivors = farm.survivors.slice(0, 1);
-    // (the team is worked out once a minute; asked for afresh here)
-    expect(farm.team()).not.toBeNull();
-    expect(farm.team(true)).toBeNull();
+    const pool = farm.teams(true);
+    expect(pool.length).toBeGreaterThan(0);
+    expect(pool.length).toBeLessThanOrEqual(5);
+    for (const t of pool) {
+      // one of each pace
+      expect(t.members.map((m) => m.pace).sort()).toEqual(['intraday', 'scalp', 'swing']);
+      const ids = t.members.map((m) => m.id);
+      // w2 loses, gone has faded, and i2 moves with s1
+      expect(ids).not.toContain('w2');
+      expect(ids).not.toContain('gone');
+      expect(ids.includes('s1') && ids.includes('i2')).toBe(false);
+      expect(t.members.reduce((x, m) => x + m.weight, 0)).toBeCloseTo(1, 6);
+      // read over the unseen stretch AND the fresh candles
+      expect(t.days).toBe(160);
+      expect(t.ready).toBe(t.sharpe >= 1);
+      expect(t.key).toBe(ids.join('+'));
+    }
+    // a strategy is in at most two teams
+    const uses: Record<string, number> = {};
+    for (const t of pool) for (const m of t.members) uses[m.id] = (uses[m.id] ?? 0) + 1;
+    expect(Math.max(...Object.values(uses))).toBeLessThanOrEqual(2);
+    // the pool is saved and comes back in the same order after a restart
+    const again = new Farm(farm.cfg, { seed: 2, save: JSON.parse(JSON.stringify(farm.save())) });
+    expect(again.teams(true).map((t) => t.key)).toEqual(pool.map((t) => t.key));
+    expect(farm.state(false).teams!.length).toBe(pool.length);
+    // with no swing strategy standing there is no team
+    farm.survivors = farm.survivors.filter((x) => x.style !== 'swing');
+    expect(farm.teams(true)).toEqual([]);
+  });
+
+  it('two strategies with the same result are one, whatever their blocks are called; a kept one never goes', () => {
+    const farm = new Farm({ coins: ['BTC'], styles: ['intraday'] }, { seed: 1 });
+    const oos = { sharpe: 2.67, trades: 40, t: 3, maxDD: 0.008, totalReturn: 0.09 } as Survivor['oos'];
+    const save = { ...farm.save(), survivors: [fake('a', 3, ['tsmom'], { oos }), fake('b', 3, ['zrev'], { oos }), fake('c', 3, ['donchian'], { oos: { ...oos, trades: 41 } })], pinned: ['b'] };
+    const again = new Farm(farm.cfg, { seed: 1, save: JSON.parse(JSON.stringify(save)) });
+    // a and b are the same strategy: the kept one stays
+    expect(again.survivors.map((x) => x.id).sort()).toEqual(['b', 'c']);
+    expect(again.state(false).kept!.map((x) => x.id)).toEqual(['b']);
+    // a kept strategy is not pruned, even faded
+    again.survivors[0].stage = 'faded';
+    again.pin('b', true);
+    again.setMarkets({});
+    expect(again.survivors.some((x) => x.id === 'b')).toBe(true);
+    again.pin('b', false);
+    expect(again.state(false).kept).toEqual([]);
+    // the screen gets no long series
+    expect(again.state(false).kept).toBeDefined();
   });
 
   it('daily returns from bar returns', () => {
@@ -688,7 +724,7 @@ describe('one survivor of a kind, and steady lists', () => {
     let k = 0;
     for (let i = 0; i < names.length && k < 50; i++)
       for (let j = i + 1; j < names.length && k < 50; j++, k++)
-        save.survivors.push({ id: `s${k}`, key: `s${k}`, flow: flow({ strategies: [names[i], names[j]] }), name: `s${k}`, style: 'intraday', tfH: 1, coins: ['BTC'], foundAt: k, seenTo: 0, is: { sharpe: 2 }, oos: { sharpe: 2, trades: 40, t: 1, maxDD: 0.05 }, beat: 90, nudge: { kept: 8, tried: 10 }, mc: { dd95: 0.1, pLoss: 0.1 }, periods: { unit: 'month', list: [], up: 1, worst: 0, avg: 0 }, dsr: 0.9, tried: 1, score: k, forward: null, stage: k < 3 ? 'proving' : 'incubating', summary: [], sig: false, curve: [], split: 0 } as unknown as Survivor);
+        save.survivors.push({ id: `s${k}`, key: `s${k}`, flow: flow({ strategies: [names[i], names[j]] }), name: `s${k}`, style: 'intraday', tfH: 1, coins: ['BTC'], foundAt: k, seenTo: 0, is: { sharpe: 2 }, oos: { sharpe: 2, trades: 40, t: 1, maxDD: 0.05 }, beat: 90, nudge: { kept: 8, tried: 10 }, mc: { dd95: 0.1, pLoss: 0.1 }, periods: { unit: 'month', list: [], up: 1, worst: 0, avg: 0 }, dsr: 0.9, tried: 1, score: k, forward: k < 3 ? { bars: 100, trades: 12, ret: 0.05, sharpe: 1, maxDD: 0.02, days: 60 } : { bars: 100, trades: 3, ret: 0.01, sharpe: 1, maxDD: 0.01, days: 60 }, stage: k < 3 ? 'proving' : 'incubating', summary: [], sig: false, curve: [], split: 0 } as unknown as Survivor);
     // and a copy of a kind already there, from a save made before kinds were kept one each
     save.survivors.push({ ...save.survivors[0], id: 'copy', score: -5, stage: 'new' });
     const again = new Farm(save.cfg, { seed: 1, save });

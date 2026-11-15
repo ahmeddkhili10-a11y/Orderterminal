@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('novus', {
       state: () => call('lab:farm-state'),
       start: (patch) => call('lab:farm-start', patch),
       stop: () => call('lab:farm-stop'),
+      pin: (id, on) => call('lab:farm-pin', id, on),
       onState: (fn) => listen(labListeners.farm, fn),
     },
   },
