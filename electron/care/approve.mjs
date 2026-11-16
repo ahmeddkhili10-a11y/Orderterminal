@@ -1,5 +1,6 @@
 // Deploying from your phone. When the edge finder's team pool has a team that
-// is READY — every member proven on fresh data, and the team strong together —
+// is READY — every member a proven edge (significant on the unseen data AND
+// proven on fresh data), and the team strong together —
 // it is sent to your Telegram chat with its numbers and three buttons:
 //
 //   ✅ Deploy · council decides     ✅ Deploy · trade as tested     ✖ Not now
@@ -7,7 +8,9 @@
 // Nothing is deployed until you tap: the decision stays yours. /teams in the
 // chat lists the whole pool, each team with the same buttons. Taps are only
 // taken from your own chat, each offer works once, and an offer lapses after
-// three days (the pool moves on).
+// three days (the pool moves on). At the moment of the tap the team is checked
+// again: if any member is no longer a proven edge, nothing is deployed. Teams
+// that are not ready are never offered with buttons.
 import { randomBytes } from 'node:crypto';
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
 
@@ -43,6 +46,8 @@ export class Approvals {
     this.deployedFn = o.deployed;
     this.deployFn = o.deploy;
     this.swarmFn = o.swarm ?? (() => null);
+    /** while no team is ready: each pace's proven edges and its closest candidate */
+    this.waitFn = o.waiting ?? (() => []);
     this.now = o.now ?? Date.now;
   }
 
@@ -92,12 +97,23 @@ export class Approvals {
     return out;
   }
 
-  /** /teams: the whole pool, each with its buttons */
+  /** what is still missing before a team can be offered */
+  waitText() {
+    const L = ['🧩 <b>No proven team yet — nothing to deploy.</b>', 'A team is offered only when its scalping, intraday and swing strategies are each a proven edge: significant on the unseen data, AND 25+ trades on fresh data, in profit, Sharpe 0.75+.'];
+    for (const w of this.waitFn() ?? []) {
+      const b = w.best;
+      L.push(`• <b>${PACE[w.pace] ?? w.pace}</b>: ${w.proven ? `${w.proven} proven edge${w.proven === 1 ? '' : 's'} ✓` : 'none proven yet'}${!w.proven && b ? ` — closest: ${e(b.name.split(' · ')[0])} (${b.missing.join('; ')})` : !w.proven ? ' — nothing standing yet' : ''}`);
+    }
+    L.push('<i>Leave the edge finder running: you will get a message the moment a team is ready.</i>');
+    return L.join('\n');
+  }
+
+  /** /teams: the ready teams, each with its buttons — or what is still missing */
   pool() {
-    const teams = this.teamsFn() ?? [];
-    if (!teams.length) return [{ html: '🧩 <b>No teams in the pool yet.</b>\nA team needs a strategy standing at each of scalping, intraday and swing whose results fit together. Leave the edge finder running.' }];
+    const teams = (this.teamsFn() ?? []).filter((t) => t.ready);
+    if (!teams.length) return [{ html: this.waitText() }];
     const swarm = this.swarmFn();
-    return teams.map((t, i) => ({ html: teamText(t, { title: `🧩 <b>Team ${i + 1} of ${teams.length}</b>${t.ready ? ' · ✓ ready' : ' · not every member proven yet'}`, swarm: i === 0 ? swarm : null }), keyboard: this.make(t) }));
+    return teams.map((t, i) => ({ html: teamText(t, { title: `🧩 <b>Team ${i + 1} of ${teams.length}</b> · ✓ every member a proven edge`, swarm: i === 0 ? swarm : null }), keyboard: this.make(t) }));
   }
 
   /** a button was tapped: deploy (or not), and say what was done */
@@ -114,6 +130,14 @@ export class Approvals {
       o.done = 'not now';
       this.save(all);
       return 'OK — not deployed. Send /teams to see the pool again.';
+    }
+    // checked again now: every member must still be a proven edge in today's pool
+    const standing = new Set((this.teamsFn() ?? []).filter((t) => t.ready).flatMap((t) => t.members.map((mm) => mm.id)));
+    const lapsed = o.members.filter((mm) => !standing.has(mm.id));
+    if (lapsed.length) {
+      o.done = 'refused: no longer proven';
+      this.save(all);
+      return `⛔ <b>Not deployed.</b> ${lapsed.map((mm) => e(mm.name.split(' · ')[0])).join(', ')} ${lapsed.length === 1 ? 'is' : 'are'} no longer a proven edge in the pool, so this team no longer qualifies. Send /teams for the teams that do.`;
     }
     const authority = what === 't' ? 'tested' : 'council';
     const deployed = new Set(this.deployedFn());

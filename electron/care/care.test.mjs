@@ -334,14 +334,33 @@ describe('deploying from the phone', () => {
     expect(await s.a.tap('nd:zzzz:c')).toBeNull();
     expect(await s.a.tap('nd:0123456789ab:c')).toMatch(/lapsed/);
   });
-  it('/teams lists the pool with buttons; members already deployed are not deployed again', async () => {
-    const s = setup([team('A'), team('B', false)]);
+  it('/teams offers only teams of proven edges; members already deployed are not deployed again', async () => {
+    const teams = [team('A'), team('B', false), team('C')];
+    const s = setup(teams);
     const pool = s.a.pool();
-    expect(pool.map((p) => p.html.split('\n')[0])).toEqual(['🧩 <b>Team 1 of 2</b> · ✓ ready', '🧩 <b>Team 2 of 2</b> · not every member proven yet']);
-    s.deployed.push({ name: 'scalp B' });
+    // the unproven team is not offered at all
+    expect(pool.map((p) => p.html.split('\n')[0])).toEqual(['🧩 <b>Team 1 of 2</b> · ✓ every member a proven edge', '🧩 <b>Team 2 of 2</b> · ✓ every member a proven edge']);
+    expect(pool.every((p) => p.keyboard)).toBe(true);
+    s.deployed.push({ name: 'scalp C' });
     const r = await s.a.tap(pool[1].keyboard[0][0].callback_data);
-    expect(r).toMatch(/scalp B \(already deployed\)/);
-    expect(s.deployed.filter((d) => d.name === 'scalp B')).toHaveLength(1);
-    expect(setup([]).a.pool()[0].html).toMatch(/No teams in the pool yet/);
+    expect(r).toMatch(/scalp C \(already deployed\)/);
+    expect(s.deployed.filter((d) => d.name === 'scalp C')).toHaveLength(1);
+  });
+  it('with no proven team it says what is missing, with no buttons; a team that lost a proven member is refused at the tap', async () => {
+    const waiting = [{ pace: 'scalp', proven: 0, best: { name: 'Follow a big day · Scalping', trades: 21, ret: 0.02, missing: ['21 of 25 fresh-data trades'] } }, { pace: 'intraday', proven: 2, best: null }, { pace: 'swing', proven: 0, best: null }];
+    const db = memDb();
+    const none = new Approvals({ db, teams: () => [team('Z', false)], deployed: () => [], deploy: async () => 0, waiting: () => waiting });
+    const msg = none.pool();
+    expect(msg).toHaveLength(1);
+    expect(msg[0].keyboard).toBeUndefined();
+    expect(msg[0].html).toMatch(/No proven team yet[\s\S]*Scalping<\/b>: none proven yet — closest: Follow a big day \(21 of 25 fresh-data trades\)[\s\S]*Intraday<\/b>: 2 proven edges ✓[\s\S]*Swing<\/b>: none proven yet — nothing standing yet/);
+    expect(none.check()).toEqual([]);
+    // offered while proven; a member then fades out of the pool before the tap: nothing is deployed
+    const pool = [team('A')];
+    const s = setup(pool);
+    const kb = s.a.check()[0].keyboard;
+    pool.splice(0, 1, team('Q'));
+    expect(await s.a.tap(kb[0][0].callback_data)).toMatch(/Not deployed[\s\S]*no longer a proven edge/);
+    expect(s.deployed).toHaveLength(0);
   });
 });

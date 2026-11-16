@@ -344,6 +344,8 @@ export interface FarmState {
   team?: Team | null;
   /** the pool of teams: up to five, each one scalping, one intraday and one swing strategy */
   teams?: Team[];
+  /** while a pace has no proven edge, how close its best candidate is */
+  teamWait?: TeamWait[];
   /** the strategies you chose to keep (never dropped, whatever happens) */
   kept?: Survivor[];
   /** the five best still standing at each pace: proven on fresh data first, then significant, then by score */
@@ -418,6 +420,15 @@ export interface Team {
   days: number;
   /** the best member alone over the same days */
   solo: { name: string; sharpe: number; maxDD: number };
+}
+
+/** a pace waiting for a proven edge */
+export interface TeamWait {
+  pace: string;
+  /** proven edges standing at this pace */
+  proven: number;
+  /** the closest candidate, and what it still lacks */
+  best: { name: string; trades: number; ret: number; missing: string[] } | null;
 }
 
 /** what is saved between sessions */
@@ -2046,6 +2057,26 @@ export class Farm {
     return [];
   }
 
+  /** for each of the three paces: how many proven edges stand, and how close the best candidate is */
+  teamWait(): TeamWait[] {
+    return ["scalp", "intraday", "swing"].map((pid) => {
+      const mine = this.survivors.filter((x) => paceIdOf(x.style) === pid && x.stage !== "faded");
+      const proven = mine.filter(provenEdge).length;
+      const next = mine
+        .filter((x) => !provenEdge(x))
+        .sort((a, b) => STAGE_RANK[b.stage] - STAGE_RANK[a.stage] || (b.forward?.trades ?? 0) - (a.forward?.trades ?? 0) || b.score - a.score)[0];
+      const f = next?.forward;
+      const missing: string[] = [];
+      if (next) {
+        if (!next.sig) missing.push("not yet significant on the unseen data");
+        if (!f || f.trades < PROVEN_TRADES) missing.push(`${f?.trades ?? 0} of ${PROVEN_TRADES} fresh-data trades`);
+        else if (!(f.ret > 0)) missing.push("not in profit on fresh data");
+        else if (next.stage !== "proven") missing.push(`fresh-data Sharpe ${f.sharpe.toFixed(2)} (needs 0.75)`);
+      }
+      return { pace: pid, proven, best: next ? { name: next.name, trades: f?.trades ?? 0, ret: f?.ret ?? 0, missing } : null };
+    });
+  }
+
   /** keep a strategy for good (or let it go again): a kept one is never pruned or hidden */
   pin(id: string, on: boolean) {
     if (on && this.survivors.some((x) => x.id === id)) this.pinned.add(id);
@@ -2087,7 +2118,8 @@ export class Farm {
       if (!m) maps.set(x.id, (m = dailyMap(x)));
       return m;
     };
-    const live = (x: Survivor) => x.stage !== "faded" && (x.daily || x.forward?.daily);
+    // only a PROVEN edge is a member: significant on the unseen data (allowing for every kind tried) AND proven on fresh data
+    const live = (x: Survivor) => provenEdge(x) && (x.daily || x.forward?.daily);
     const byPace = PACE_IDS.map((pid) =>
       this.survivors
         .filter((x) => paceIdOf(x.style) === pid && live(x))
@@ -2153,11 +2185,12 @@ export class Farm {
       const port = xs[0].map((_, i) => xs.reduce((p, x, k) => p + w[k] * x[i], 0));
       const sd = sdOf(port);
       const sharpe = sd > 0 ? (mean(port) / sd) * Math.sqrt(365) : 0;
-      if (!(sharpe > 0)) return null;
+      // a team must be strong together, not just made of proven parts
+      if (!(sharpe >= 1)) return null;
       const top = each.reduce((p, e, i) => (e.sharpe > each[p].sharpe ? i : p), 0);
       return {
         key: ms.map((m) => m.id).join("+"),
-        ready: ms.every((m) => m.stage === "proven") && sharpe >= 1,
+        ready: ms.every(provenEdge) && sharpe >= 1,
         members: ms.map((m, i) => ({
           id: m.id,
           name: m.name,
@@ -2194,7 +2227,7 @@ export class Farm {
     // the teams already in the pool, read again on today's candles: they keep their place unless clearly beaten
     for (const ids of this.poolIds) {
       const ms = ids.map((id) => byId.get(id));
-      if (ms.every((m): m is Survivor => !!m && m.stage !== "faded")) add(ms, 1.1);
+      if (ms.every((m): m is Survivor => !!m && provenEdge(m))) add(ms, 1.1);
     }
     if (byPace.every((xs) => xs.length))
       for (const a of byPace[0]) for (const b of byPace[1]) for (const c of byPace[2]) add([a, b, c], 1);
@@ -2259,6 +2292,7 @@ export class Farm {
       blocks: this.blocks(),
       team: this.team(),
       teams: this.teams(),
+      teamWait: this.teamWait(),
       kept: this.survivors.filter((x) => this.pinned.has(x.id)).map(lite),
     };
   }
@@ -2391,6 +2425,15 @@ export function ladderOf(s: Pick<Survivor, "forward" | "oos">): Ladder {
     return "proven";
   return "proving";
 }
+
+/**
+ * A proven edge: it holds up on two separate tests it was never fitted to —
+ * significant on the unseen 30 % after allowing for every kind of bot tried
+ * (false-discovery rate 10 %), and proven on fresh data (the vault and the
+ * candles since: 25 or more trades, in profit, Sharpe at least 0.75). Only
+ * these make teams, and only teams of these are offered to deploy.
+ */
+export const provenEdge = (s: Pick<Survivor, "stage" | "sig">) => s.stage === "proven" && !!s.sig;
 
 /** two survivors with the same result on the same candles are one strategy, whatever their blocks are called */
 export const resultKey = (s: Pick<Survivor, "id" | "tfH" | "oos">) =>

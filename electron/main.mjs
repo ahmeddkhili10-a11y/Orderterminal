@@ -1303,6 +1303,7 @@ app.whenReady().then(async () => {
       log('info', `deployed "${m.name}" from Telegram (${authority})`);
     },
     swarm: () => (cswarm ? { running: cswarm.running, mode: cswarm.mode } : null),
+    waiting: () => lab?.farmState().teamWait ?? [],
   });
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([

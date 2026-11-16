@@ -271,10 +271,14 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
           />
         ) : (
           <div className="lab-line muted farm-none" data-team-none>
-            A team needs a strategy standing at each of scalping, intraday and swing whose results fit together (in profit on the same days, not moving as one).
-            {farm.cfg.styles.some((x) => x === "scalp" || x === "scalp15") && farm.cfg.styles.some((x) => x === "intraday" || x === "intraday15") && farm.cfg.styles.some((x) => x === "swing" || x === "week")
-              ? " The pool fills as those paces find survivors."
-              : " Add the scalping, intraday and swing paces under ⚙ Settings."}
+            <b>No proven team yet — nothing to deploy.</b> A team is made only of proven edges: each of its scalping, intraday and swing strategies must be significant on the unseen data <i>and</i> have 25 or more trades on fresh data, in profit, with a Sharpe of 0.75 or more.
+            {!(farm.cfg.styles.some((x) => x === "scalp" || x === "scalp15") && farm.cfg.styles.some((x) => x === "intraday" || x === "intraday15") && farm.cfg.styles.some((x) => x === "swing" || x === "week")) && " Add the scalping, intraday and swing paces under ⚙ Settings."}
+            {(farm.teamWait ?? []).map((w) => (
+              <div key={w.pace} data-wait={w.pace}>
+                • <b>{w.pace[0].toUpperCase() + w.pace.slice(1)}</b>: {w.proven ? <span className="up">{w.proven} proven edge{w.proven === 1 ? "" : "s"} ✓</span> : "none proven yet"}
+                {!w.proven && w.best ? ` — closest: ${w.best.name.split(" · ")[0]} (${w.best.missing.join("; ")})` : !w.proven ? " — nothing standing yet" : ""}
+              </div>
+            ))}
           </div>
         )}
 
@@ -1003,7 +1007,7 @@ function TeamCard({
     <div className="farm-team" data-team>
       {team.ready && (
         <div className="lab-line up" data-ready>
-          ✓ Ready: every member is proven on fresh data and the team is strong together. With Telegram linked, it is offered on your phone with a Deploy button.
+          ✓ Every member is a proven edge — significant on the unseen data and proven on fresh data — and the team is strong together. With Telegram linked, it is offered on your phone with Deploy buttons.
         </div>
       )}
       <div className="farm-team-stats">

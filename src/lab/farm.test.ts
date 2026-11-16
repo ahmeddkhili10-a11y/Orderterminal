@@ -483,7 +483,9 @@ describe('significance allows for every bot tried', () => {
       expect(t.members.reduce((x, m) => x + m.weight, 0)).toBeCloseTo(1, 6);
       // read over the unseen stretch AND the fresh candles
       expect(t.days).toBe(160);
-      expect(t.ready).toBe(t.sharpe >= 1);
+      // every team in the pool is ready: proven edges only, and strong together
+      expect(t.ready).toBe(true);
+      expect(t.sharpe).toBeGreaterThanOrEqual(1);
       expect(t.key).toBe(ids.join('+'));
     }
     // a strategy is in at most two teams
@@ -494,6 +496,22 @@ describe('significance allows for every bot tried', () => {
     const again = new Farm(farm.cfg, { seed: 2, save: JSON.parse(JSON.stringify(farm.save())) });
     expect(again.teams(true).map((t) => t.key)).toEqual(pool.map((t) => t.key));
     expect(farm.state(false).teams!.length).toBe(pool.length);
+    // only proven edges make teams: a swing strategy that is proving, or proven but not significant, is no member
+    const w1 = farm.survivors.find((x) => x.id === 'w1')!;
+    w1.stage = 'proving';
+    expect(farm.teams(true)).toEqual([]);
+    w1.stage = 'proven';
+    w1.sig = false;
+    expect(farm.teams(true)).toEqual([]);
+    const wait = farm.teamWait();
+    expect(wait.map((x) => x.pace)).toEqual(['scalp', 'intraday', 'swing']);
+    // (w2 is a proven edge on paper, but it loses on the team's days: it counts here, and still makes no team)
+    expect(wait[2].proven).toBe(1);
+    expect(wait[2].best!.missing).toContain('not yet significant on the unseen data');
+    expect(wait[0].proven).toBeGreaterThan(0);
+    w1.sig = true;
+    expect(farm.teams(true).length).toBeGreaterThan(0);
+    expect(farm.teams(true).every((t) => t.ready)).toBe(true);
     // with no swing strategy standing there is no team
     farm.survivors = farm.survivors.filter((x) => x.style !== 'swing');
     expect(farm.teams(true)).toEqual([]);
