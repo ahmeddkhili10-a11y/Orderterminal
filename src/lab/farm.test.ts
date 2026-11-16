@@ -552,7 +552,7 @@ describe('the farm learns which blocks work', () => {
     const farm = new Farm(save.cfg, { seed: 11, save });
     farm.setMarkets(trending());
     const count: Record<string, number> = {};
-    for (let i = 0; i < 600; i++) for (const id of farm.randomFlow()!.strategies) count[id] = (count[id] ?? 0) + 1;
+    for (let i = 0; i < 2500; i++) for (const id of farm.randomFlow()!.strategies) count[id] = (count[id] ?? 0) + 1;
     expect(count.tsmom).toBeGreaterThan(4 * count.zrev);
     expect(count.zrev).toBeGreaterThan(0);
     const blocks = farm.blocks();

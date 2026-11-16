@@ -594,6 +594,43 @@ function learnedSignal(c: Ctx, p: Params, kind: 'ols' | 'rf' | 'nn'): Int8Array 
 
 // ---------- the signals ----------
 
+// ---------- ICT and Candle Range Theory: helpers ----------
+
+/** the n-th Sunday of a month (UTC day of the month) */
+const nthSunday = (y: number, m: number, n: number) => {
+  const first = new Date(Date.UTC(y, m, 1)).getUTCDay();
+  return 1 + ((7 - first) % 7) + 7 * (n - 1);
+};
+/** New York's offset from UTC at a moment: −4 hours in US daylight saving (2nd Sunday of March to 1st Sunday of November), −5 otherwise */
+export const nyOffset = (t: number) => {
+  const y = new Date(t).getUTCFullYear();
+  const start = Date.UTC(y, 2, nthSunday(y, 2, 2), 7);
+  const end = Date.UTC(y, 10, nthSunday(y, 10, 1), 6);
+  return t >= start && t < end ? -4 : -5;
+};
+/** the hour of the day in New York (fractional) */
+export const nyHour = (t: number) => (((t / 3_600_000 + nyOffset(t)) % 24) + 24) % 24;
+/** the bar's candle of a higher timeframe (`hours` long, aligned to UTC midnight) */
+const htfOf = (t: number, hours: number) => Math.floor(t / (hours * 3_600_000));
+/** fair value gaps: a three-candle imbalance — the first candle's high below the third's low (bullish), or its low above the third's high (bearish) — at least `k` ATR wide; marked on the third candle with the gap's far edge */
+function fvgs(c: Ctx, k: number): { bull: Float64Array; bear: Float64Array } {
+  return cached(c, `fvg${k}`, () => {
+    const b = c.m.bars;
+    const A = atr14(c);
+    const bull = new Float64Array(b.length).fill(NaN);
+    const bear = new Float64Array(b.length).fill(NaN);
+    for (let i = 2; i < b.length; i++) {
+      const a = A[i - 1];
+      if (!(a > 0)) continue;
+      if (b[i].low - b[i - 2].high >= k * a) bull[i] = b[i - 2].high;
+      if (b[i - 2].low - b[i].high >= k * a) bear[i] = b[i - 2].low;
+    }
+    return { bull, bear };
+  });
+}
+const ICT_NOTE = ' A practitioner method (ICT), not a peer-reviewed one: the Lab tests whether it holds on crypto, with costs, on data it never saw.';
+const CRT_NOTE = ' A practitioner method (Candle Range Theory), not a peer-reviewed one: the Lab tests whether it holds on crypto, with costs, on data it never saw.';
+
 export const SIGNALS: SignalDef[] = [
   {
     id: 'tsmom',
@@ -1360,6 +1397,305 @@ export const SIGNALS: SignalDef[] = [
       }),
     describe: (p) => `long the coin when it has beaten bitcoin over ${hrs(p.lookback).replace('-', ' ')}s by more than ${p.k} standard deviations of its usual gap, short when it has lagged by as much`,
   },
+  // ---------- Candle Range Theory ----------
+  {
+    id: 'crt',
+    name: 'Candle Range Theory: sweep of the last candle',
+    family: 'reversion',
+    papers: ['crt', 'osler03', 'osler05'],
+    rationale: 'A higher-timeframe candle (4-hour or daily) leaves a range. When the next one runs past its high or low and closes back inside, the stops resting beyond were taken and no new buyers (or sellers) followed — price tends to travel to the other side of the range. Stop orders do cluster just beyond highs and lows, and their triggering moves price (Osler).' + CRT_NOTE,
+    grid: { htf: [4, 24], depth: [0, 0.25] },
+    intraday: true,
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const out = state(b.length);
+      if (c.m.tfH >= p.htf) return out;
+      let u = -1;
+      let pH = NaN;
+      let pL = NaN;
+      let cH = -Infinity;
+      let cL = Infinity;
+      let done = false;
+      for (let i = 0; i < b.length; i++) {
+        const v = htfOf(b[i].time, p.htf);
+        if (v !== u) {
+          // a new higher-timeframe candle: the one just finished is the range
+          pH = v === u + 1 ? cH : NaN;
+          pL = v === u + 1 ? cL : NaN;
+          u = v;
+          cH = -Infinity;
+          cL = Infinity;
+          done = false;
+        }
+        cH = Math.max(cH, b[i].high);
+        cL = Math.min(cL, b[i].low);
+        const a = A[i];
+        if (done || !Number.isFinite(pH) || !(a > 0)) continue;
+        // swept above and closed back inside: short toward the low (and the mirror)
+        if (cH > pH + p.depth * a && b[i].close < pH && b[i].close > pL) {
+          out[i] = -1;
+          done = true;
+        } else if (cL < pL - p.depth * a && b[i].close > pL && b[i].close < pH) {
+          out[i] = 1;
+          done = true;
+        }
+      }
+      return out;
+    },
+    describe: (p) => `when a ${p.htf === 24 ? 'day' : `${p.htf}-hour candle`} runs past the last one's high${p.depth ? ` (by ${p.depth} ATR or more)` : ''} and closes back inside its range, sell toward its low (buy after a run below its low)`,
+  },
+  {
+    id: 'monday',
+    name: 'The Monday range',
+    family: 'reversion',
+    papers: ['crt', 'cp19', 'osler05'],
+    rationale: "Monday's high and low frame the week for many traders. A run beyond one of them later in the week that closes back inside is a false move — price tends to return across the range; a close beyond that holds is a real one, and runs. Monday is special in crypto returns (Caporale & Plastun)." + CRT_NOTE,
+    grid: { mode: [0, 1] },
+    exit: { stopAtr: 2, targetR: 2.5, maxBars: 72, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const out = state(b.length);
+      let wk = -1;
+      let mH = -Infinity;
+      let mL = Infinity;
+      let up = false;
+      let dn = false;
+      let usedL = false;
+      let usedS = false;
+      for (let i = 0; i < b.length; i++) {
+        const day = new Date(b[i].time).getUTCDay();
+        // the week starts on Monday 00:00 UTC (1 Jan 1970 was a Thursday)
+        const w = Math.floor((b[i].time - 4 * 86_400_000) / (7 * 86_400_000));
+        if (w !== wk) {
+          wk = w;
+          mH = -Infinity;
+          mL = Infinity;
+          up = dn = usedL = usedS = false;
+        }
+        if (day === 1) {
+          mH = Math.max(mH, b[i].high);
+          mL = Math.min(mL, b[i].low);
+          continue;
+        }
+        if (!Number.isFinite(mH) || day === 0 || day === 6) continue;
+        if (b[i].high > mH) up = true;
+        if (b[i].low < mL) dn = true;
+        if (p.mode === 0) {
+          if (up && !usedS && b[i].close < mH && b[i].close > mL) {
+            out[i] = -1;
+            usedS = true;
+          } else if (dn && !usedL && b[i].close > mL && b[i].close < mH) {
+            out[i] = 1;
+            usedL = true;
+          }
+        } else if (!usedL && !usedS) {
+          if (b[i].close > mH) {
+            out[i] = 1;
+            usedL = true;
+          } else if (b[i].close < mL) {
+            out[i] = -1;
+            usedS = true;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => (p.mode === 0 ? "Monday sets the range: from Tuesday, after a run past Monday's high (low) that closes back inside, trade back across the range" : 'Monday sets the range: from Tuesday, trade the first close beyond it, in its direction'),
+  },
+  // ---------- ICT ----------
+  {
+    id: 'sweep',
+    name: 'Liquidity sweep (turtle soup)',
+    family: 'reversion',
+    papers: ['ict', 'osler03', 'osler05'],
+    rationale: 'Stops sit just beyond obvious highs and lows. A candle that takes out the highest high of recent days and closes back below it has run those stops and found no follow-through — the move was the liquidity grab, and price tends to reverse.' + ICT_NOTE,
+    grid: { lookback: [24, 72, 168] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const out = state(b.length);
+      for (let i = 1; i < b.length; i++) {
+        if (!Number.isFinite(hh[i]) || !Number.isFinite(ll[i])) continue;
+        if (b[i].high > hh[i] && b[i].close < hh[i]) out[i] = -1;
+        else if (b[i].low < ll[i] && b[i].close > ll[i]) out[i] = 1;
+      }
+      return out;
+    },
+    describe: (p) => `after a candle takes out the highest high of the last ${hrs(p.lookback)} and closes back below it, sell (buy after a sweep of the lowest low)`,
+  },
+  {
+    id: 'fvg',
+    name: 'Fair value gap retrace',
+    family: 'trend',
+    papers: ['ict', 'cs04'],
+    rationale: 'A displacement — a candle so strong it leaves a gap between the candles either side of it — shows one-sided order flow (order imbalance predicts short-term returns: Chordia & Subrahmanyam). Price often comes back to the gap before carrying on; enter in the displacement\'s direction on that first return.' + ICT_NOTE,
+    grid: { k: [0.3, 0.6], age: [12, 48] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { bull, bear } = fvgs(c, p.k);
+      const maxAge = H(c, p.age);
+      const out = state(b.length);
+      let bu: { lo: number; hi: number; at: number } | null = null;
+      let be: { lo: number; hi: number; at: number } | null = null;
+      for (let i = 2; i < b.length; i++) {
+        if (Number.isFinite(bull[i])) bu = { lo: bull[i], hi: b[i].low, at: i };
+        if (Number.isFinite(bear[i])) be = { lo: b[i].high, hi: bear[i], at: i };
+        if (bu && i > bu.at) {
+          if (i - bu.at > maxAge || b[i].close < bu.lo) bu = null;
+          else if (b[i].low <= bu.hi) {
+            out[i] = 1;
+            bu = null;
+          }
+        }
+        if (be && i > be.at) {
+          if (i - be.at > maxAge || b[i].close > be.hi) be = null;
+          else if (b[i].high >= be.lo) {
+            out[i] = -1;
+            be = null;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => `after a displacement leaves a fair value gap (${p.k} ATR or wider), buy (sell) its first retrace into the gap within ${hrs(p.age)}`,
+  },
+  {
+    id: 'mss',
+    name: 'Market structure shift',
+    family: 'reversion',
+    papers: ['ict', 'osler05'],
+    rationale: 'First the sweep: price runs below the lowest low of recent days, taking the stops there. Then the shift: it closes above the last swing high made before the sweep. The sellers have been absorbed and structure has turned — buy (and the mirror for shorts).' + ICT_NOTE,
+    grid: { lookback: [24, 72], window: [6, 12] },
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 36, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const n = H(c, p.lookback);
+      const w = H(c, p.window);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const out = state(b.length);
+      let sl = -1;
+      let sh = -1;
+      let swingH = NaN;
+      let swingL = NaN;
+      for (let i = w + 1; i < b.length; i++) {
+        // a sweep of the low: the swing high to beat is the highest of the bars before it
+        if (Number.isFinite(ll[i]) && b[i].low < ll[i]) {
+          sl = i;
+          swingH = -Infinity;
+          for (let j = i - w; j < i; j++) swingH = Math.max(swingH, b[j].high);
+        }
+        if (Number.isFinite(hh[i]) && b[i].high > hh[i]) {
+          sh = i;
+          swingL = Infinity;
+          for (let j = i - w; j < i; j++) swingL = Math.min(swingL, b[j].low);
+        }
+        if (sl >= 0 && i > sl && i - sl <= w && b[i].close > swingH) {
+          out[i] = 1;
+          sl = -1;
+        } else if (sh >= 0 && i > sh && i - sh <= w && b[i].close < swingL) {
+          out[i] = -1;
+          sh = -1;
+        }
+        if (sl >= 0 && i - sl > w) sl = -1;
+        if (sh >= 0 && i - sh > w) sh = -1;
+      }
+      return out;
+    },
+    describe: (p) => `after a sweep of the ${hrs(p.lookback)} low, buy the first close above the swing high before it within ${hrs(p.window)} (and the mirror for shorts)`,
+  },
+  {
+    id: 'silver',
+    name: 'Silver Bullet',
+    family: 'seasonal',
+    papers: ['ict', 'emuw19'],
+    rationale: "ICT's Silver Bullet: in three one-hour windows of the New York clock — 03:00 (London), 10:00 and 14:00 — the first fair value gap to form shows where price is being delivered, and is traded in its direction. Crypto's volume and volatility do peak around the European and US sessions (Eross et al.)." + ICT_NOTE,
+    grid: { win: [0, 1, 2], k: [0.1, 0.3] },
+    intraday: true,
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 8, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { bull, bear } = fvgs(c, p.k);
+      const start = [3, 10, 14][p.win] ?? 10;
+      const out = state(b.length);
+      let day = -1;
+      for (let i = 2; i < b.length; i++) {
+        const t = b[i].time;
+        const h = nyHour(t);
+        if (h < start || h >= start + 1) continue;
+        const d = Math.floor((t / 3_600_000 + nyOffset(t)) / 24);
+        if (d === day) continue;
+        if (Number.isFinite(bull[i])) {
+          out[i] = 1;
+          day = d;
+        } else if (Number.isFinite(bear[i])) {
+          out[i] = -1;
+          day = d;
+        }
+      }
+      return out;
+    },
+    describe: (p) => `in the ${['03:00–04:00', '10:00–11:00', '14:00–15:00'][p.win]} New York window, trade the first fair value gap (${p.k} ATR or wider) in its direction, once a day`,
+  },
+  {
+    id: 'judas',
+    name: 'London Judas swing (power of three)',
+    family: 'reversion',
+    papers: ['ict', 'emuw19', 'osler05'],
+    rationale: "Power of three: the Asian hours build a range (accumulation), London makes a false run beyond one side of it (the manipulation, or Judas swing) and the day's real move goes the other way (distribution). When the London run closes back inside the Asian range, trade against it into New York." + ICT_NOTE,
+    grid: { depth: [0, 0.2] },
+    intraday: true,
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 14, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const out = state(b.length);
+      let day = -1;
+      let aH = -Infinity;
+      let aL = Infinity;
+      let up = false;
+      let dn = false;
+      let used = false;
+      for (let i = 0; i < b.length; i++) {
+        const t = b[i].time;
+        const d = Math.floor(t / 86_400_000);
+        const h = new Date(t).getUTCHours();
+        if (d !== day) {
+          day = d;
+          aH = -Infinity;
+          aL = Infinity;
+          up = dn = used = false;
+        }
+        // the Asian range: 00:00–06:00 UTC
+        if (h < 6) {
+          aH = Math.max(aH, b[i].high);
+          aL = Math.min(aL, b[i].low);
+          continue;
+        }
+        // London's false run: 06:00–11:00 UTC
+        if (h >= 11 || used || !Number.isFinite(aH)) continue;
+        const a = A[i];
+        if (!(a > 0)) continue;
+        if (b[i].high > aH + p.depth * a) up = true;
+        if (b[i].low < aL - p.depth * a) dn = true;
+        if (up && b[i].close < aH && b[i].close > aL) {
+          out[i] = -1;
+          used = true;
+        } else if (dn && b[i].close > aL && b[i].close < aH) {
+          out[i] = 1;
+          used = true;
+        }
+      }
+      return out;
+    },
+    describe: (p) => `the Asian hours (00–06 UTC) set a range; when London runs past one side${p.depth ? ` by ${p.depth} ATR or more` : ''} and closes back inside, trade the other way into New York`,
+  },
 ];
 
 // ---------- the filters ----------
@@ -1608,6 +1944,73 @@ export const FILTERS: FilterDef[] = [
       return a;
     },
     describe: (p) => (p.mode === 0 ? 'only in the calm regime (the hidden-Markov odds of turbulence under 50 %)' : 'only in the turbulent regime (the hidden-Markov odds of turbulence over 50 %)'),
+  },
+  // ---------- ICT and Candle Range Theory ----------
+  {
+    id: 'killzone',
+    name: 'ICT kill zone',
+    papers: ['ict', 'emuw19'],
+    rationale: "ICT's kill zones are the hours of the New York clock when the big sessions open and price is delivered: London 02:00–05:00, New York 07:00–10:00 and the afternoon 13:30–16:00. Outside them signals are more often noise. Crypto's volume does concentrate in the European and US hours (Eross et al.)." + ICT_NOTE,
+    grid: { z: [0, 1, 2, 3] },
+    compute: (c, p) => {
+      const a = allow(c.m.bars.length);
+      const zones: [number, number][] = p.z === 0 ? [[2, 5]] : p.z === 1 ? [[7, 10]] : p.z === 2 ? [[13.5, 16]] : [[2, 5], [7, 10], [13.5, 16]];
+      c.m.bars.forEach((b, i) => {
+        const h = nyHour(b.time);
+        const ok = zones.some(([x, y]) => h >= x && h < y);
+        a.long[i] = a.short[i] = ok ? 1 : 0;
+      });
+      return a;
+    },
+    describe: (p) => (p.z === 0 ? 'only in the London kill zone (02:00–05:00 New York)' : p.z === 1 ? 'only in the New York kill zone (07:00–10:00 New York)' : p.z === 2 ? 'only in the afternoon kill zone (13:30–16:00 New York)' : 'only in the ICT kill zones (London, New York morning and afternoon)'),
+  },
+  {
+    id: 'pd',
+    name: 'Premium and discount',
+    papers: ['ict', 'osler03'],
+    rationale: "Split the recent dealing range at its midpoint (equilibrium): below it price is at a discount, above it at a premium. Buy only at a discount and sell only at a premium — ICT's rule for not chasing. Take-profit orders do cluster at levels where price then tends to turn (Osler)." + ICT_NOTE,
+    grid: { lookback: [24, 120, 480] },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const a = allow(b.length);
+      for (let i = 0; i < b.length; i++) {
+        if (!Number.isFinite(hh[i]) || !Number.isFinite(ll[i])) continue;
+        const eq = (hh[i] + ll[i]) / 2;
+        a.long[i] = b[i].close < eq ? 1 : 0;
+        a.short[i] = b[i].close > eq ? 1 : 0;
+      }
+      return a;
+    },
+    describe: (p) => `longs only below the middle of the last ${hrs(p.lookback)} range (discount), shorts only above it (premium)`,
+  },
+  {
+    id: 'bias',
+    name: 'Bias from the open (day or week)',
+    papers: ['crt', 'ict', 'cp19'],
+    rationale: "Where price stands against today's (or this week's) opening price is the simplest higher-timeframe bias in ICT and Candle Range Theory: above the open the candle is bullish so far, below it bearish. Trade only with the candle that is forming." + CRT_NOTE,
+    grid: { anchor: [0, 1, 2] },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const a = allow(b.length);
+      let key = NaN;
+      let open = NaN;
+      for (let i = 0; i < b.length; i++) {
+        const t = b[i].time;
+        // 0: the UTC day, 1: the week from Monday 00:00 UTC, 2: the day from midnight in New York
+        const k = p.anchor === 1 ? Math.floor((t - 4 * 86_400_000) / (7 * 86_400_000)) : p.anchor === 2 ? Math.floor((t / 3_600_000 + nyOffset(t)) / 24) : Math.floor(t / 86_400_000);
+        if (k !== key) {
+          key = k;
+          open = b[i].open;
+        }
+        a.long[i] = b[i].close > open ? 1 : 0;
+        a.short[i] = b[i].close < open ? 1 : 0;
+      }
+      return a;
+    },
+    describe: (p) => (p.anchor === 1 ? "only with the week's candle: longs above the weekly open, shorts below" : p.anchor === 2 ? "only with the day's candle from midnight New York: longs above that open, shorts below" : "only with the day's candle: longs above the daily open (00:00 UTC), shorts below"),
   },
 ];
 

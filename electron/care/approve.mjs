@@ -24,7 +24,10 @@ const num = (x) => (Number.isFinite(x) ? x.toFixed(2) : '—');
 /** a team in words, for the phone */
 export function teamText(t, { title, swarm } = {}) {
   const L = [title ?? `🧩 <b>A proven team is ready to deploy</b>`];
-  L.push(`Together: Sharpe <b>${num(t.sharpe)}</b> · ${pct(t.ret, 0)} a year · worst drop ${pct(-t.maxDD)} · read on ${Math.round(t.days)} days`);
+  L.push(`Together: Sharpe <b>${num(t.sharpe)}</b> · ${pct(t.ret, 0)} a year at 1× · worst drop ${pct(-t.maxDD)} · read on ${Math.round(t.days)} days`);
+  // the same edge sized up to a 15 % worst drop (at most 5×): what the steady ones are really worth — losses grow by the same multiple
+  const lev = Math.max(0, Math.min(5, 0.15 / Math.max(t.maxDD, 0.005)));
+  L.push(`Sized up to a ${pct(-t.maxDD * lev, 0)} worst drop (${lev.toFixed(1)}×): <b>${pct(t.ret * lev, 0)} a year</b>`);
   for (const m of t.members) {
     const f = m.fresh;
     L.push(`• <b>${PACE[m.pace] ?? m.pace}</b> — ${e(m.name)}\n   fresh data ${f ? `${pct(f.ret)} over ${f.trades} trades (worst drop ${pct(-f.maxDD)})` : 'none yet'} · Sharpe ${num(m.sharpe)} alone · ${Math.round(m.weight * 100)}% of the risk`);

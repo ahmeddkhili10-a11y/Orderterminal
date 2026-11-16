@@ -13,6 +13,48 @@ export interface Paper {
 }
 
 export const PAPERS: Record<string, Paper> = {
+  ict: {
+    id: 'ict',
+    cite: 'Huddleston (ICT, “The Inner Circle Trader”)',
+    title: 'ICT mentorship lectures: liquidity, fair value gaps, kill zones, the Silver Bullet and the power of three',
+    venue: 'Practitioner teaching (public lectures, 2016–2023) — not peer-reviewed',
+    finding: 'Teaches that price runs the stops beyond obvious highs and lows, fills imbalances (fair value gaps) and is delivered in set hours of the New York clock. Unverified claims: the Lab tests each rule on crypto, with costs, on unseen data.',
+  },
+  crt: {
+    id: 'crt',
+    cite: 'Candle Range Theory (practitioner method)',
+    title: 'Candle Range Theory: a candle’s range as the next one’s target',
+    venue: 'Practitioner method popularised among retail traders (c. 2023) — not peer-reviewed',
+    finding: 'A higher-timeframe candle’s high and low frame the next: a run past one side that closes back inside tends to travel to the other. Unverified: the Lab tests it.',
+  },
+  osler03: {
+    id: 'osler03',
+    cite: 'Osler (2003)',
+    title: 'Currency orders and exchange rate dynamics: an explanation for the predictive success of technical analysis',
+    venue: 'Journal of Finance 58(5)',
+    finding: 'Take-profit orders cluster at round numbers, where trends tend to reverse; stop-loss orders cluster just beyond them, where trends tend to speed up once crossed.',
+  },
+  osler05: {
+    id: 'osler05',
+    cite: 'Osler (2005)',
+    title: 'Stop-loss orders and price cascades in currency markets',
+    venue: 'Journal of International Money and Finance 24(2)',
+    finding: 'Triggered stop-loss orders feed rapid, self-reinforcing price moves (cascades), and the clustering of stops makes those moves predictable around obvious levels.',
+  },
+  cs04: {
+    id: 'cs04',
+    cite: 'Chordia & Subrahmanyam (2004)',
+    title: 'Order imbalance and individual stock returns: theory and evidence',
+    venue: 'Journal of Financial Economics 72(3)',
+    finding: 'An imbalance between buying and selling orders predicts returns over the short term — one-sided flow carries on before it is absorbed.',
+  },
+  emuw19: {
+    id: 'emuw19',
+    cite: 'Eross, McGroarty, Urquhart & Wolfe (2019)',
+    title: 'The intraday dynamics of bitcoin',
+    venue: 'Research in International Business and Finance 49',
+    finding: 'Bitcoin’s volume, volatility and returns vary with the time of day, peaking when the European and US markets are open.',
+  },
   ks151: {
     id: 'ks151',
     cite: 'Kakushadze & Serur (2018)',

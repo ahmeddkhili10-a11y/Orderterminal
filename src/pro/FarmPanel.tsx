@@ -12,6 +12,7 @@ import { desktop, type FarmView } from "../desktop/bridge";
 import { sendToBot } from "../lab/bridge";
 import {
   LADDER,
+  sizedUp,
   STAGES,
   type FleetItem,
   type PaceBoard,
@@ -439,7 +440,8 @@ function Table({
             >
               EVIDENCE
             </th>
-            <th title="A year’s return on the unseen 30 %">A YEAR</th>
+            <th title="A year’s return on the unseen 30 %, trading one times the account (no leverage)">A YEAR · 1×</th>
+            <th title="The same edge sized up until its worst drop on the unseen 30 % would have been 15 %, at most 5× — every loss grows by the same multiple. Simple scaling: compounding and the swarm’s risk rules left out.">SIZED UP</th>
             <th title="Return for the risk on the unseen 30 %">SHARPE</th>
             <th title="The biggest fall from a high on the unseen 30 %">
               WORST DROP
@@ -471,8 +473,14 @@ function Table({
                   {s.name.split(" · ").slice(0, 2).join(" · ")}
                 </td>
                 <td className={`l ${ev.tone}`}>{ev.text}</td>
-                <td className={`mono b ${s.oos.cagr >= 0 ? "up" : "down"}`}>
+                <td className={`mono ${s.oos.cagr >= 0 ? "up" : "down"}`}>
                   {pct(s.oos.cagr, 0)}
+                </td>
+                <td className={`mono b ${s.oos.cagr >= 0 ? "up" : "down"}`} data-sized>
+                  {(() => {
+                    const z = sizedUp(s.oos.cagr, s.oos.maxDD);
+                    return `${pct(z.ret, 0)} · ${num(z.lev, 1)}×`;
+                  })()}
                 </td>
                 <td className="mono">{num(s.oos.sharpe)}</td>
                 <td className="mono down">{pct(-s.oos.maxDD)}</td>
@@ -1031,9 +1039,11 @@ function TeamCard({
           <span className="muted">best member alone {pct(-team.solo.maxDD)}</span>
         </div>
         <div>
-          <small>A YEAR</small>
-          <b className={`mono ${team.ret >= 0 ? "up" : "down"}`}>{pct(team.ret, 0)}</b>
-          <span className="muted">at the members’ tested sizes</span>
+          <small>A YEAR · SIZED UP</small>
+          <b className={`mono ${team.ret >= 0 ? "up" : "down"}`}>{pct(sizedUp(team.ret, team.maxDD).ret, 0)}</b>
+          <span className="muted">
+            {pct(team.ret, 0)} at 1× · {num(sizedUp(team.ret, team.maxDD).lev, 1)}× for a {pct(-sizedUp(team.ret, team.maxDD).maxDD, 0)} worst drop
+          </span>
         </div>
         <div>
           <small>MOVE TOGETHER</small>

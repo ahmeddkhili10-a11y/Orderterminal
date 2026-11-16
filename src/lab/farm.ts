@@ -1920,19 +1920,16 @@ export class Farm {
         return s;
       })
       .sort((a, b) => a.p! - b.p!);
-    // q-values: the smallest false-discovery rate at which each would be called significant
-    // a strategy already on a board that gains or loses its significance is shown at once;
-    // a newcomer's standing waits for the boards' clock
-    const listed = new Set(Object.values(this.board?.ids ?? {}).flat());
+    // q-values: the smallest false-discovery rate at which each would be called significant.
+    // A listed strategy that gains or loses its significance shows it in its own row at once;
+    // the ORDER of the lists waits for the boards' 20-second clock — while many bots arrive,
+    // several can flip within seconds, and a list that re-sorts each time cannot be read
     let q = 1;
-    let flipped = false;
     for (let k = byP.length - 1; k >= 0; k--) {
       q = Math.min(q, (byP[k].p! * M) / (k + 1));
       byP[k].q = q;
-      if (byP[k].sig !== q <= FDR && listed.has(byP[k].id)) flipped = true;
       byP[k].sig = q <= FDR;
     }
-    if (flipped) this.boardDirty = true;
     // the last step of the funnel is how many stand as significant NOW (it can fall as more bots are tried)
     this.funnel.proof = byP.filter((x) => x.sig).length;
   }
@@ -2439,6 +2436,18 @@ export function ladderOf(s: Pick<Survivor, "forward" | "oos">): Ladder {
  * these make teams, and only teams of these are offered to deploy.
  */
 export const provenEdge = (s: Pick<Survivor, "stage" | "sig">) => s.stage === "proven" && !!s.sig;
+
+/**
+ * What a result is worth sized up: the test trades one times the account, with no
+ * leverage, so a very steady edge shows a small return. Scaled until its worst drop
+ * would have been `target` (15 %), at most `cap` times (5×), the return grows in
+ * proportion — and so does every loss. Simple scaling: compounding and the swarm's
+ * own risk rules are left out.
+ */
+export function sizedUp(ret: number, maxDD: number, target = 0.15, cap = 5): { lev: number; ret: number; maxDD: number } {
+  const lev = Math.max(0, Math.min(cap, target / Math.max(maxDD, 0.005)));
+  return { lev, ret: ret * lev, maxDD: maxDD * lev };
+}
 
 /** two survivors with the same result on the same candles are one strategy, whatever their blocks are called */
 export const resultKey = (s: Pick<Survivor, "id" | "tfH" | "oos">) =>
