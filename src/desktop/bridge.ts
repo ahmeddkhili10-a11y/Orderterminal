@@ -604,6 +604,8 @@ export interface CSwarmConfig {
 }
 export interface CSwarmState {
   running: boolean;
+  /** paused for new trades (open ones still managed) */
+  holding?: boolean;
   mode: 'paper' | 'live';
   secretId: string | null;
   sandbox: boolean;
@@ -691,7 +693,7 @@ export interface WalletRecord {
 
 export interface NovusApi {
   desktop: true;
-  app: { info(): Promise<{ version: string; platform: string; userData: string; db: DbInfo; vaultBackend: string; retentionDays: number; safeMode?: boolean }>; openExternal(url: string): Promise<void>; locked(): Promise<boolean>; unlock(code: string): Promise<boolean>; seal(): Promise<boolean>; changeKey(current: string, next: string): Promise<boolean>; leaveSafeMode(): Promise<void>; fullscreen(on?: boolean): Promise<boolean>; isFullscreen(): Promise<boolean>; onFullscreen(fn: (on: boolean) => void): () => void; status(): Promise<{ locked: boolean; sealedAt: number | null; botsRunning: number; botsLive: number }>; restart(): Promise<boolean>; onSealed(fn: (reason: string) => void): () => void };
+  app: { info(): Promise<{ version: string; platform: string; userData: string; db: DbInfo; vaultBackend: string; retentionDays: number; safeMode?: boolean }>; openExternal(url: string): Promise<void>; locked(): Promise<boolean>; unlock(code: string): Promise<boolean>; seal(): Promise<boolean>; changeKey(current: string, next: string): Promise<boolean>; leaveSafeMode(): Promise<void>; fullscreen(on?: boolean): Promise<boolean>; isFullscreen(): Promise<boolean>; onFullscreen(fn: (on: boolean) => void): () => void; status(): Promise<{ locked: boolean; sealedAt: number | null; botsRunning: number; botsLive: number }>; restart(): Promise<boolean>; autoStart(on?: boolean): Promise<{ on: boolean; supported: boolean; packaged: boolean }>; onSealed(fn: (reason: string) => void): () => void };
   net: { fetchJson<T = any>(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<T> };
   vault: {
     list(): Promise<SecretRecord[]>;
@@ -798,6 +800,8 @@ export interface NovusApi {
     state(): Promise<CSwarmState>;
     start(): Promise<boolean>;
     stop(flatten?: boolean): Promise<boolean>;
+    /** pause (true) or resume (false) new trades */
+    hold(on: boolean): Promise<boolean>;
     config(patch: Partial<Omit<CSwarmConfig, 'risk' | 'agents'>> & { risk?: Partial<CSwarmRisk>; agents?: Partial<CSwarmConfig['agents']> }): Promise<CSwarmConfig>;
     mode(mode: 'paper' | 'live', secretId?: string | null): Promise<'paper' | 'live'>;
     resetPaper(): Promise<void>;
@@ -884,6 +888,8 @@ export interface CareConfig {
   health: boolean;
   /** offer ready teams on the phone, with Deploy buttons */
   offers: boolean;
+  /** after a restart, say on Telegram that Novus Ordo waits for the ledger key */
+  wakeNotice: boolean;
 }
 export interface CareStatus {
   cfg: CareConfig;

@@ -104,6 +104,8 @@ export interface FarmCfg {
   maxDD: number;
   /** the version of these settings (2: scalping is bred beside intraday and swing) */
   v?: number;
+  /** test on Hyperliquid's own recent prices and funding (the market the swarm trades), joined onto the long history (default on) */
+  hl?: boolean;
 }
 
 /** the share of the history held back as the vault: the most recent candles, which no bot is bred or checked on */
@@ -119,6 +121,7 @@ export const PACES: { id: string; name: string; styles: StyleId[] }[] = [
 export const paceIdOf = (style: StyleId): string =>
   PACES.find((p) => p.styles.includes(style))?.id ?? "swing";
 export const FARM_DEFAULTS: FarmCfg = {
+  hl: true,
   coins: ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"],
   styles: ["scalp", "intraday", "swing", "position"],
   sides: "both",
@@ -364,6 +367,8 @@ export interface FarmState {
     lastOkAt: number;
     checkedAt: number;
     nextTryAt: number;
+    /** tested on Hyperliquid's own recent prices: for which markets, and why not for the others */
+    hl?: { on: string[]; off: string[]; error: string } | null;
   } | null;
 }
 

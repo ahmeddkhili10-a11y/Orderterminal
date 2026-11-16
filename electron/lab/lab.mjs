@@ -53,10 +53,50 @@ export function alignFunding(bars, rows, tfH) {
   const intervalH = gaps.length ? Math.max(1, Math.round(gaps[Math.floor(gaps.length / 2)] / HOUR)) : 8;
   for (let i = 0; i < bars.length; i++) {
     while (j + 1 < rows.length && rows[j + 1].time <= bars[i].time) j++;
-    if (rows[j].time <= bars[i].time) out[i] = (rows[j].rate * tfH) / intervalH;
+    // (a row may carry its own interval: funding joined from two exchanges, 8-hourly then hourly)
+    if (rows[j].time <= bars[i].time) out[i] = (rows[j].rate * tfH) / (rows[j].h ?? intervalH);
   }
   return out;
 }
+
+const median = (xs) => {
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length ? s[s.length >> 1] : NaN;
+};
+
+/**
+ * One history from two: the long one (another exchange's spot candles, years of them) and
+ * Hyperliquid's own recent candles in its place from the first of them on — Hyperliquid
+ * keeps only its last 5,000 candles of each size. The older candles are scaled to
+ * Hyperliquid's price and volume where the two overlap, so the seam does not look like a
+ * move. The recent stretch — the vault and the fresh data that decide what is proven — is
+ * Hyperliquid's real prices: the market the swarm trades.
+ */
+export function spliceCandles(long, recent) {
+  if (!recent?.length) return { bars: long, from: null };
+  const t0 = recent[0].time;
+  const before = long.filter((b) => b.time < t0);
+  if (!before.length) return { bars: recent, from: t0 };
+  const byT = new Map(long.map((b) => [b.time, b]));
+  const pr = [];
+  const vr = [];
+  for (const b of recent.slice(0, 500)) {
+    const a = byT.get(b.time);
+    if (!a || !(a.close > 0) || !(b.close > 0)) continue;
+    pr.push(b.close / a.close);
+    if (a.volume > 0 && b.volume > 0) vr.push(b.volume / a.volume);
+  }
+  const kp = pr.length ? median(pr) : recent[0].open / before[before.length - 1].close;
+  const kv = vr.length ? median(vr) : 1;
+  const scaled = before.map((b) => ({ time: b.time, open: b.open * kp, high: b.high * kp, low: b.low * kp, close: b.close * kp, volume: b.volume * kv }));
+  return { bars: [...scaled, ...recent], from: t0 };
+}
+
+/** the funding interval of a list of rows, in hours, from the rows themselves */
+const intervalOf = (rows) => {
+  const gaps = rows.slice(1, 50).map((r, i) => r.time - rows[i].time).filter((g) => g > 0);
+  return gaps.length ? Math.max(1, Math.round(median(gaps) / HOUR)) : 8;
+};
 
 /** markets as plain arrays, for a worker */
 const plainMarkets = (byTf) => Object.fromEntries(Object.entries(byTf).map(([tf, ms]) => [tf, ms.map((m) => ({ ...m, funding: m.funding ? Array.from(m.funding) : null }))]));
@@ -73,6 +113,8 @@ export class LabService {
     this.now = o.now ?? Date.now;
     /** the costs measured on your live trades (assumed costs in, the costs to test with out) */
     this.costsFn = o.costs ?? null;
+    /** told when the edge finder's engine dies (it restarts by itself) */
+    this.onTrouble = o.onTrouble ?? (() => {});
     mkdirSync(join(this.dir, 'cache'), { recursive: true });
     this.cfg = { ...LAB_DEFAULTS, ...this.read('config.json', {}) };
     this.deployedList = this.read('deployed.json', []);
@@ -144,6 +186,11 @@ export class LabService {
     const out = {};
     const stale = [];
     const missing = [];
+    // coins tested on Hyperliquid's own recent prices, and those it could not give
+    const hlOn = [];
+    const hlOff = [];
+    let hlError = '';
+    const useHl = cfg.hl !== false;
     let error = '';
     for (const [tf, yrs] of Object.entries(years)) {
       const ms = [];
@@ -152,7 +199,14 @@ export class LabService {
         this.farmPush();
         const last = this.farmLast?.[tf]?.find((m) => m.coin === coin);
         try {
-          const got = await this.candles(coin, tf, yrs, this.cfg.source, { any: true });
+          const got = useHl ? await this.hlCandles(coin, tf, yrs) : await this.candles(coin, tf, yrs, this.cfg.source, { any: true });
+          if (useHl) {
+            if (got.hl) hlOn.push(`${coin} ${tf}`);
+            else {
+              hlOff.push(`${coin} ${tf}`);
+              hlError ||= got.hlError ?? '';
+            }
+          }
           if (got.stale) {
             stale.push(`${coin} ${tf}`);
             error ||= got.error;
@@ -165,7 +219,7 @@ export class LabService {
           let funding = null;
           if (this.cfg.funding && tf !== '1d') {
             try {
-              funding = alignFunding(got.bars, await this.funding(coin, got.bars[0].time), TF_H[tf]);
+              funding = alignFunding(got.bars, await (useHl ? this.hlFunding(coin, got.bars[0].time) : this.funding(coin, got.bars[0].time)), TF_H[tf]);
             } catch {
               /* the funding rules sit this one out */
             }
@@ -183,7 +237,7 @@ export class LabService {
     }
     this.farmNote = '';
     this.farmLast = out;
-    return { markets: out, stale, missing, error: error.slice(0, 300) };
+    return { markets: out, stale, missing, error: error.slice(0, 300), hl: useHl ? { on: hlOn, off: hlOff, error: hlError.slice(0, 200) } : null };
   }
 
   /** how the edge finder's data is doing, for the screen */
@@ -200,6 +254,8 @@ export class LabService {
       lastOkAt: ok ? this.now() : prev.lastOkAt,
       checkedAt: this.now(),
       nextTryAt: 0,
+      // Hyperliquid's own prices: on for which coins, and why not for the others
+      hl: r.hl ?? null,
     };
     // the banner is for what stops the farm; a problem it is working around is shown with the data
     if (ok || Object.keys(r.markets).length) this.farmErr = '';
@@ -331,6 +387,11 @@ export class LabService {
   farmRevive(why) {
     if (!this.farmWanted) return;
     this.farmRestarts = (this.farmRestarts ?? 0) + 1;
+    try {
+      this.onTrouble(why);
+    } catch {
+      /* the restart matters more than the message */
+    }
     const ms = this.reviveDelays[Math.min(this.farmRestarts, this.reviveDelays.length) - 1];
     this.farmErr = `The edge finder stopped unexpectedly (${String(why).slice(0, 120)}). It restarts by itself in ${ms < 60_000 ? `${ms / 1000} seconds` : `${ms / 60_000} minute${ms === 60_000 ? '' : 's'}`} — everything it found is kept.`;
     this.farmPush();
@@ -498,7 +559,7 @@ export class LabService {
     const need = Math.ceil((years * 365 * 24) / tfH);
     const tried = [];
     let stale = null;
-    const order = source === 'auto' ? SOURCES : o.any ? [source, ...SOURCES.filter((x) => x !== source)] : [source];
+    const order = (source === 'auto' ? SOURCES : o.any ? [source, ...SOURCES.filter((x) => x !== source)] : [source]).filter((x) => x !== o.skip);
     for (const id of order) {
       const key = `cache/${id}-${coin}-${tf}.json`;
       const cached = this.read(key, []);
@@ -511,7 +572,7 @@ export class LabService {
         const bars = [...(from === since ? [] : have), ...fresh.filter((b) => !have.length || b.time > have[have.length - 1].time)];
         // only closed candles
         const closed = bars.filter((b) => b.time + tfH * HOUR <= this.now());
-        if (closed.length < 600) throw new Error(`only ${closed.length} candles`);
+        if (closed.length < (o.min ?? 600)) throw new Error(`only ${closed.length} candles`);
         // the whole history was asked for and it starts later: that is when the coin was listed here (later refreshes only top it up)
         if (from === since && closed[0].time > since + 7 * 24 * HOUR) {
           const all = this.read('cache/listed.json', {});
@@ -526,7 +587,7 @@ export class LabService {
         tried.push(`${id}: ${err?.message ?? err}`);
         // what is on disk from this exchange: kept as a fallback (the freshest of them wins)
         const closed = have.filter((b) => b.time + tfH * HOUR <= this.now());
-        if (closed.length >= 600 && (!stale || closed[closed.length - 1].time > stale.bars[stale.bars.length - 1].time)) stale = { bars: closed, source: id, stale: true };
+        if (closed.length >= (o.min ?? 600) && (!stale || closed[closed.length - 1].time > stale.bars[stale.bars.length - 1].time)) stale = { bars: closed, source: id, stale: true };
       }
     }
     if (stale && o.stale !== false) return { ...stale, error: tried.join('; ') };
@@ -554,6 +615,39 @@ export class LabService {
     }
   }
 
+  /**
+   * Candles for testing what the swarm trades (Hyperliquid perpetuals): the long history
+   * from the other exchanges, with Hyperliquid's own recent candles joined on (see
+   * spliceCandles). If Hyperliquid cannot be reached, the long history alone, said so.
+   */
+  async hlCandles(coin, tf, years) {
+    const long = await this.candles(coin, tf, years, 'binance', { any: true, skip: 'hyperliquid' }).catch(() => null);
+    let hl = null;
+    let hlError = '';
+    try {
+      hl = await this.candles(coin, tf, years, 'hyperliquid', { min: 100 });
+    } catch (err) {
+      hlError = String(err?.message ?? err).slice(0, 200);
+    }
+    if (!long && !hl) throw new Error(`no history for ${coin} — ${hlError}`);
+    if (!hl) return { ...long, hl: null, hlError };
+    if (!long) return { ...hl, hl: hl.bars[0].time, source: 'hyperliquid' };
+    const sp = spliceCandles(long.bars, hl.bars);
+    return { bars: sp.bars, source: `${long.source} + hyperliquid`, hl: sp.from, stale: long.stale || hl.stale, error: long.error || hl.error };
+  }
+
+  /** funding the swarm pays: Binance's for the long past, Hyperliquid's own (hourly) from its first record on */
+  async hlFunding(coin, since) {
+    const [bin, hl] = await Promise.all([
+      this.ccxt.fundingHistory('binanceusdm', `${coin}/USDT:USDT`, since).catch(() => []),
+      this.ccxt.fundingHistory('hyperliquid', `${coin}/USDC:USDC`, since).catch(() => []),
+    ]);
+    if (hl.length < 20) return bin;
+    const hB = intervalOf(bin);
+    const hH = intervalOf(hl);
+    return [...bin.filter((r) => r.time < hl[0].time).map((r) => ({ ...r, h: hB })), ...hl.map((r) => ({ ...r, h: hH }))];
+  }
+
   async funding(coin, since) {
     for (const [id, sym] of [
       ['binanceusdm', `${coin}/USDT:USDT`],
@@ -576,12 +670,16 @@ export class LabService {
     for (const coin of cfg.coins) {
       this.note(`Downloading ${coin} history (${cfg.years} years of ${cfg.timeframe} candles)…`);
       try {
-        const { bars, source, stale } = await this.candles(coin, cfg.timeframe, cfg.years, cfg.source);
+        // Hyperliquid keeps only its last 5,000 candles: its own recent prices are joined onto the long history
+        const hl = cfg.source === 'hyperliquid';
+        const got = hl ? await this.hlCandles(coin, cfg.timeframe, cfg.years) : await this.candles(coin, cfg.timeframe, cfg.years, cfg.source);
+        const { bars, source, stale } = got;
+        if (hl) notes.push(got.hl ? `${coin}: Hyperliquid's own prices from ${new Date(got.hl).toISOString().slice(0, 10)}, the years before from ${String(source).split(' ')[0]} (scaled to Hyperliquid's)` : `${coin}: Hyperliquid's candles could not be had (${got.hlError || 'no answer'}) — tested on ${source}`);
         if (stale) notes.push(`${coin}: no exchange answered — tested on the candles already on this computer (to ${new Date(bars[bars.length - 1].time).toISOString().slice(0, 16).replace('T', ' ')} UTC)`);
         let funding = null;
         if (cfg.funding) {
           this.note(`Downloading ${coin} funding history…`);
-          const rows = await this.funding(coin, bars[0].time);
+          const rows = await (hl ? this.hlFunding(coin, bars[0].time) : this.funding(coin, bars[0].time));
           funding = alignFunding(bars, rows, tfH);
           if (!funding) notes.push(`${coin}: no funding history`);
         }

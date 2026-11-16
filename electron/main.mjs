@@ -19,6 +19,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { fromBot, fromSwarm, TradeJournal } from './care/journal.mjs';
 import { Care } from './care/care.mjs';
 import { Approvals } from './care/approve.mjs';
+import { Remote } from './care/remote.mjs';
+import { crashText, lastErrors, markRunning, markStopped, wakeText } from './care/crash.mjs';
 import { buildSpec } from '../src/lab/flow.ts';
 import { testedStats } from '../src/lab/live.ts';
 import { costsForTests, measureCosts } from './care/costs.mjs';
@@ -107,7 +109,14 @@ if (process.env.NOVUS_USER_DATA) app.setPath('userData', process.env.NOVUS_USER_
 const userDataDir = app.getPath('userData');
 initLog(join(userDataDir, 'logs'));
 log('info', `starting Novus Ordo ${app.getVersion()} on ${process.platform} ${process.arch}, electron ${process.versions.electron}`);
-process.on('uncaughtException', (e) => log('error', 'uncaught exception', e));
+process.on('uncaughtException', (e) => {
+  log('error', 'uncaught exception', e);
+  try {
+    care?.error('main', `An error in Novus Ordo's background engine: ${String(e?.message ?? e).slice(0, 200)} — it carries on.`);
+  } catch {
+    /* too early for messages */
+  }
+});
 process.on('unhandledRejection', (e) => log('error', 'unhandled rejection', e instanceof Error ? e : String(e)));
 
 // Safe mode: no GPU acceleration. Turned on automatically when the GPU process
@@ -153,9 +162,15 @@ function leaveSafeMode() {
   app.exit(0);
 }
 
-if (!app.requestSingleInstanceLock()) {
+/** the last session did not close properly (its marker was still there): told once the terminal is unlocked */
+let unclean = null;
+const primary = app.requestSingleInstanceLock();
+if (!primary) {
   log('info', 'another instance is already running — handing over to it');
   app.quit();
+} else {
+  unclean = markRunning(userDataDir);
+  if (unclean) log('warn', `the last session did not close properly (started ${new Date(unclean.t || 0).toISOString()})`);
 }
 
 let win = null;
@@ -175,6 +190,8 @@ let care = null;
 let screenState = 'ok';
 /** ready teams offered on Telegram with Deploy buttons (care/approve.mjs) */
 let approvals = null;
+/** the swarm from the phone: /positions, /pause, /resume, /stop, /start (care/remote.mjs) */
+let remote = null;
 /** start (or restart) the Telegram poller for the chosen bot: set once the IPC handlers exist */
 let ensurePoller = () => {};
 
@@ -242,7 +259,10 @@ function createWindow() {
   wc.on('did-fail-load', (_e, code, desc, url) => log('error', `page failed to load (${code} ${desc}) ${url}`));
   wc.on('render-process-gone', (_e, d) => {
     log('error', `window renderer gone: ${d.reason} (exit ${d.exitCode})`);
-    if (d.reason !== 'clean-exit') screenState = 'gone';
+    if (d.reason !== 'clean-exit') {
+      screenState = 'gone';
+      care?.error('renderer', `The terminal's window crashed (${d.reason}). It reloads by itself; trading carries on in the background.`);
+    }
     if (d.reason !== 'clean-exit' && !w.isDestroyed()) {
       if ((w.__crashes = (w.__crashes ?? 0) + 1) <= 1) wc.reload();
       else relaunchSafe(`renderer ${d.reason}`);
@@ -350,12 +370,47 @@ const httpsOnly = (url) => {
   return u.toString();
 };
 
+/** open Novus Ordo when you sign in to Windows (the portable copy starts itself from where it is, not from its temporary folder) */
+function setAutoStart(on) {
+  try {
+    const exe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+    app.setLoginItemSettings({ openAtLogin: !!on, path: exe, args: [] });
+  } catch (err) {
+    log('warn', 'could not change start with Windows', err);
+  }
+}
+
 /** the exchange a key belongs to (the swarm's live venue) */
 function venueOf(secretId) {
   try {
     return (secretId && db.getSecret(secretId)?.exchange) || 'hyperliquid';
   } catch {
     return 'hyperliquid';
+  }
+}
+
+/**
+ * Once unlocked: the crash report (if the last session did not close properly), and the crypto
+ * swarm picks up where it left off — started again if it was running when Novus Ordo closed.
+ */
+let resumedOnce = false;
+async function afterUnlockCare() {
+  if (resumedOnce) return;
+  resumedOnce = true;
+  if (unclean) {
+    const report = crashText({ lastSeen: db.get('care:lastSeenBefore') ?? null, errors: lastErrors(logFile()).filter((x) => x.t <= Date.now() && (!unclean.t || x.t >= unclean.t - 60_000)) });
+    setTimeout(() => void care?.send(report, 'crash report'), 25_000).unref?.();
+  }
+  try {
+    await services;
+    if (care?.wanted.swarm && cswarm && !cswarm.running) {
+      await cswarm.start();
+      log('info', 'crypto swarm resumed after the restart');
+      void care.send(`▶ <b>The crypto swarm has resumed</b> (${cswarm.mode === 'live' ? 'LIVE' : 'paper'}) — it was running when Novus Ordo closed.${cswarm.holding ? ' It is paused for new trades: /resume to trade.' : ''}`, 'resumed');
+    }
+  } catch (err) {
+    log('warn', 'could not resume the crypto swarm', err);
+    care?.error('resume', `The crypto swarm was running before the restart but could not start again: ${String(err?.message ?? err).slice(0, 160)}. Start it from Novus Ordo or send /startswarm.`);
   }
 }
 
@@ -444,6 +499,7 @@ function registerIpc() {
     // the daily message, the warnings and the weekly report start once the ledger key has been entered
     care?.start();
     ensurePoller();
+    void afterUnlockCare();
     // popped-out panels come back (and, the first time, the ones left open last session)
     if (screens) {
       screens.setVisible(true);
@@ -602,6 +658,7 @@ function registerIpc() {
     care?.setWanted('swarm', false);
     return cswarm.stop({ flatten: Boolean(flatten) });
   });
+  handle('cswarm:hold', (_e, on) => cswarm.hold(Boolean(on)));
   handle('cswarm:config', (_e, patch) => cswarm.setConfig(patch ?? {}));
   handle('cswarm:resetPaper', () => cswarm.resetPaper());
   handle('cswarm:mode', async (_e, mode, secretId) => {
@@ -1104,8 +1161,8 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
     commandsFor = sig;
     commands = new TelegramCommands(s.fields.token, chat, () => ({ ...tgStatus, wallet: walletReply() }), fetch, (e) => console.warn('telegram', e?.message ?? e), {
       answerBasics: () => basicsOn,
-      command: async (cmd) => (cmd === '/teams' ? approvals.pool() : null),
-      callback: (data) => approvals.tap(data),
+      command: async (cmd) => (cmd === '/teams' ? approvals.pool() : remote.command(cmd)),
+      callback: (data) => (String(data).startsWith('rc:') ? remote.tap(data) : approvals.tap(data)),
     });
     void commands.run();
   };
@@ -1131,6 +1188,13 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
 
   // ---- while you are away: the daily message, warnings, the weekly report, strategy health, real costs ----
   handle('care:status', () => care.status());
+  handle('app:autoStart', (_e, on) => {
+    if (typeof on === 'boolean') {
+      db.set('autoStart', on);
+      setAutoStart(on);
+    }
+    return { on: db.get('autoStart') === true, supported: process.platform !== 'linux', packaged: app.isPackaged };
+  });
   handle('care:config', (_e, patch) => {
     const st = care.setConfig(patch ?? {});
     ensurePoller();
@@ -1305,6 +1369,23 @@ app.whenReady().then(async () => {
     swarm: () => (cswarm ? { running: cswarm.running, mode: cswarm.mode } : null),
     waiting: () => lab?.farmState().teamWait ?? [],
   });
+  remote = new Remote({ db, swarm: () => cswarm, bots: () => bots, wanted: (on) => care?.setWanted('swarm', on) });
+  // when this computer last saw Novus Ordo running (for the crash report), and — if you asked for it —
+  // a fixed message that it has started and waits for the ledger key (nothing private in it)
+  {
+    const lastSeen = db.get('care:lastSeen') ?? null;
+    db.set('care:lastSeenBefore', lastSeen);
+    const off = lastSeen ? Date.now() - lastSeen : 0;
+    if (care.cfg.wakeNotice !== false && care.cfg.secretId && (unclean || off > 10 * 60_000))
+      setTimeout(() => {
+        if (!unlocked) void care.send(wakeText({ unclean: !!unclean, offSince: lastSeen }), 'waiting for the key');
+      }, 20_000).unref?.();
+  }
+  // start with Windows (a setting; on by default the first time, for the installed app)
+  if (app.isPackaged && process.platform !== 'linux' && db.get('autoStart') === undefined) {
+    db.set('autoStart', true);
+    setAutoStart(true);
+  }
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
@@ -1356,6 +1437,8 @@ app.whenReady().then(async () => {
         dir: join(app.getPath('userData'), 'lab'),
         makeWorker: () => new Worker(labWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
         makeFarmWorker: () => new Worker(farmWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
+        // the edge finder's engine died: said on the phone (it restarts by itself)
+        onTrouble: (why) => care?.error('farm-died', `The edge finder's engine stopped (${String(why).slice(0, 140)}). It restarts by itself from what it last saved.`),
         // tests charge what your live trades really cost, once there are enough of them (never less than assumed)
         costs: (assumed) => costsForTests(measureCosts(journal.list({ mode: 'live' }), { assumedFeeBps: assumed.feeBps }), assumed),
         emit: (ch, payload) => {
@@ -1431,6 +1514,7 @@ app.whenReady().then(async () => {
 
 app.on('child-process-gone', (_e, d) => {
   log('error', `${d.type} process gone: ${d.reason} (exit ${d.exitCode})`);
+  if (d.reason !== 'clean-exit' && d.reason !== 'killed') care?.error(`proc:${d.type}`, `A part of Novus Ordo stopped (${d.type}: ${d.reason}). ${d.type === 'GPU' ? 'It restarts without the graphics card (safe mode).' : 'It carries on.'}`);
   if (d.type === 'GPU' && d.reason !== 'clean-exit') relaunchSafe(`GPU process ${d.reason}`);
 });
 
@@ -1454,6 +1538,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  // closed properly: no crash report next time
+  if (primary) markStopped(userDataDir);
   lab?.shutdownFarm();
   void dbw?.terminate();
   db?.close();

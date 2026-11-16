@@ -20,7 +20,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const REWARN = 6 * HOUR;
 
-export const CARE_DEFAULTS = { secretId: '', daily: true, dailyHour: 8, weekly: true, weekday: 0, weeklyHour: 18, warnings: true, health: true, offers: true };
+export const CARE_DEFAULTS = { secretId: '', daily: true, dailyHour: 8, weekly: true, weekday: 0, weeklyHour: 18, warnings: true, health: true, offers: true, wakeNotice: true };
 
 export class Care {
   /**
@@ -58,7 +58,7 @@ export class Care {
     c.dailyHour = clampInt(c.dailyHour, 0, 23, 8);
     c.weeklyHour = clampInt(c.weeklyHour, 0, 23, 18);
     c.weekday = clampInt(c.weekday, 0, 6, 0);
-    for (const k of ['daily', 'weekly', 'warnings', 'health', 'offers']) c[k] = c[k] !== false;
+    for (const k of ['daily', 'weekly', 'warnings', 'health', 'offers', 'wakeNotice']) c[k] = c[k] !== false;
     this.cfg = c;
     this.db.set('care:cfg', c);
     return this.status();
@@ -72,7 +72,12 @@ export class Care {
 
   /** a failure worth telling at once (an exit that failed, an order refused) */
   error(key, text) {
-    this.errors.push({ key: String(key).slice(0, 60), text: String(text).slice(0, 400), t: this.now() });
+    // the same failure over and over is told once an hour
+    const k = String(key).slice(0, 60);
+    this.errSeen ??= new Map();
+    if (this.now() - (this.errSeen.get(k) ?? -Infinity) < 3_600_000) return;
+    this.errSeen.set(k, this.now());
+    this.errors.push({ key: k, text: String(text).slice(0, 400), t: this.now() });
     if (this.errors.length > 20) this.errors.shift();
     if (this.running) void this.tick();
   }

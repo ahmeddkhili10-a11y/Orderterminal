@@ -304,6 +304,36 @@ describe('the optimizer and 15-minute history', () => {
     expect(ccxt.history.mock.calls[1][3]).toBeGreaterThan(since0 + 900 * HOUR);
   });
 
+  it('Hyperliquid: its own recent candles joined onto the long history, scaled at the seam; its hourly funding after Binance\'s', async () => {
+    const now = Date.UTC(2026, 10, 6, 12);
+    const long = walk(3000, now, 4);
+    // Hyperliquid keeps its last 800 candles here, at prices 1 % above the spot exchange's
+    const hlBars = long.slice(-800).map((b) => ({ ...b, open: b.open * 1.01, high: b.high * 1.01, low: b.low * 1.01, close: b.close * 1.01, volume: b.volume * 3 }));
+    const ccxt = {
+      history: vi.fn(async (id, _sym, _tf, since) => (id === 'hyperliquid' ? hlBars.filter((b) => b.time >= since) : long.filter((b) => b.time >= since))),
+      fundingHistory: vi.fn(async (id) => (id === 'hyperliquid' ? Array.from({ length: 200 }, (_, i) => ({ time: now - (200 - i) * HOUR, rate: 0.0001 })) : Array.from({ length: 300 }, (_, i) => ({ time: now - 3000 * HOUR + i * 8 * HOUR, rate: 0.0008 })))),
+    };
+    const lab = new LabService({ ccxt, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const got = await lab.hlCandles('BTC', '1h', 0.4);
+    expect(got.hl).toBe(hlBars[0].time);
+    expect(got.source).toMatch(/\+ hyperliquid/);
+    const seam = got.bars.findIndex((b) => b.time === got.hl);
+    // the recent stretch is Hyperliquid's own; the older candles are scaled to it, so the seam is no jump
+    expect(got.bars[seam].close).toBeCloseTo(hlBars[0].close, 8);
+    expect(got.bars[seam - 1].close / long[long.length - 801].close).toBeCloseTo(1.01, 6);
+    expect(got.bars[seam - 1].volume / long[long.length - 801].volume).toBeCloseTo(3, 6);
+    // the funding: 8-hourly before Hyperliquid's first record, hourly after, each counted at its own interval
+    const rows = await lab.hlFunding('BTC', now - 3000 * HOUR);
+    const f = alignFunding(got.bars, rows, 1);
+    expect(f[f.length - 1]).toBeCloseTo(0.0001, 10);
+    expect(f[seam - 300]).toBeCloseTo(0.0001, 10);
+    // Hyperliquid unreachable: the long history alone, and why
+    const down = new LabService({ ccxt: { history: vi.fn(async (id, _s, _t, since) => { if (id === 'hyperliquid') throw new Error('hyperliquid down'); return long.filter((b) => b.time >= since); }) }, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const alone = await down.hlCandles('BTC', '1h', 0.4);
+    expect(alone.hl).toBeNull();
+    expect(alone.hlError).toMatch(/hyperliquid down/);
+  });
+
   it('a shorter request keeps the longer history in the cache', async () => {
     const now = Date.UTC(2026, 10, 6, 12);
     const ccxt = { history: vi.fn(async (_id, _sym, _tf, since) => walk(Math.floor((now - since) / HOUR), now, 3)) };

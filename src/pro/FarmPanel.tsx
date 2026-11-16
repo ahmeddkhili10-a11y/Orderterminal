@@ -795,6 +795,12 @@ function Status({ farm, now }: { farm: FarmView; now: number }) {
             <>
               newest candle {newest} UTC · loaded {ago(farm.dataAt, now)}
               {d?.nextTryAt ? ` · next check in ${mins(d.nextTryAt)} min` : ""}
+              {d?.hl && (
+                <span data-hl={d.hl.off.length ? "partial" : "on"} title={d.hl.off.length ? `Not on Hyperliquid's prices: ${d.hl.off.join(", ")}${d.hl.error ? ` — ${d.hl.error}` : ""}` : "The recent stretch — the vault and fresh data — is Hyperliquid's own prices and funding"}>
+                  {" · "}
+                  {d.hl.off.length ? `Hyperliquid prices for ${d.hl.on.length} of ${d.hl.on.length + d.hl.off.length}` : "Hyperliquid prices ✓"}
+                </span>
+              )}
             </>
           )}
         </span>
@@ -1231,12 +1237,14 @@ function Settings({
   const [sides, setSides] = useState(farm.cfg.sides);
   const [pace, setPace] = useState(farm.cfg.pace);
   const [maxDD, setMaxDD] = useState(farm.cfg.maxDD);
+  const [hl, setHl] = useState(farm.cfg.hl !== false);
   useEffect(() => {
     setCoins(farm.cfg.coins.join(" "));
     setStyles(farm.cfg.styles);
     setSides(farm.cfg.sides);
     setPace(farm.cfg.pace);
     setMaxDD(farm.cfg.maxDD);
+    setHl(farm.cfg.hl !== false);
   }, [farm.cfg]);
   const toggle = (id: StyleId) =>
     setStyles((xs) =>
@@ -1272,6 +1280,19 @@ function Settings({
               </button>
             ))}
           </div>
+        </div>
+        <div className="farm-chips">
+          <span>Prices</span>
+          <button
+            className={`chip${hl ? " active" : ""}`}
+            onClick={() => setHl(true)}
+            title="The years of history from Binance, with Hyperliquid's own recent candles and funding joined on: the vault and fresh data — what decides proven — are the market the swarm trades"
+          >
+            Hyperliquid (what the swarm trades)
+          </button>
+          <button className={`chip${!hl ? " active" : ""}`} onClick={() => setHl(false)} title="Binance and the other exchanges only">
+            Other exchanges only
+          </button>
         </div>
         <div className="farm-chips">
           <span>Direction</span>
@@ -1327,6 +1348,7 @@ function Settings({
               sides,
               pace,
               maxDD,
+              hl,
             });
             // the settings box closes: the results are right under it
             document.body.dispatchEvent(

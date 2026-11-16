@@ -84,7 +84,7 @@ export async function tgSendPhoto(token: string, chatId: string, png: Uint8Array
   if (!j.ok) throw new Error(j.description ?? 'Telegram sendPhoto failed');
 }
 
-export const HELP_TEXT = '<b>Novus Ordo bot</b>\n/teams — the edge finder\'s team pool, each with a Deploy button\n/wallet — the swarm wallet address, to paste into Phantom\n/price — primary instrument price\n/status — price, funding, open interest and feeds\n/help — this message';
+export const HELP_TEXT = '<b>Novus Ordo bot</b>\n/positions — the account and every open trade\n/pause — no new trades (open ones still managed)\n/resume — new trades again\n/stop — close everything and stop (asks first)\n/startswarm — start the crypto swarm (asks first)\n/teams — the edge finder\'s proven teams, with Deploy buttons\n/wallet — the swarm wallet address\n/price — primary instrument price\n/status — price, funding, open interest and feeds\n/help — this message';
 
 /** a button under a message: its text, and what comes back when it is tapped (at most 64 bytes) */
 export type TgButton = { text: string; callback_data: string };

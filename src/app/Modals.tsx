@@ -380,6 +380,23 @@ function LedgerKeySettings() {
   );
 }
 
+/** open Novus Ordo when Windows starts, so a restart does not leave it closed */
+function AutoStartSetting() {
+  const [st, setSt] = useState<{ on: boolean; supported: boolean; packaged: boolean } | null>(null);
+  useEffect(() => {
+    void desktop?.app.autoStart?.().then(setSt).catch(() => undefined);
+  }, []);
+  if (!desktop || !st?.supported) return null;
+  return (
+    <div className="form-row" data-autostart>
+      <span>Start with Windows</span>
+      <label className="check">
+        <input type="checkbox" checked={st.on} onChange={(e) => void desktop!.app.autoStart(e.target.checked).then(setSt)} /> open Novus Ordo when you sign in to Windows — after a restart it waits for your ledger key, then the crypto swarm picks up where it left off
+      </label>
+    </div>
+  );
+}
+
 /** everything this window keeps in its own storage (settings, layouts, panel choices), for a backup */
 function windowStorage(): Record<string, string> {
   const out: Record<string, string> = {};
@@ -498,6 +515,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       <AppearanceSettings />
       <LedgerKeySettings />
       <BackupSettings />
+      <AutoStartSetting />
       <div className="section-title">Display</div>
       <div className="form-row">
         <span>FPS counter</span>

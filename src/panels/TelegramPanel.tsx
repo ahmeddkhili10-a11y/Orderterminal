@@ -172,6 +172,9 @@ function AwaySection({ chatReady, onNote }: { chatReady: boolean; onNote: (ok: b
       <Check checked={c.offers} onChange={(offers) => set({ offers })}>
         <b>Offer ready teams — deploy from my phone</b> <span className="muted">— when the edge finder's team pool has a team whose every member is proven on fresh data, it is sent with its numbers and Deploy buttons (council decides, or trade as tested). Nothing is deployed until you tap. Send <span className="mono">/teams</span> to the bot for the whole pool.</span>
       </Check>
+      <Check checked={c.wakeNotice} onChange={(wakeNotice) => set({ wakeNotice })}>
+        <b>Tell me when it restarts</b> <span className="muted">— after a crash, a power cut or Windows restarting: a message that Novus Ordo is waiting for your ledger key (a fixed message, nothing private in it). Once unlocked, the swarm picks up where it left off, and a crash report follows.</span>
+      </Check>
       <Check checked={c.weekly} onChange={(weekly) => set({ weekly })}>
         <b>Weekly report card</b> <span className="muted">— each agent, strategy and bot: trades, wins, profit, what it expected against what it got, real costs, the edge finder's best</span>
       </Check>

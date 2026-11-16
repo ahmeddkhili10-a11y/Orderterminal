@@ -7,6 +7,11 @@ import { rateOn, ratesFromChart, taxCsv, taxYearOf, taxYearRange } from './tax.m
 import { backText, clearedText, dailyText, problemsOf, weeklyText } from './reports.mjs';
 import { Care, localDay } from './care.mjs';
 import { Approvals } from './approve.mjs';
+import { Remote } from './remote.mjs';
+import { markRunning, markStopped, tidyErrors, crashText, wakeText } from './crash.mjs';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { collectBackup, openBackup, passwordProblem, peekBackup, restoreBackup, sealBackup } from './backup.mjs';
 
 const DAY = 86_400_000;
@@ -362,5 +367,121 @@ describe('deploying from the phone', () => {
     pool.splice(0, 1, team('Q'));
     expect(await s.a.tap(kb[0][0].callback_data)).toMatch(/Not deployed[\s\S]*no longer a proven edge/);
     expect(s.deployed).toHaveLength(0);
+  });
+});
+
+describe('the swarm from the phone', () => {
+  const mkSwarm = (o = {}) => {
+    const sw = {
+      running: true,
+      mode: 'paper',
+      holding: false,
+      positions: [{ id: 'p1', coin: 'BTC', side: 'buy', entry: 100, price: 102, upnl: 2, riskUsd: 4, stop: 98, target: 108, openedAt: Date.now() - 3_600_000, agent: 'trend' }],
+      open() {
+        return this.positions.filter((p) => !p.closedAt);
+      },
+      state() {
+        return { running: this.running, holding: this.holding, mode: this.mode, equity: 1040, open: this.open(), closed: this.positions.filter((p) => p.closedAt) };
+      },
+      hold(on) {
+        this.holding = on;
+      },
+      async start() {
+        this.running = true;
+      },
+      async stop({ flatten }) {
+        if (flatten) for (const p of this.open()) Object.assign(p, { closedAt: Date.now(), pnl: 1.5 });
+        this.running = false;
+      },
+      ...o,
+    };
+    return sw;
+  };
+  const setup = (sw, bots = []) => {
+    const db = memDb();
+    const wanted = [];
+    const B = { list: () => bots, stop: async (id) => (bots.find((b) => b.id === id).running = false) };
+    return { r: new Remote({ db, swarm: () => sw, bots: () => B, wanted: (on) => wanted.push(on) }), wanted };
+  };
+  it('/positions shows the account and every open trade', async () => {
+    const { r } = setup(mkSwarm());
+    const [m] = await r.command('/positions');
+    expect(m.html).toMatch(/running · paper · account \$1040\.00/);
+    expect(m.html).toMatch(/BTC LONG<\/b> — Trend\n   100 → 102 · <b>\+\$2\.00<\/b> \(\+0\.50R\) · stop 98 · target 108/);
+    expect(await r.command('/hello')).toBeNull();
+  });
+  it('/pause and /resume: no new trades, then trades again', async () => {
+    const sw = mkSwarm();
+    const { r } = setup(sw);
+    expect((await r.command('/pause'))[0].html).toMatch(/Paused for new trades[\s\S]*1 open trade is still managed/);
+    expect(sw.holding).toBe(true);
+    expect((await r.command('/resume'))[0].html).toMatch(/Resumed/);
+    expect(sw.holding).toBe(false);
+  });
+  it('/stop asks first, then closes everything and stops the swarm and the bots — once', async () => {
+    const sw = mkSwarm({ mode: 'live' });
+    const bots = [{ id: 'b1', name: 'Scalper', running: true, mode: 'live' }];
+    const { r, wanted } = setup(sw, bots);
+    const [ask] = await r.command('/stop');
+    expect(ask.html).toMatch(/Close everything and stop\?[\s\S]*LIVE[\s\S]*1 running bot/);
+    expect(sw.running).toBe(true);
+    const yes = ask.keyboard[0][0].callback_data;
+    const done = await r.tap(yes);
+    expect(done).toMatch(/Stopped\.<\/b> Closed 1 trade: \+\$1\.50\. 1 bot stopped and flattened/);
+    expect(sw.running).toBe(false);
+    expect(bots[0].running).toBe(false);
+    expect(wanted).toEqual([false]);
+    expect(await r.tap(yes)).toMatch(/lapsed/);
+  });
+  it('/startswarm asks first; Cancel changes nothing', async () => {
+    const sw = mkSwarm({ running: false, mode: 'live' });
+    const { r, wanted } = setup(sw);
+    const [ask] = await r.command('/startswarm');
+    expect(ask.html).toMatch(/LIVE mode — real money/);
+    expect(await r.tap(ask.keyboard[1][0].callback_data)).toMatch(/Cancelled/);
+    expect(sw.running).toBe(false);
+    const [again] = await r.command('/startswarm');
+    expect(await r.tap(again.keyboard[0][0].callback_data)).toMatch(/is running<\/b> \(LIVE\)/);
+    expect(sw.running).toBe(true);
+    expect(wanted).toEqual([true]);
+  });
+});
+
+describe('crash reports', () => {
+  it('a marker left behind means the last session did not close properly', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'crash-'));
+    expect(markRunning(dir, 1000)).toBeNull();
+    // closed properly
+    markStopped(dir);
+    expect(markRunning(dir, 2000)).toBeNull();
+    // not closed: found at the next start
+    expect(markRunning(dir, 3000)).toMatchObject({ t: 2000 });
+  });
+  it('the last errors from the log, without signatures, keys or addresses, each once', () => {
+    const log = [
+      '2026-11-16T05:00:00.000Z +1.00s INFO starting',
+      '2026-11-16T05:01:00.000Z +60.00s ERROR window renderer gone: crashed (exit 1)',
+      '2026-11-16T05:02:00.000Z +60.00s ERROR fetch https://api.binance.com/x?signature=abc123&key=1 failed',
+      '2026-11-16T05:03:00.000Z +60.00s ERROR wallet 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU refused',
+      '2026-11-16T05:04:00.000Z +60.00s ERROR window renderer gone: crashed (exit 1)',
+    ].join('\n');
+    const errs = tidyErrors(log);
+    expect(errs.map((x) => x.msg)).toEqual(['fetch https://api.binance.com/x failed', 'wallet … refused', 'window renderer gone: crashed (exit 1)']);
+    expect(crashText({ lastSeen: Date.UTC(2026, 10, 16, 5), errors: errs })).toMatch(/closed unexpectedly[\s\S]*<code>window renderer gone/);
+    expect(crashText({ lastSeen: null, errors: [] })).toMatch(/power cut, Windows restarting/);
+    expect(wakeText({ unclean: true, offSince: null })).toMatch(/waiting for your ledger key[\s\S]*did not close properly[\s\S]*Nothing trades until it is unlocked/);
+  });
+  it('the same failure is told once an hour', async () => {
+    let t = Date.UTC(2026, 10, 16, 5);
+    const sent = [];
+    const care = new Care({ db: memDb(), journal: new TradeJournal(new DatabaseSync(':memory:')), send: async (_i, h) => sent.push(h), swarm: () => null, lab: () => null, bots: () => [], now: () => t });
+    care.setConfig({ secretId: 'x', daily: false, weekly: false });
+    care.error('farm-died', 'The edge finder stopped');
+    care.error('farm-died', 'The edge finder stopped');
+    await care.tick();
+    t += 10 * 60_000;
+    care.error('farm-died', 'The edge finder stopped');
+    await care.tick();
+    expect(sent.filter((h) => /edge finder stopped/.test(h))).toHaveLength(1);
   });
 });

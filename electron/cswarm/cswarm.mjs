@@ -94,6 +94,8 @@ export class CryptoSwarm {
     this.sandbox = false;
     this.lastSaid = new Map();
     this.lastState = 0;
+    /** paused for new trades (open trades are still managed), kept across restarts */
+    this.holding = !!db.get('cswarm:hold');
     // anything left open from before a restart is managed by the swarm itself
     for (const p of this.positions) if (!p.closedAt) p.owner = 'swarm';
   }
@@ -123,6 +125,15 @@ export class CryptoSwarm {
   }
 
   // ---------- control ----------
+
+  /** pause (or resume) new trades; open trades are managed either way */
+  hold(on) {
+    this.holding = !!on;
+    this.db.set('cswarm:hold', this.holding);
+    this.say('swarm', on ? 'Paused for new trades — open trades are still managed to their stops and targets.' : 'Resumed — new trades allowed again.', on ? 'warn' : 'info');
+    this.pushState(true);
+    return this.holding;
+  }
 
   setConfig(patch) {
     if (this.running) throw new Error('stop the crypto swarm before changing its settings');
@@ -510,6 +521,12 @@ export class CryptoSwarm {
       if (p.labId && this.running) this.labNote(p.labId, (b) => b.refused++);
       return;
     }
+    // paused by you (from the phone or the screen): no new trades; open ones are still managed
+    if (this.holding) {
+      e?.failed('paused by you — no new trades');
+      this.sayOnce(`hold:${coin}:${agent}`, agent, `${coin}: a ${p.side === 'buy' ? 'LONG' : 'SHORT'} signal, not taken — the swarm is paused for new trades`, 'pass', 30 * MIN);
+      return;
+    }
     const t = this.now();
     const cand = { agent, coin, symbol: cs.symbol, side: p.side, price: p.price, stop: p.stop, target: p.target, setup: p.setup, why: p.why, t, ctx: this.ctxOf(cs, agent), authority: p.authority ?? 'council' };
     const x = features(cand);
@@ -832,6 +849,7 @@ export class CryptoSwarm {
     const fs = this.forest?.stats;
     return {
       running: this.running,
+      holding: this.holding,
       mode: this.mode,
       secretId: this.secretId,
       sandbox: this.sandbox,
