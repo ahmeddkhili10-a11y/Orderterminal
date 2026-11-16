@@ -630,6 +630,72 @@ function fvgs(c: Ctx, k: number): { bull: Float64Array; bear: Float64Array } {
 }
 const ICT_NOTE = ' A practitioner method (ICT), not a peer-reviewed one: the Lab tests whether it holds on crypto, with costs, on data it never saw.';
 const CRT_NOTE = ' A practitioner method (Candle Range Theory), not a peer-reviewed one: the Lab tests whether it holds on crypto, with costs, on data it never saw.';
+/** a higher-timeframe candle: 168 hours is the week from Monday 00:00 UTC; `ny` aligns the candles to the New York clock (the 1am-5am-9am 4-hour candles) */
+const htfKey = (t: number, hours: number, ny = 0) => {
+  if (!ny) return hours === 168 ? Math.floor((t - 4 * 86_400_000) / (7 * 86_400_000)) : htfOf(t, hours);
+  const h = t / 3_600_000 + nyOffset(t);
+  // New York: the week from Monday 00:00, the day from midnight, 4-hour candles from 01:00
+  return hours === 168 ? Math.floor((h - 96) / 168) : Math.floor((h - (hours === 4 ? 1 : 0)) / hours);
+};
+/** pivot highs and lows: a high above the `k` candles either side of it (known `k` candles later) */
+function pivots(c: Ctx, k: number): { hi: Float64Array; lo: Float64Array } {
+  return cached(c, `piv${k}`, () => {
+    const b = c.m.bars;
+    const hi = new Float64Array(b.length).fill(NaN);
+    const lo = new Float64Array(b.length).fill(NaN);
+    for (let i = 2 * k; i < b.length; i++) {
+      const j = i - k;
+      let isH = true;
+      let isL = true;
+      for (let d = 1; d <= k; d++) {
+        if (!(b[j].high > b[j - d].high && b[j].high >= b[j + d].high)) isH = false;
+        if (!(b[j].low < b[j - d].low && b[j].low <= b[j + d].low)) isL = false;
+      }
+      // marked on the bar where it becomes known
+      if (isH) hi[i] = b[j].high;
+      if (isL) lo[i] = b[j].low;
+    }
+    return { hi, lo };
+  });
+}
+/**
+ * Order blocks: a displacement candle (body at least `k` ATR) that closes beyond the highest high
+ * (lowest low) of the last 12 hours breaks structure; the last opposite-coloured candle before it
+ * is the order block. Marked on the displacement candle: the zone [low, high] of that candle.
+ */
+function orderBlocks(c: Ctx, k: number): { bull: ({ lo: number; hi: number } | null)[]; bear: ({ lo: number; hi: number } | null)[] } {
+  return cached(c, `ob${k}`, () => {
+    const b = c.m.bars;
+    const A = atr14(c);
+    const n = H(c, 12);
+    const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+    const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+    const bull: ({ lo: number; hi: number } | null)[] = new Array(b.length).fill(null);
+    const bear: ({ lo: number; hi: number } | null)[] = new Array(b.length).fill(null);
+    for (let i = 1; i < b.length; i++) {
+      const a = A[i - 1];
+      if (!(a > 0)) continue;
+      const body = b[i].close - b[i].open;
+      if (body >= k * a && b[i].close > hh[i]) {
+        for (let j = i - 1; j >= Math.max(0, i - 5); j--)
+          if (b[j].close < b[j].open) {
+            bull[i] = { lo: b[j].low, hi: b[j].high };
+            break;
+          }
+      } else if (-body >= k * a && b[i].close < ll[i]) {
+        for (let j = i - 1; j >= Math.max(0, i - 5); j--)
+          if (b[j].close > b[j].open) {
+            bear[i] = { lo: b[j].low, hi: b[j].high };
+            break;
+          }
+      }
+    }
+    return { bull, bear };
+  });
+}
+const WYCKOFF_NOTE = ' A practitioner method (Wyckoff), not a peer-reviewed one: the Lab tests whether it holds on crypto, with costs, on data it never saw.';
+const CANDLE_NOTE = ' Candlestick patterns are practitioner lore (Nison); tests of them are mixed (Caginalp & Laurent found some predictive power): the Lab tests whether this one holds on crypto, with costs, on data it never saw.';
+
 
 export const SIGNALS: SignalDef[] = [
   {
@@ -1404,7 +1470,7 @@ export const SIGNALS: SignalDef[] = [
     family: 'reversion',
     papers: ['crt', 'osler03', 'osler05'],
     rationale: 'A higher-timeframe candle (4-hour or daily) leaves a range. When the next one runs past its high or low and closes back inside, the stops resting beyond were taken and no new buyers (or sellers) followed — price tends to travel to the other side of the range. Stop orders do cluster just beyond highs and lows, and their triggering moves price (Osler).' + CRT_NOTE,
-    grid: { htf: [4, 24], depth: [0, 0.25] },
+    grid: { htf: [4, 24, 168], depth: [0, 0.25], ny: [0, 1], mode: [0, 1] },
     intraday: true,
     exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
     compute: (c, p) => {
@@ -1419,7 +1485,7 @@ export const SIGNALS: SignalDef[] = [
       let cL = Infinity;
       let done = false;
       for (let i = 0; i < b.length; i++) {
-        const v = htfOf(b[i].time, p.htf);
+        const v = htfKey(b[i].time, p.htf, p.ny ?? 0);
         if (v !== u) {
           // a new higher-timeframe candle: the one just finished is the range
           pH = v === u + 1 ? cH : NaN;
@@ -1433,6 +1499,17 @@ export const SIGNALS: SignalDef[] = [
         cL = Math.min(cL, b[i].low);
         const a = A[i];
         if (done || !Number.isFinite(pH) || !(a > 0)) continue;
+        if (p.mode === 1) {
+          // the other style: a close beyond the last candle's range is the expansion — follow it
+          if (b[i].close > pH + p.depth * a) {
+            out[i] = 1;
+            done = true;
+          } else if (b[i].close < pL - p.depth * a) {
+            out[i] = -1;
+            done = true;
+          }
+          continue;
+        }
         // swept above and closed back inside: short toward the low (and the mirror)
         if (cH > pH + p.depth * a && b[i].close < pH && b[i].close > pL) {
           out[i] = -1;
@@ -1444,7 +1521,13 @@ export const SIGNALS: SignalDef[] = [
       }
       return out;
     },
-    describe: (p) => `when a ${p.htf === 24 ? 'day' : `${p.htf}-hour candle`} runs past the last one's high${p.depth ? ` (by ${p.depth} ATR or more)` : ''} and closes back inside its range, sell toward its low (buy after a run below its low)`,
+    describe: (p) => {
+      const k = p.htf === 168 ? 'week' : p.htf === 24 ? 'day' : `${p.htf}-hour candle`;
+      const clock = p.ny ? (p.htf === 168 ? ' (weeks from Monday 00:00 New York)' : p.htf === 24 ? ' (days from midnight New York)' : ' (candles from 01:00, 05:00, 09:00 New York)') : '';
+      return p.mode === 1
+        ? `when a ${k}${clock} closes beyond the last one's high${p.depth ? ` by ${p.depth} ATR or more` : ''}, buy the expansion (sell a close below its low)`
+        : `when a ${k}${clock} runs past the last one's high${p.depth ? ` (by ${p.depth} ATR or more)` : ''} and closes back inside its range, sell toward its low (buy after a run below its low)`;
+    },
   },
   {
     id: 'monday',
@@ -1649,7 +1732,7 @@ export const SIGNALS: SignalDef[] = [
     family: 'reversion',
     papers: ['ict', 'emuw19', 'osler05'],
     rationale: "Power of three: the Asian hours build a range (accumulation), London makes a false run beyond one side of it (the manipulation, or Judas swing) and the day's real move goes the other way (distribution). When the London run closes back inside the Asian range, trade against it into New York." + ICT_NOTE,
-    grid: { depth: [0, 0.2] },
+    grid: { depth: [0, 0.2], mode: [0, 1] },
     intraday: true,
     exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 14, onFlip: false },
     compute: (c, p) => {
@@ -1682,6 +1765,17 @@ export const SIGNALS: SignalDef[] = [
         if (h >= 11 || used || !Number.isFinite(aH)) continue;
         const a = A[i];
         if (!(a > 0)) continue;
+        if (p.mode === 1) {
+          // the London breakout: the first close beyond the Asian range, followed
+          if (b[i].close > aH + p.depth * a) {
+            out[i] = 1;
+            used = true;
+          } else if (b[i].close < aL - p.depth * a) {
+            out[i] = -1;
+            used = true;
+          }
+          continue;
+        }
         if (b[i].high > aH + p.depth * a) up = true;
         if (b[i].low < aL - p.depth * a) dn = true;
         if (up && b[i].close < aH && b[i].close > aL) {
@@ -1694,7 +1788,483 @@ export const SIGNALS: SignalDef[] = [
       }
       return out;
     },
-    describe: (p) => `the Asian hours (00–06 UTC) set a range; when London runs past one side${p.depth ? ` by ${p.depth} ATR or more` : ''} and closes back inside, trade the other way into New York`,
+    describe: (p) =>
+      p.mode === 1
+        ? `the Asian hours (00–06 UTC) set a range; trade London's first close beyond it${p.depth ? ` by ${p.depth} ATR or more` : ''} (06–11 UTC), in its direction`
+        : `the Asian hours (00–06 UTC) set a range; when London runs past one side${p.depth ? ` by ${p.depth} ATR or more` : ''} and closes back inside, trade the other way into New York`,
+  },
+  // ---------- ICT, more of it ----------
+  {
+    id: 'ob',
+    name: 'Order block retest',
+    family: 'trend',
+    papers: ['ict', 'cs04'],
+    rationale: "A displacement that breaks structure leaves its order block — the last opposite-coloured candle before the move, where the large orders were filled. When price comes back to that candle, the rest of the orders are expected to be there: trade in the displacement's direction." + ICT_NOTE,
+    grid: { k: [1, 1.5], age: [24, 72] },
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { bull, bear } = orderBlocks(c, p.k);
+      const maxAge = H(c, p.age);
+      const out = state(b.length);
+      let L: { lo: number; hi: number; at: number } | null = null;
+      let S: { lo: number; hi: number; at: number } | null = null;
+      for (let i = 1; i < b.length; i++) {
+        if (bull[i]) L = { ...bull[i]!, at: i };
+        if (bear[i]) S = { ...bear[i]!, at: i };
+        if (L && i > L.at) {
+          if (i - L.at > maxAge || b[i].close < L.lo) L = null;
+          else if (b[i].low <= L.hi) {
+            out[i] = 1;
+            L = null;
+          }
+        }
+        if (S && i > S.at) {
+          if (i - S.at > maxAge || b[i].close > S.hi) S = null;
+          else if (b[i].high >= S.lo) {
+            out[i] = -1;
+            S = null;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => `after a displacement (a body of ${p.k} ATR or more that breaks the 12-hour high or low), trade the first return to its order block within ${hrs(p.age)}`,
+  },
+  {
+    id: 'breaker',
+    name: 'Breaker block',
+    family: 'reversion',
+    papers: ['ict', 'osler05'],
+    rationale: 'An order block that fails — price closes through it — becomes a breaker: those who bought there are trapped and sell into the first return to it. Short the first rally back into a failed bullish order block (and the mirror).' + ICT_NOTE,
+    grid: { k: [1, 1.5], age: [24, 72] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { bull, bear } = orderBlocks(c, p.k);
+      const maxAge = H(c, p.age);
+      const out = state(b.length);
+      let L: { lo: number; hi: number; at: number; broke: number } | null = null;
+      let S: { lo: number; hi: number; at: number; broke: number } | null = null;
+      for (let i = 1; i < b.length; i++) {
+        if (bull[i]) L = { ...bull[i]!, at: i, broke: -1 };
+        if (bear[i]) S = { ...bear[i]!, at: i, broke: -1 };
+        if (L && i > L.at) {
+          if (i - L.at > maxAge) L = null;
+          else if (L.broke < 0) {
+            if (b[i].close < L.lo) L.broke = i;
+          } else if (i > L.broke && b[i].high >= L.lo && b[i].close < L.hi) {
+            out[i] = -1;
+            L = null;
+          }
+        }
+        if (S && i > S.at) {
+          if (i - S.at > maxAge) S = null;
+          else if (S.broke < 0) {
+            if (b[i].close > S.hi) S.broke = i;
+          } else if (i > S.broke && b[i].low <= S.hi && b[i].close > S.lo) {
+            out[i] = 1;
+            S = null;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => `an order block (displacement of ${p.k} ATR) that price closes through becomes a breaker: trade against it on the first return, within ${hrs(p.age)}`,
+  },
+  {
+    id: 'ifvg',
+    name: 'Inversion fair value gap',
+    family: 'reversion',
+    papers: ['ict', 'cs04'],
+    rationale: 'A fair value gap that price closes straight through has failed: the imbalance has been overwhelmed by the other side, and the gap now acts the other way round — support turned resistance. Trade the first retest of the inverted gap.' + ICT_NOTE,
+    grid: { k: [0.3, 0.6], age: [12, 48] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { bull, bear } = fvgs(c, p.k);
+      const maxAge = H(c, p.age);
+      const out = state(b.length);
+      // a bullish gap closed through becomes a bearish zone, and the mirror
+      let up: { lo: number; hi: number; at: number; inv: number } | null = null;
+      let dn: { lo: number; hi: number; at: number; inv: number } | null = null;
+      for (let i = 2; i < b.length; i++) {
+        if (Number.isFinite(bull[i])) up = { lo: bull[i], hi: b[i].low, at: i, inv: -1 };
+        if (Number.isFinite(bear[i])) dn = { lo: b[i].high, hi: bear[i], at: i, inv: -1 };
+        if (up && i > up.at) {
+          if (i - up.at > maxAge) up = null;
+          else if (up.inv < 0) {
+            if (b[i].close < up.lo) up.inv = i;
+          } else if (i > up.inv && b[i].high >= up.lo && b[i].close < up.hi) {
+            out[i] = -1;
+            up = null;
+          }
+        }
+        if (dn && i > dn.at) {
+          if (i - dn.at > maxAge) dn = null;
+          else if (dn.inv < 0) {
+            if (b[i].close > dn.hi) dn.inv = i;
+          } else if (i > dn.inv && b[i].low <= dn.hi && b[i].close > dn.lo) {
+            out[i] = 1;
+            dn = null;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => `a fair value gap (${p.k} ATR or wider) that price closes through flips sides: trade the first retest of it the other way, within ${hrs(p.age)}`,
+  },
+  {
+    id: 'ote',
+    name: 'Optimal trade entry (62–79 % retracement)',
+    family: 'trend',
+    papers: ['ict', 'osler03'],
+    rationale: "After an impulse to a new high, ICT buys the pullback into the 62–79 % retracement of the leg (the 'optimal trade entry', a Fibonacci zone) for the leg to resume; the mirror after a new low." + ICT_NOTE,
+    grid: { lookback: [24, 72], k: [2, 4] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 36, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const out = state(b.length);
+      let up: { hi: number; lo: number; at: number } | null = null;
+      let dn: { hi: number; lo: number; at: number } | null = null;
+      for (let i = n; i < b.length; i++) {
+        const a = A[i];
+        if (!(a > 0)) continue;
+        // a new high: the leg runs from the lowest low of the look-back to it
+        if (b[i].high > hh[i] && b[i].high - ll[i] >= p.k * a) up = { hi: b[i].high, lo: ll[i], at: i };
+        if (b[i].low < ll[i] && hh[i] - b[i].low >= p.k * a) dn = { hi: hh[i], lo: b[i].low, at: i };
+        if (up && i > up.at) {
+          const leg = up.hi - up.lo;
+          if (i - up.at > n || b[i].low < up.lo || b[i].high > up.hi) up = null;
+          else if (b[i].low <= up.hi - 0.62 * leg && b[i].close >= up.hi - 0.79 * leg) {
+            out[i] = 1;
+            up = null;
+          }
+        }
+        if (dn && i > dn.at) {
+          const leg = dn.hi - dn.lo;
+          if (i - dn.at > n || b[i].high > dn.hi || b[i].low < dn.lo) dn = null;
+          else if (b[i].high >= dn.lo + 0.62 * leg && b[i].close <= dn.lo + 0.79 * leg) {
+            out[i] = -1;
+            dn = null;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => `after an impulse of ${p.k} ATR or more to a new ${hrs(p.lookback)} high, buy the pullback into its 62–79 % retracement (sell the mirror after a new low)`,
+  },
+  {
+    id: 'eqhl',
+    name: 'Equal highs and lows swept',
+    family: 'reversion',
+    papers: ['ict', 'osler03', 'osler05'],
+    rationale: 'Two swing highs at (nearly) the same price are an obvious pool of stops — ICT calls them engineered liquidity. A run above both that closes back below took the stops and found nobody: trade the reversal (and the mirror at equal lows).' + ICT_NOTE,
+    grid: { lookback: [24, 72], tol: [0.1, 0.25] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const n = H(c, p.lookback);
+      const { hi, lo } = pivots(c, 2);
+      const out = state(b.length);
+      const hs: [number, number][] = [];
+      const ls: [number, number][] = [];
+      let sh: number[] = [];
+      let sl: number[] = [];
+      let dirty = false;
+      for (let i = 0; i < b.length; i++) {
+        const before = hs.length + ls.length;
+        if (Number.isFinite(hi[i])) hs.push([i, hi[i]]);
+        if (Number.isFinite(lo[i])) ls.push([i, lo[i]]);
+        let gone = 0;
+        while (hs.length && hs[0][0] < i - n) gone += hs.shift() ? 1 : 0;
+        while (ls.length && ls[0][0] < i - n) gone += ls.shift() ? 1 : 0;
+        if (gone || hs.length + ls.length !== before) dirty = true;
+        const a = A[i];
+        if (!(a > 0)) continue;
+        // the highest pair of near-equal highs, and the lowest pair of near-equal lows, in the window:
+        // sorted, the best pair is always two neighbours, so one pass finds it (fast on 15-minute candles)
+        if (dirty) {
+          sh = hs.map((x) => x[1]).sort((x, y) => x - y);
+          sl = ls.map((x) => x[1]).sort((x, y) => x - y);
+          dirty = false;
+        }
+        let poolH = NaN;
+        for (let x = sh.length - 1; x > 0; x--)
+          if (sh[x] - sh[x - 1] <= p.tol * a) {
+            poolH = sh[x];
+            break;
+          }
+        let poolL = NaN;
+        for (let x = 0; x + 1 < sl.length; x++)
+          if (sl[x + 1] - sl[x] <= p.tol * a) {
+            poolL = sl[x];
+            break;
+          }
+        if (Number.isFinite(poolH) && b[i].high > poolH && b[i].close < poolH) {
+          out[i] = -1;
+          hs.length = 0;
+          dirty = true;
+        } else if (Number.isFinite(poolL) && b[i].low < poolL && b[i].close > poolL) {
+          out[i] = 1;
+          ls.length = 0;
+          dirty = true;
+        }
+      }
+      return out;
+    },
+    describe: (p) => `two swing highs within ${p.tol} ATR of each other in the last ${hrs(p.lookback)} are a pool of stops: after a run above both that closes back below, sell (buy the mirror at equal lows)`,
+  },
+  {
+    id: 'nyrev',
+    name: 'New York reversal of the London range',
+    family: 'reversion',
+    papers: ['ict', 'emuw19', 'osler05'],
+    rationale: "London (02:00–07:00 New York) sets the day's range; New York (08:00–11:00) often runs one side of it and turns — the London high or low is the liquidity it was after. Fade a New York run that closes back inside the London range, or (the other style) follow a close beyond it." + ICT_NOTE,
+    grid: { mode: [0, 1] },
+    intraday: true,
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 10, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const out = state(b.length);
+      let day = NaN;
+      let lH = -Infinity;
+      let lL = Infinity;
+      let up = false;
+      let dn = false;
+      let used = false;
+      for (let i = 0; i < b.length; i++) {
+        const t = b[i].time;
+        const d = Math.floor((t / 3_600_000 + nyOffset(t)) / 24);
+        const h = nyHour(t);
+        if (d !== day) {
+          day = d;
+          lH = -Infinity;
+          lL = Infinity;
+          up = dn = used = false;
+        }
+        if (h >= 2 && h < 7) {
+          lH = Math.max(lH, b[i].high);
+          lL = Math.min(lL, b[i].low);
+          continue;
+        }
+        if (h < 8 || h >= 11 || used || !Number.isFinite(lH)) continue;
+        if (p.mode === 0) {
+          if (b[i].high > lH) up = true;
+          if (b[i].low < lL) dn = true;
+          if (up && b[i].close < lH && b[i].close > lL) {
+            out[i] = -1;
+            used = true;
+          } else if (dn && b[i].close > lL && b[i].close < lH) {
+            out[i] = 1;
+            used = true;
+          }
+        } else if (b[i].close > lH) {
+          out[i] = 1;
+          used = true;
+        } else if (b[i].close < lL) {
+          out[i] = -1;
+          used = true;
+        }
+      }
+      return out;
+    },
+    describe: (p) => (p.mode === 0 ? 'London (02:00–07:00 New York) sets a range; when New York (08:00–11:00) runs past one side and closes back inside, trade the other way' : 'London (02:00–07:00 New York) sets a range; trade the first New York close beyond it (08:00–11:00), in its direction'),
+  },
+  {
+    id: 'smt',
+    name: 'SMT divergence against bitcoin',
+    family: 'relative',
+    papers: ['ict', 'ltw22'],
+    rationale: "ICT's smart money technique: correlated markets should make new highs and lows together. When the coin closes at a new low and bitcoin does not, the coin's low was a stop run that the market did not confirm — buy (and the mirror). Crypto returns are driven by a common market factor, so a split is informative." + ICT_NOTE,
+    grid: { lookback: [24, 72] },
+    needsBench: true,
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const out = state(b.length);
+      const bm = benchFilled(c);
+      if (!bm) return out;
+      const n = H(c, p.lookback);
+      const cl = close(c);
+      const lo = cached(c, `clo${n}`, () => extremePrev(cl, n, -1));
+      const hi = cached(c, `chi${n}`, () => extremePrev(cl, n, 1));
+      const blo = cached(c, `blo${n}`, () => extremePrev(bm!, n, -1));
+      const bhi = cached(c, `bhi${n}`, () => extremePrev(bm!, n, 1));
+      for (let i = n; i < b.length; i++) {
+        if (!Number.isFinite(bm[i]) || !Number.isFinite(lo[i]) || !Number.isFinite(blo[i])) continue;
+        if (cl[i] < lo[i] && bm[i] > blo[i]) out[i] = 1;
+        else if (cl[i] > hi[i] && bm[i] < bhi[i]) out[i] = -1;
+      }
+      return out;
+    },
+    describe: (p) => `when the coin closes at a new ${hrs(p.lookback)} low and bitcoin does not, buy (sell when the coin makes a new high that bitcoin does not)`,
+  },
+  // ---------- price action ----------
+  {
+    id: 'insidebar',
+    name: 'Inside bar breakout',
+    family: 'breakout',
+    papers: ['cra90', 'cl98'],
+    rationale: 'A candle inside the one before it (lower high, higher low) is the market pausing; the break of the mother candle shows who won. Range contraction before expansion is the basis of Crabel’s short-term patterns.' + CANDLE_NOTE,
+    grid: { n: [1, 2] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 12, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const out = state(b.length);
+      for (let i = p.n + 1; i < b.length; i++) {
+        const m = b[i - p.n - 1];
+        let inside = true;
+        for (let j = i - p.n; j < i; j++) if (!(b[j].high <= m.high && b[j].low >= m.low)) inside = false;
+        if (!inside) continue;
+        if (b[i].close > m.high) out[i] = 1;
+        else if (b[i].close < m.low) out[i] = -1;
+      }
+      return out;
+    },
+    describe: (p) => `after ${p.n === 1 ? 'an inside candle' : `${p.n} inside candles`}, trade the first close beyond the mother candle, in its direction`,
+  },
+  {
+    id: 'engulf',
+    name: 'Engulfing candle at an extreme',
+    family: 'reversion',
+    papers: ['cl98', 'nis91'],
+    rationale: "A candle whose body swallows the one before it, at the lowest point of recent days, shows the sellers' push absorbed and reversed in one candle — a classic reversal (and the mirror at a high)." + CANDLE_NOTE,
+    grid: { lookback: [24, 72] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const out = state(b.length);
+      for (let i = 2; i < b.length; i++) {
+        const a = b[i - 1];
+        const x = b[i];
+        const lowHere = Math.min(a.low, x.low) <= ll[i - 1];
+        const highHere = Math.max(a.high, x.high) >= hh[i - 1];
+        if (lowHere && a.close < a.open && x.close > x.open && x.close >= a.open && x.open <= a.close) out[i] = 1;
+        else if (highHere && a.close > a.open && x.close < x.open && x.close <= a.open && x.open >= a.close) out[i] = -1;
+      }
+      return out;
+    },
+    describe: (p) => `a candle whose body engulfs the one before, at the lowest low of the last ${hrs(p.lookback)}: buy (the mirror at the high: sell)`,
+  },
+  {
+    id: 'pinbar',
+    name: 'Pin bar rejection',
+    family: 'reversion',
+    papers: ['cl98', 'nis91', 'osler05'],
+    rationale: 'A candle with a long tail through the recent low and a small body near its high (a hammer, or pin bar) shows price pushed into the stops and rejected in the same candle — buy (and the mirror at a high).' + CANDLE_NOTE,
+    grid: { r: [2, 3], lookback: [24, 72] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const out = state(b.length);
+      for (let i = 1; i < b.length; i++) {
+        const x = b[i];
+        const body = Math.abs(x.close - x.open);
+        const range = x.high - x.low;
+        if (!(range > 0)) continue;
+        const lower = Math.min(x.open, x.close) - x.low;
+        const upper = x.high - Math.max(x.open, x.close);
+        if (x.low < ll[i] && lower >= p.r * Math.max(body, range * 0.05) && lower >= 0.6 * range) out[i] = 1;
+        else if (x.high > hh[i] && upper >= p.r * Math.max(body, range * 0.05) && upper >= 0.6 * range) out[i] = -1;
+      }
+      return out;
+    },
+    describe: (p) => `a candle that pokes below the ${hrs(p.lookback)} low with a tail ${p.r}× its body and closes near its high: buy (the mirror at the high)`,
+  },
+  {
+    id: 'nr',
+    name: 'Narrow range breakout (NR4 / NR7)',
+    family: 'breakout',
+    papers: ['cra90'],
+    rationale: 'The narrowest candle of the last four (NR4) or seven (NR7) is volatility at its quietest — Crabel’s range-contraction setup. Quiet is followed by movement: trade the first close beyond the narrow candle.',
+    grid: { n: [4, 7] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 12, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const out = state(b.length);
+      let at = -1;
+      for (let i = p.n; i < b.length; i++) {
+        const r = b[i - 1].high - b[i - 1].low;
+        let narrow = r > 0;
+        for (let j = i - p.n; j < i - 1; j++) if (b[j].high - b[j].low <= r) narrow = false;
+        if (narrow) at = i - 1;
+        if (at >= 0 && i - at <= 3) {
+          if (b[i].close > b[at].high) {
+            out[i] = 1;
+            at = -1;
+          } else if (b[i].close < b[at].low) {
+            out[i] = -1;
+            at = -1;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => `after the narrowest candle of the last ${p.n} (NR${p.n}), trade the first close beyond it within three candles`,
+  },
+  {
+    id: 'round',
+    name: 'Round-number rejection',
+    family: 'reversion',
+    papers: ['osler03'],
+    rationale: 'Take-profit orders cluster at round numbers, and trends tend to stall and reverse there (Osler, on currency order books). A candle that pokes through a round level and closes back on the near side is fading against that wall of orders.',
+    grid: { m: [5, 10] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const out = state(b.length);
+      for (let i = 0; i < b.length; i++) {
+        const x = b[i];
+        if (!(x.close > 0)) continue;
+        // the round step for this price: e.g. 500 or 1,000 for bitcoin near 60,000
+        const step = 10 ** (Math.floor(Math.log10(x.close)) - 2) * p.m;
+        const above = Math.ceil(Math.max(x.open, x.close) / step) * step;
+        const below = Math.floor(Math.min(x.open, x.close) / step) * step;
+        if (x.high > above && x.close < above && x.open < above) out[i] = -1;
+        else if (x.low < below && x.close > below && x.open > below) out[i] = 1;
+      }
+      return out;
+    },
+    describe: (p) => `a candle that pokes through a round number (steps of ${p.m} in the price's third digit) and closes back below it: sell (the mirror below: buy)`,
+  },
+  {
+    id: 'spring',
+    name: 'Wyckoff spring and upthrust',
+    family: 'reversion',
+    papers: ['wyck', 'osler05'],
+    rationale: "Wyckoff's spring: after a tight trading range (accumulation), price dips below the range's low, takes the stops, and closes back inside — the last shake-out before the markup. The upthrust is its mirror at the top of a range (distribution)." + WYCKOFF_NOTE,
+    grid: { lookback: [24, 72], w: [4, 8] },
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 36, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const out = state(b.length);
+      for (let i = n; i < b.length; i++) {
+        const a = A[i - 1];
+        if (!(a > 0) || !Number.isFinite(hh[i])) continue;
+        // a tight range first: no wider than w ATR
+        if (hh[i] - ll[i] > p.w * a) continue;
+        if (b[i].low < ll[i] && b[i].close > ll[i]) out[i] = 1;
+        else if (b[i].high > hh[i] && b[i].close < hh[i]) out[i] = -1;
+      }
+      return out;
+    },
+    describe: (p) => `after a range no wider than ${p.w} ATR over ${hrs(p.lookback)}, buy a dip below its low that closes back inside (a spring); sell the mirror at its high (an upthrust)`,
   },
 ];
 
@@ -1951,10 +2521,10 @@ export const FILTERS: FilterDef[] = [
     name: 'ICT kill zone',
     papers: ['ict', 'emuw19'],
     rationale: "ICT's kill zones are the hours of the New York clock when the big sessions open and price is delivered: London 02:00–05:00, New York 07:00–10:00 and the afternoon 13:30–16:00. Outside them signals are more often noise. Crypto's volume does concentrate in the European and US hours (Eross et al.)." + ICT_NOTE,
-    grid: { z: [0, 1, 2, 3] },
+    grid: { z: [0, 1, 2, 3, 4] },
     compute: (c, p) => {
       const a = allow(c.m.bars.length);
-      const zones: [number, number][] = p.z === 0 ? [[2, 5]] : p.z === 1 ? [[7, 10]] : p.z === 2 ? [[13.5, 16]] : [[2, 5], [7, 10], [13.5, 16]];
+      const zones: [number, number][] = p.z === 0 ? [[2, 5]] : p.z === 1 ? [[7, 10]] : p.z === 2 ? [[13.5, 16]] : p.z === 4 ? [[20, 24]] : [[2, 5], [7, 10], [13.5, 16]];
       c.m.bars.forEach((b, i) => {
         const h = nyHour(b.time);
         const ok = zones.some(([x, y]) => h >= x && h < y);
@@ -1962,7 +2532,28 @@ export const FILTERS: FilterDef[] = [
       });
       return a;
     },
-    describe: (p) => (p.z === 0 ? 'only in the London kill zone (02:00–05:00 New York)' : p.z === 1 ? 'only in the New York kill zone (07:00–10:00 New York)' : p.z === 2 ? 'only in the afternoon kill zone (13:30–16:00 New York)' : 'only in the ICT kill zones (London, New York morning and afternoon)'),
+    describe: (p) => (p.z === 0 ? 'only in the London kill zone (02:00–05:00 New York)' : p.z === 1 ? 'only in the New York kill zone (07:00–10:00 New York)' : p.z === 2 ? 'only in the afternoon kill zone (13:30–16:00 New York)' : p.z === 4 ? 'only in the Asian kill zone (20:00–24:00 New York)' : 'only in the ICT kill zones (London, New York morning and afternoon)'),
+  },
+  {
+    id: 'macro',
+    name: 'ICT macro windows',
+    papers: ['ict', 'emuw19'],
+    rationale: "ICT's macros are short windows on the New York clock when, he teaches, the algorithm seeks liquidity: 02:33–03:00, 04:03–04:30, 08:50–09:10, 09:50–10:10, 10:50–11:10, 11:50–12:10, 13:10–13:40 and 15:15–15:45. A candle that overlaps one of them is allowed; on hourly candles this is close to the whole hour." + ICT_NOTE,
+    grid: { set: [0, 1] },
+    compute: (c, p) => {
+      const a = allow(c.m.bars.length);
+      // 0: every macro; 1: only the New York morning ones (08:50 to 11:10)
+      const all: [number, number][] = [[2 + 33 / 60, 3], [4 + 3 / 60, 4.5], [8 + 50 / 60, 9 + 10 / 60], [9 + 50 / 60, 10 + 10 / 60], [10 + 50 / 60, 11 + 10 / 60], [11 + 50 / 60, 12 + 10 / 60], [13 + 10 / 60, 13 + 40 / 60], [15.25, 15.75]];
+      const ws = p.set === 1 ? all.slice(2, 5) : all;
+      c.m.bars.forEach((b, i) => {
+        const h0 = nyHour(b.time);
+        const h1 = h0 + c.m.tfH;
+        const ok = ws.some(([x, y]) => h0 < y && h1 > x);
+        a.long[i] = a.short[i] = ok ? 1 : 0;
+      });
+      return a;
+    },
+    describe: (p) => (p.set === 1 ? 'only in the New York morning macros (08:50–09:10, 09:50–10:10, 10:50–11:10 New York)' : 'only in the ICT macro windows of the New York clock'),
   },
   {
     id: 'pd',
@@ -1991,26 +2582,46 @@ export const FILTERS: FilterDef[] = [
     name: 'Bias from the open (day or week)',
     papers: ['crt', 'ict', 'cp19'],
     rationale: "Where price stands against today's (or this week's) opening price is the simplest higher-timeframe bias in ICT and Candle Range Theory: above the open the candle is bullish so far, below it bearish. Trade only with the candle that is forming." + CRT_NOTE,
-    grid: { anchor: [0, 1, 2] },
+    grid: { anchor: [0, 1, 2, 3, 4] },
     compute: (c, p) => {
       const b = c.m.bars;
       const a = allow(b.length);
       let key = NaN;
       let open = NaN;
+      // 3 and 4: the colour of the last finished day (week) — the candle Candle Range Theory reads its bias from
+      let lastClose = NaN;
+      let prevDir = 0;
       for (let i = 0; i < b.length; i++) {
         const t = b[i].time;
-        // 0: the UTC day, 1: the week from Monday 00:00 UTC, 2: the day from midnight in New York
-        const k = p.anchor === 1 ? Math.floor((t - 4 * 86_400_000) / (7 * 86_400_000)) : p.anchor === 2 ? Math.floor((t / 3_600_000 + nyOffset(t)) / 24) : Math.floor(t / 86_400_000);
+        // 0 and 3: the UTC day, 1 and 4: the week from Monday 00:00 UTC, 2: the day from midnight in New York
+        const k = p.anchor === 1 || p.anchor === 4 ? Math.floor((t - 4 * 86_400_000) / (7 * 86_400_000)) : p.anchor === 2 ? Math.floor((t / 3_600_000 + nyOffset(t)) / 24) : Math.floor(t / 86_400_000);
         if (k !== key) {
+          // the candle just finished: its direction (only if it was the one right before)
+          prevDir = k === key + 1 && Number.isFinite(open) ? sgn(lastClose - open) : 0;
           key = k;
           open = b[i].open;
         }
-        a.long[i] = b[i].close > open ? 1 : 0;
-        a.short[i] = b[i].close < open ? 1 : 0;
+        lastClose = b[i].close;
+        if (p.anchor >= 3) {
+          a.long[i] = prevDir > 0 ? 1 : 0;
+          a.short[i] = prevDir < 0 ? 1 : 0;
+        } else {
+          a.long[i] = b[i].close > open ? 1 : 0;
+          a.short[i] = b[i].close < open ? 1 : 0;
+        }
       }
       return a;
     },
-    describe: (p) => (p.anchor === 1 ? "only with the week's candle: longs above the weekly open, shorts below" : p.anchor === 2 ? "only with the day's candle from midnight New York: longs above that open, shorts below" : "only with the day's candle: longs above the daily open (00:00 UTC), shorts below"),
+    describe: (p) =>
+      p.anchor === 3
+        ? "only with yesterday's candle: longs after a green day, shorts after a red one"
+        : p.anchor === 4
+          ? "only with last week's candle: longs after a green week, shorts after a red one"
+          : p.anchor === 1
+            ? "only with the week's candle: longs above the weekly open, shorts below"
+            : p.anchor === 2
+              ? "only with the day's candle from midnight New York: longs above that open, shorts below"
+              : "only with the day's candle: longs above the daily open (00:00 UTC), shorts below",
   },
 ];
 

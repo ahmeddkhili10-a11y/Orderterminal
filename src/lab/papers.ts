@@ -27,6 +27,13 @@ export const PAPERS: Record<string, Paper> = {
     venue: 'Practitioner method popularised among retail traders (c. 2023) — not peer-reviewed',
     finding: 'A higher-timeframe candle’s high and low frame the next: a run past one side that closes back inside tends to travel to the other. Unverified: the Lab tests it.',
   },
+  wyck: {
+    id: 'wyck',
+    cite: 'Wyckoff (1931); Pruden (2007)',
+    title: 'The Richard D. Wyckoff method of trading and investing in stocks; The three skills of top trading',
+    venue: 'Practitioner method (course, 1931; book, 2007) — not peer-reviewed',
+    finding: 'Ranges are accumulation or distribution by large operators; a false break of the range (the spring, or upthrust) shakes out the last weak holders before the markup (or markdown). Unverified: the Lab tests it.',
+  },
   osler03: {
     id: 'osler03',
     cite: 'Osler (2003)',

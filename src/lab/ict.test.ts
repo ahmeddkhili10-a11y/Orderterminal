@@ -143,13 +143,147 @@ describe('the edge finder breeds them, and shows what an edge is worth sized up'
       f.strategies.forEach((x) => seen.add(x));
       f.models.forEach((x) => models.add(x));
     }
-    for (const id of ['crt4', 'crtd', 'sweep', 'fvg', 'mss', 'judas', 'monday']) expect(seen.has(id)).toBe(true);
-    for (const id of ['kz', 'pd', 'bias-day']) expect(models.has(id)).toBe(true);
+    for (const id of ['crt4', 'crtd', 'sweep', 'fvg', 'mss', 'judas', 'monday', 'crt4ny', 'crt-break', 'london-break', 'nyrev', 'ob', 'breaker', 'ote', 'eqhl', 'smt', 'insidebar', 'engulf', 'pinbar', 'nr7', 'round', 'spring']) expect(seen.has(id)).toBe(true);
+    for (const id of ['kz', 'pd', 'bias-day', 'kz-london', 'bias-yday']) expect(models.has(id)).toBe(true);
     // a steady 9 % a year with a 0.8 % worst drop: 5× (the cap) for 45 % with a 4 % drop
     const a = sizedUp(0.09, 0.008);
     expect([a.lev, a.ret, a.maxDD].map((x) => Math.round(x * 1e9) / 1e9)).toEqual([5, 0.45, 0.04]);
     // a jumpy 30 % with a 30 % drop: halved to a 15 % drop
     const b = sizedUp(0.3, 0.3);
     expect([b.lev, b.ret, b.maxDD].map((x) => Math.round(x * 1e9) / 1e9)).toEqual([0.5, 0.15, 0.15]);
+  });
+});
+
+describe('more ICT, Candle Range Theory and price action', () => {
+  const t0 = Date.UTC(2026, 0, 5);
+  it('CRT: the expansion style follows a close beyond the last candle; weekly and New York candles are their own ranges', () => {
+    const rows = [...flat(24), [100, 100.4, 99.6, 100.1], [100.1, 102, 100, 101.8]];
+    const b = bars(t0, rows);
+    // 00:00–03:00 UTC is a 4-hour candle (99.5–100.5); 04:00 is inside the next one; at 25 a close of 101.8 is beyond the last one's high
+    expect(at(SIGNAL_MAP.crt.compute(ctx(b), { htf: 4, depth: 0, mode: 1 }))).toEqual([[25, 1]]);
+    // the sweep style does not fire: it closed outside
+    expect(at(SIGNAL_MAP.crt.compute(ctx(b), { htf: 4, depth: 0, mode: 0 }))).toEqual([]);
+    // a whole week of flat candles, then Monday runs above last week's high and closes back inside
+    const w = bars(t0, [...flat(168), [100, 102, 99.9, 100.2]]);
+    expect(at(SIGNAL_MAP.crt.compute(ctx(w), { htf: 168, depth: 0 }))).toEqual([[168, -1]]);
+    // the New York clock moves the candle edges, so the same bars give different candles
+    const ny = SIGNAL_MAP.crt.compute(ctx(b), { htf: 4, depth: 0, ny: 1, mode: 1 });
+    expect(at(ny).length).toBeLessThanOrEqual(1);
+  });
+
+  it('the London breakout and the New York reversal of London', () => {
+    const day = Date.UTC(2026, 0, 6);
+    const rows = [...flat(6), [100, 100.3, 99.8, 100.1], [100.1, 101.5, 100, 101.2]];
+    const b = bars(day - 20 * HOUR, [...flat(20), ...rows]);
+    expect(at(SIGNAL_MAP.judas.compute(ctx(b), { depth: 0, mode: 1 }))).toEqual([[27, 1]]);
+    // winter: London 02–07 New York is 07–12 UTC; New York 08–11 is 13–16 UTC
+    const nr = flat(24);
+    nr[14] = [100, 101.2, 99.9, 100.1];
+    const nb = bars(day, nr);
+    expect(at(SIGNAL_MAP.nyrev.compute(ctx(nb), { mode: 0 }))).toEqual([[14, -1]]);
+    nr[14] = [100, 101.2, 99.9, 101];
+    expect(at(SIGNAL_MAP.nyrev.compute(ctx(bars(day, nr)), { mode: 1 }))).toEqual([[14, 1]]);
+  });
+
+  it('order blocks: the retest of the last down candle before a displacement is bought; a failed one is a breaker', () => {
+    const rows = [...flat(30), [100, 100.2, 99.4, 99.6], [99.6, 104, 99.6, 103.8], [103.8, 104.2, 103, 103.5], [103.5, 103.6, 100, 100.4]];
+    const b = bars(t0, rows);
+    // candle 31 is a displacement (a 4.2 body, ATR ≈ 1) that closes above the 12-hour high; candle 30 is its order block (99.4–100.2)
+    expect(at(SIGNAL_MAP.ob.compute(ctx(b), { k: 1, age: 24 }))).toEqual([[33, 1]]);
+    // the order block fails (a close below 99.4), then price comes back up into it: sold
+    const br = bars(t0, [...rows.slice(0, 33), [103.5, 103.6, 99, 99.1], [99.1, 99.8, 98.9, 99.5]]);
+    expect(at(SIGNAL_MAP.breaker.compute(ctx(br), { k: 1, age: 24 }))).toEqual([[34, -1]]);
+  });
+
+  it('an inverted fair value gap is traded the other way on its retest', () => {
+    const rows = [...flat(30), [100, 101, 99.8, 100.9], [101, 104, 101, 103.8], [103.8, 105, 103, 104.5], [104.5, 104.6, 99.5, 99.8], [99.8, 101.5, 99.6, 100.2]];
+    const b = bars(t0, rows);
+    // the gap 101–103 (third candle 32) is closed through at 33, then retested from below at 34
+    expect(at(SIGNAL_MAP.ifvg.compute(ctx(b), { k: 0.3, age: 12 }))).toEqual([[34, -1]]);
+  });
+
+  it('the optimal trade entry buys the 62–79 % pullback of a fresh leg', () => {
+    const rows = [...flat(30), [100, 103, 100, 102.8], [102.8, 106, 102.7, 105.8], [105.8, 105.9, 102, 102.4]];
+    const b = bars(t0, rows);
+    // the leg runs 99.5 → 106 (6.5); 62 % back is 101.97, 79 % back is 100.87: a low of 102 does not reach, so nothing yet
+    expect(at(SIGNAL_MAP.ote.compute(ctx(b), { lookback: 24, k: 2 }))).toEqual([]);
+    const b2 = bars(t0, [...rows.slice(0, 32), [105.8, 105.9, 101.5, 101.9]]);
+    expect(at(SIGNAL_MAP.ote.compute(ctx(b2), { lookback: 24, k: 2 }))).toEqual([[32, 1]]);
+  });
+
+  it('equal highs swept, and SMT divergence against bitcoin', () => {
+    const rows = flat(40);
+    rows[10] = [100, 102, 99.8, 100];
+    rows[20] = [100, 102.1, 99.8, 100];
+    rows[30] = [100, 102.6, 99.9, 101.5];
+    const b = bars(t0, rows);
+    expect(at(SIGNAL_MAP.eqhl.compute(ctx(b), { lookback: 24, tol: 0.25 }))).toEqual([[30, -1]]);
+    const coin = bars(t0, [...flat(30), [100, 100, 98, 98.5]]);
+    const m = { coin: 'ETH', tfH: 1, bars: coin, funding: null, bench: Float64Array.from([...Array(30).fill(100), 100.2]) };
+    expect(at(SIGNAL_MAP.smt.compute(ctxOf(m as never), { lookback: 24 }))).toEqual([[30, 1]]);
+  });
+
+  it('inside bars, engulfing, pin bars, narrow ranges, round numbers and the Wyckoff spring', () => {
+    const ib = bars(t0, [...flat(10), [100, 102, 98, 100], [100, 101, 99, 100.5], [100.5, 103, 100, 102.5]]);
+    expect(at(SIGNAL_MAP.insidebar.compute(ctx(ib), { n: 1 }))).toEqual([[12, 1]]);
+    const en = bars(t0, [...flat(30), [100, 100.1, 98.5, 98.8], [98.6, 100.6, 98.4, 100.5]]);
+    expect(at(SIGNAL_MAP.engulf.compute(ctx(en), { lookback: 24 }))).toEqual([[31, 1]]);
+    const pin = bars(t0, [...flat(30), [100, 100.2, 97, 100.1]]);
+    expect(at(SIGNAL_MAP.pinbar.compute(ctx(pin), { r: 2, lookback: 24 }))).toEqual([[30, 1]]);
+    const nrb = bars(t0, [[100, 102, 98, 100], [100, 102, 98, 100], [100, 102, 98, 100], [100, 102, 98, 100], [100, 102, 98, 100], [100, 102, 98, 100], [100, 100.3, 99.8, 100], [100, 101, 99.5, 100.8]]);
+    expect(at(SIGNAL_MAP.nr.compute(ctx(nrb), { n: 7 }))).toEqual([[7, 1]]);
+    // bitcoin near 60,000: round steps of 500 (5 in the third digit)
+    const rd = bars(t0, [[59_800, 60_100, 59_700, 59_900]]);
+    expect(at(SIGNAL_MAP.round.compute(ctx(rd), { m: 5 }))).toEqual([[0, -1]]);
+    const sp = bars(t0, [...flat(30), [100, 100.2, 99, 100.1]]);
+    expect(at(SIGNAL_MAP.spring.compute(ctx(sp), { lookback: 24, w: 4 }))).toEqual([[30, 1]]);
+  });
+
+  it('kill zone in Asia, the macros, and the bias from the last candle', () => {
+    const t = Date.UTC(2026, 0, 15, 0);
+    const b = bars(t, flat(48));
+    const asia = FILTER_MAP.killzone.compute(ctx(b), { z: 4 });
+    // 20:00–24:00 New York is 01:00–05:00 UTC in winter
+    expect([...asia.long].map((x, i) => (x ? i : -1)).filter((i) => i >= 0 && i < 24)).toEqual([1, 2, 3, 4]);
+    const mac = FILTER_MAP.macro.compute(ctx(b), { set: 1 });
+    // hourly candles that overlap 08:50–09:10, 09:50–10:10, 10:50–11:10 New York: 13:00 to 16:00 UTC
+    expect([...mac.long].map((x, i) => (x ? i : -1)).filter((i) => i >= 0 && i < 24)).toEqual([13, 14, 15, 16]);
+    // yesterday green: longs only today
+    const days = bars(t, [...Array.from({ length: 24 }, (_, i) => [100 + i * 0.1, 100.2 + i * 0.1, 99.9 + i * 0.1, 100.1 + i * 0.1]), ...flat(5, 102)]);
+    const by = FILTER_MAP.bias.compute(ctx(days), { anchor: 3 });
+    expect([by.long[25], by.short[25], by.long[10]]).toEqual([1, 0, 0]);
+  });
+
+  it('every new block is in the bot builder, describes itself, cites its sources, and runs fast', () => {
+    const ids = ['ob', 'breaker', 'ifvg', 'ote', 'eqhl', 'nyrev', 'smt', 'insidebar', 'engulf', 'pinbar', 'nr', 'round', 'spring'];
+    for (const id of ids) {
+      const sig = SIGNAL_MAP[id];
+      expect(STRATEGIES.some((s) => s.signal === id)).toBe(true);
+      expect(sig.papers.every((p) => PAPERS[p])).toBe(true);
+      for (const [k, vs] of Object.entries(sig.grid)) expect(sig.describe({ ...Object.fromEntries(Object.entries(sig.grid).map(([a, v]) => [a, v[0]])), [k]: vs[vs.length - 1] }).length).toBeGreaterThan(20);
+    }
+    for (const id of ['ob', 'breaker', 'ifvg', 'ote', 'eqhl', 'nyrev', 'smt']) expect(SIGNAL_MAP[id].rationale).toMatch(/not a peer-reviewed one/);
+    expect(SIGNAL_MAP.spring.rationale).toMatch(/not a peer-reviewed one/);
+    expect(FILTER_MAP.macro.papers.every((p) => PAPERS[p])).toBe(true);
+    // two years of 15-minute candles: every new rule, every setting, in well under a few seconds
+    let s = 11;
+    let p = 100;
+    const n = 70_000;
+    const walk = Array.from({ length: n }, (_, i) => {
+      s = (s * 16807) % 2147483647;
+      const o = p;
+      p *= 1 + (s / 2147483647 - 0.5) * 0.006;
+      return { time: t0 + i * 900_000, open: o, high: Math.max(o, p) * 1.001, low: Math.min(o, p) * 0.999, close: p, volume: 100 };
+    });
+    const c = ctxOf({ coin: 'ETH', tfH: 0.25, bars: walk, funding: null, bench: Float64Array.from(walk, (x) => x.close * 1.01) } as never);
+    const started = performance.now();
+    for (const id of [...ids, 'crt', 'judas']) {
+      const sig = SIGNAL_MAP[id];
+      for (const pr of Object.entries(sig.grid).reduce<Record<string, number>[]>((acc, [k, vs]) => acc.flatMap((x) => vs.map((v) => ({ ...x, [k]: v }))), [{}])) {
+        const out = sig.compute(c, pr);
+        expect(out.length).toBe(n);
+      }
+    }
+    expect(performance.now() - started).toBeLessThan(8000);
   });
 });
