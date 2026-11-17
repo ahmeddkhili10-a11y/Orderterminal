@@ -7,7 +7,7 @@
 // the team that fits together best, what the search has learned and how
 // overfit it is — ready to open in the bot builder or deploy to the crypto
 // swarm, which is the user's call.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { desktop, type FarmView } from "../desktop/bridge";
 import { sendToBot } from "../lab/bridge";
 import {
@@ -66,6 +66,10 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [now, setNow] = useState(Date.now());
+  const listed = useRef<Survivor[]>([]);
+  const onTeamSel = useCallback((id: string) => {
+    if (listed.current.some((x) => x.id === id)) setSel(id);
+  }, []);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(t);
@@ -113,6 +117,7 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
   const kept = farm.kept ?? [];
   const keptIds = new Set(kept.map((x) => x.id));
   const all = [...kept, ...boards.flatMap((b) => b.rows)];
+  listed.current = all;
   const found = all.find((s) => s.id === sel) ?? null;
   if (found) shown.current = found;
   // one that has left the lists since it was picked stays on show until another is clicked
@@ -267,7 +272,7 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
           <TeamPool
             teams={farm.teams!}
             explain={c.explain}
-            onSel={(id) => all.some((x) => x.id === id) && setSel(id)}
+            onSel={onTeamSel}
             onMsg={setMsg}
           />
         ) : (
@@ -318,10 +323,12 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
             {c.explain && (
               <div className="lab-line muted">
                 A survivor’s fresh-data record starts with the vault and carries
-                on into the candles that arrive after it was found. Fewer than 5
-                trades there is incubating, 5 to 14 and in profit is proving, 15
-                or more and in profit is proven; one that loses fades and is
-                dropped — and its kind is not tried again.
+                on into the candles that arrive after it was found. Fewer than 8
+                trades there is incubating; 8 or more and in profit is proving;
+                25 or more, in profit, with a Sharpe of 0.75 or more is proven —
+                and it stays proven while its Sharpe stays above 0.5 and it stays
+                in profit, so one trade either way does not flip it. One that
+                loses fades and is dropped, and its kind is not tried again.
               </div>
             )}
             <div className="pro-section">THE SEARCH ITSELF</div>
@@ -409,16 +416,26 @@ function Funnel({ farm, explain }: { farm: FarmView; explain: boolean }) {
 }
 
 /** how strong the evidence for a survivor is, in a word or two */
+// Each part of the screen redraws only when what it shows changed: the edge finder's state
+// arrives every second and a half, but its lists change at most every 20 seconds.
+const Table = memo(TableView);
+const Detail = memo(
+  DetailView,
+  (a, b) => a.s === b.s && a.rank?.n === b.rank?.n && a.rank?.pace === b.rank?.pace && a.explain === b.explain && a.kept === b.kept && a.onMsg === b.onMsg,
+);
+const TeamPool = memo(TeamPoolView);
+const Fleet = memo(FleetView);
+
 function evidence(s: Survivor): { text: string; tone: string } {
   if (s.stage === "proven")
     return { text: s.sig ? "Proven · significant" : "Proven on fresh data", tone: "up b" };
   if (s.stage === "proving")
-    return { text: s.sig ? "Proving · significant" : "Proving on fresh data", tone: "up" };
+    return { text: s.slip ? "Proving · was proven" : s.sig ? "Proving · significant" : "Proving on fresh data", tone: "up" };
   if (s.sig) return { text: "Significant", tone: "up" };
   return { text: "Candidate", tone: "muted" };
 }
 
-function Table({
+function TableView({
   rows,
   sel,
   onSel,
@@ -511,7 +528,7 @@ function Table({
   );
 }
 
-function Detail({
+function DetailView({
   s,
   rank,
   onMsg,
@@ -638,6 +655,15 @@ function Detail({
         {rank ? `${rank.pace.toUpperCase()} #${rank.n} — ` : "NO LONGER LISTED — "}
         {s.name.toUpperCase()}
       </div>
+      {s.stage === "proven" && s.provenAt ? (
+        <div className="lab-line up" data-proven-since>
+          ✓ Proven on fresh data since {new Date(s.provenAt).toISOString().slice(0, 10)} — it keeps the badge while it stays in profit with a Sharpe above 0.5 there.
+        </div>
+      ) : s.slip ? (
+        <div className="lab-line warn" data-slip>
+          ⚠ Was proven until {new Date(s.slip.at).toISOString().slice(0, 16).replace("T", " ")} UTC: {s.slip.why}. It earns the badge back at 25+ trades, in profit, with a Sharpe of 0.75 or more on fresh data.
+        </div>
+      ) : null}
       <div className="lab-grid2">
         <div>
           <ul className="farm-rules">
@@ -934,7 +960,7 @@ function Blocks({ farm, explain }: { farm: FarmView; explain: boolean }) {
 }
 
 /** the team pool: up to five teams to choose from */
-function TeamPool({
+function TeamPoolView({
   teams,
   explain,
   onSel,
@@ -1134,7 +1160,7 @@ function TeamCard({
   );
 }
 
-function Fleet({
+function FleetView({
   fleet,
   top,
   onMsg,

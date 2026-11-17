@@ -202,7 +202,9 @@ export function ReportPanel({ config: c, setConfig }: PanelProps<ReportConfig>) 
   const btc = useKlines(venue, ['BTC'], '1d', 500);
   const tickers = useTickers(venue);
   const news = useNews((s) => s.items);
-  const lab = useLab();
+  // the edge finder's top list and what is deployed (the rest of its state changes every few seconds and is not shown here)
+  const farmTop = useLab((s) => s.farm?.top);
+  const labStatus = useLab((s) => s.status);
   const [q, setQ] = useState('');
   const [tick, setTick] = useState(0);
   const [candle, setCandle] = useState<{ coin: string; at: number; rep: CandleReport | null } | null>(null);
@@ -255,8 +257,8 @@ export function ReportPanel({ config: c, setConfig }: PanelProps<ReportConfig>) 
   };
   const listed = useMemo(() => Array.from(new Set(tickers.rows.map((t) => t.base))).sort(), [tickers.rows]);
   const err = daily.errors[base] || hourly.errors[base];
-  const farmHits = (lab.farm?.top ?? []).filter((s) => s.coins.includes(base));
-  const deployed = (lab.status?.deployed ?? []).filter((d) => d.coins.includes(base));
+  const farmHits = (farmTop ?? []).filter((s) => s.coins.includes(base));
+  const deployed = (labStatus?.deployed ?? []).filter((d) => d.coins.includes(base));
   const loading = (daily.loading || hourly.loading) && !rep;
 
   return (

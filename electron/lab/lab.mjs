@@ -8,7 +8,7 @@
 // carry rule and the crowding filter) is best-effort: Binance USDⓈ-M, then
 // Hyperliquid.
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { STYLE_MAP } from '../../src/lab/flow.ts';
 import { FARM_DEFAULTS } from '../../src/lab/farm.ts';
@@ -101,6 +101,42 @@ const intervalOf = (rows) => {
 /** markets as plain arrays, for a worker */
 const plainMarkets = (byTf) => Object.fromEntries(Object.entries(byTf).map(([tf, ms]) => [tf, ms.map((m) => ({ ...m, funding: m.funding ? Array.from(m.funding) : null }))]));
 
+/**
+ * Candles for a worker thread, packed: six numbers a candle in one block of memory that is
+ * handed over, not copied. Copying hundreds of thousands of candle objects to a thread
+ * holds up the desktop process — and with it every click and scroll in every window —
+ * for a quarter of a second or more; packed, it takes a few milliseconds.
+ */
+export function packMarkets(byTf) {
+  const transfer = [];
+  const markets = Object.fromEntries(
+    Object.entries(byTf).map(([tf, ms]) => [
+      tf,
+      ms.map((m) => {
+        const n = m.bars.length;
+        const packed = new Float64Array(n * 6);
+        for (let i = 0, k = 0; i < n; i++, k += 6) {
+          const b = m.bars[i];
+          packed[k] = b.time;
+          packed[k + 1] = b.open;
+          packed[k + 2] = b.high;
+          packed[k + 3] = b.low;
+          packed[k + 4] = b.close;
+          packed[k + 5] = b.volume;
+        }
+        const funding = m.funding ? Float64Array.from(m.funding) : null;
+        transfer.push(packed.buffer);
+        if (funding) transfer.push(funding.buffer);
+        return { coin: m.coin, tfH: m.tfH, packed, funding };
+      }),
+    ]),
+  );
+  return { markets, transfer };
+}
+
+/** the fields of the edge finder's state the desktop process owns (the rest comes from its thread) */
+const FARM_OWN = ['running', 'starting', 'wanted', 'cfg', 'note', 'error', 'data'];
+
 export class LabService {
   /**
    * @param o {{ ccxt, dir: string, emit: (ch, msg) => void, makeWorker: () => import('node:worker_threads').Worker, makeFarmWorker?: () => import('node:worker_threads').Worker, now?: () => number, fetchTimeout?: number, retryPause?: number, farmSilence?: number, reviveDelays?: number[], dogEvery?: number }}
@@ -123,6 +159,8 @@ export class LabService {
     this.error = null;
     // the edge finder: its own long-lived thread, its last state, and whether it should be running
     this.makeFarmWorker = o.makeFarmWorker ?? null;
+    // how often fresh candles are loaded (tests set it shorter)
+    this.farmEvery = o.farmEvery ?? null;
     const farm = this.read('farm.json', null);
     this.farmSaved = farm?.save ?? null;
     this.farmWanted = farm ? farm.wanted !== false : true;
@@ -160,13 +198,60 @@ export class LabService {
     return { ...base, running: !!this.farmW, starting: this.farmStarting ?? false, wanted: this.farmWanted, cfg: this.farmCfg, note: this.farmNote || base.note, error: this.farmErr || (this.farmW ? '' : base.error), data: this.farmData ?? null };
   }
 
-  farmPush() {
-    this.emit('lab:farm', this.farmState());
+  /**
+   * The screen is told what changed: with `delta` (from the thread), those fields and the
+   * ones this process owns; with nothing, this process's own fields only (a note, the data
+   * tile). Lists that did not change are not sent again, so the screen does not redraw them.
+   * A window that opens asks for the whole picture (lab:farm-state).
+   */
+  farmPush(delta) {
+    const st = this.farmState();
+    if (delta === null || !this.farmSnap) return this.emit('lab:farm', st);
+    const out = Object.fromEntries(FARM_OWN.map((k) => [k, st[k]]));
+    if (delta) for (const k of Object.keys(delta)) if (!FARM_OWN.includes(k)) out[k] = st[k];
+    this.emit('lab:farm', out);
   }
 
-  farmPersist(save) {
-    if (save) this.farmSaved = save;
-    this.write('farm.json', { wanted: this.farmWanted, cfg: this.farmCfg, save: this.farmSaved, state: this.farmSnap });
+  /** the save, as text (it is kept as the thread wrote it: never parsed here unless needed) */
+  farmSavedText() {
+    if (this.farmSaveText == null && this.farmSaved) this.farmSaveText = JSON.stringify(this.farmSaved);
+    return this.farmSaveText ?? null;
+  }
+
+  /** the save, as an object (only when it is to be changed while the farm is stopped) */
+  farmSavedObj() {
+    if (!this.farmSaved && this.farmSaveText) {
+      try {
+        this.farmSaved = JSON.parse(this.farmSaveText);
+      } catch {
+        this.farmSaved = null;
+      }
+    }
+    return this.farmSaved;
+  }
+
+  /**
+   * farm.json: the settings, the last picture and the save. The save arrives as text from
+   * the thread and is written as it is, by a file write that runs off this process's
+   * thread — a save of several megabytes used to be turned into text and written here,
+   * holding every window up each minute. Writes go one after another (farmWriting).
+   */
+  farmPersist(saveText) {
+    if (typeof saveText === 'string') {
+      this.farmSaveText = saveText;
+      this.farmSaved = null;
+    }
+    const head = JSON.stringify({ wanted: this.farmWanted, cfg: this.farmCfg, state: this.farmSnap });
+    const save = this.farmSavedText();
+    const text = save ? `${head.slice(0, -1)},"save":${save}}` : head;
+    const path = join(this.dir, 'farm.json');
+    this.farmWriting = (this.farmWriting ?? Promise.resolve())
+      .then(() => fsp.writeFile(`${path}.tmp`, text))
+      .then(() => fsp.rename(`${path}.tmp`, path))
+      .catch(() => {
+        /* the Lab keeps going without its cache */
+      });
+    return this.farmWriting;
   }
 
   /**
@@ -216,6 +301,13 @@ export class LabService {
             ms.push(last);
             continue;
           }
+          // Hyperliquid did not answer this time: the candles with its prices are kept for up to a day
+          // (switching the recent stretch to another exchange's prices would move every fresh-data record,
+          // and a strategy could lose its proven badge for no reason of its own)
+          if (useHl && last?.hl && !got.hl && got.bars[got.bars.length - 1].time - last.bars[last.bars.length - 1].time < 24 * HOUR) {
+            ms.push(last);
+            continue;
+          }
           let funding = null;
           if (this.cfg.funding && tf !== '1d') {
             try {
@@ -224,7 +316,7 @@ export class LabService {
               /* the funding rules sit this one out */
             }
           }
-          ms.push({ coin, tfH: TF_H[tf], bars: got.bars, funding });
+          ms.push({ coin, tfH: TF_H[tf], bars: got.bars, funding, hl: useHl && !!got.hl });
         } catch (err) {
           error ||= String(err?.message ?? err);
           if (last) {
@@ -267,7 +359,7 @@ export class LabService {
     clearTimeout(this.farmTimer);
     if (!this.farmW && !this.farmHealing) return;
     const fast = this.farmCfg.styles.some((s) => STYLE_MAP[s]?.tfH < 1);
-    const usual = fast ? 15 * 60_000 : 30 * 60_000;
+    const usual = this.farmEvery ?? (fast ? 15 * 60_000 : 30 * 60_000);
     const d = this.farmData;
     const ms = d && !d.ok ? Math.min(usual, [60_000, 120_000, 300_000, 600_000][d.tries - 1] ?? 900_000) : usual;
     if (d) d.nextTryAt = this.now() + ms;
@@ -308,9 +400,10 @@ export class LabService {
         // it has run for ten minutes: whatever stopped it before is behind it
         if (this.farmRestarts && this.now() - this.farmBegan > 600_000) this.farmRestarts = 0;
         if (m.type === 'state' || m.type === 'save') {
-          this.farmSnap = m.state;
-          if (m.type === 'save') this.farmPersist(m.save);
-          this.farmPush();
+          // only what changed comes over (the lists change at most every 20 seconds): merged into the last picture
+          this.farmSnap = m.full || !this.farmSnap ? m.state : { ...this.farmSnap, ...m.state };
+          if (m.type === 'save') this.farmPersist(m.saveText ?? (m.save ? JSON.stringify(m.save) : undefined));
+          this.farmPush(m.full ? null : m.state);
         } else if (m.type === 'stopped') {
           this.farmDone?.();
         } else if (m.type === 'error') {
@@ -327,7 +420,11 @@ export class LabService {
       };
       w.on('error', (err) => died(String(err?.message ?? err)));
       w.on('exit', (code) => died(`its thread stopped (code ${code})`));
-      w.postMessage({ type: 'start', cfg: next, save: this.farmSaved, markets: plainMarkets(r.markets), deployed: this.fleetOf(), costs: this.testCosts() });
+      const packed = packMarkets(r.markets);
+      // the heartbeat: the thread counts up as it works, so a long stretch of work is not taken for a hang
+      const beat = typeof SharedArrayBuffer === 'function' ? new SharedArrayBuffer(4) : null;
+      this.farmBeat = beat ? { arr: new Int32Array(beat), last: 0 } : null;
+      w.postMessage({ type: 'start', cfg: next, saveText: this.farmSavedText(), markets: packed.markets, deployed: this.fleetOf(), costs: this.testCosts(), beat }, packed.transfer);
       this.farmBegan = this.now();
       // fresher candles every so often: the survivors' and the fleet's forward tests move on
       this.farmSchedule();
@@ -345,14 +442,15 @@ export class LabService {
   /** keep a strategy for good, or let it go: the running farm is told; a stopped one has it written into its save */
   farmPin(id, on) {
     if (this.farmW) this.farmW.postMessage({ type: 'pin', id, on });
-    else if (this.farmSaved) {
+    else if (this.farmSavedObj()) {
       const pinned = new Set(this.farmSaved.pinned ?? []);
       if (on) pinned.add(id);
       else pinned.delete(id);
       this.farmSaved = { ...this.farmSaved, pinned: [...pinned] };
+      this.farmSaveText = null;
       if (this.farmSnap) this.farmSnap = { ...this.farmSnap, kept: (this.farmSaved.survivors ?? []).filter((s) => pinned.has(s.id)).map((s) => ({ ...s, daily: undefined, forward: s.forward ? { ...s.forward, daily: undefined } : null })) };
       this.farmPersist();
-      this.farmPush();
+      this.farmPush(null);
     }
     return this.farmState();
   }
@@ -366,7 +464,10 @@ export class LabService {
       const r = await this.farmMarkets(this.farmCfg);
       const was = this.farmData && !this.farmData.ok;
       const d = this.farmHealth(r);
-      if (this.farmW && Object.keys(r.markets).length && (this.farmNewest() > before || (was && d.ok))) this.farmW.postMessage({ type: 'markets', markets: plainMarkets(r.markets) });
+      if (this.farmW && Object.keys(r.markets).length && (this.farmNewest() > before || (was && d.ok))) {
+        const packed = packMarkets(r.markets);
+        this.farmW.postMessage({ type: 'markets', markets: packed.markets }, packed.transfer);
+      }
     } catch (err) {
       this.farmHealth({ markets: {}, stale: ['every market'], missing: [], error: String(err?.message ?? err).slice(0, 300) });
     } finally {
@@ -410,6 +511,19 @@ export class LabService {
     clearInterval(this.farmDog);
     this.farmDog = setInterval(() => {
       const w = this.farmW;
+      // the computer slept (this check itself is far behind its clock): the silence was the sleep, not the farm
+      const t = this.now();
+      if (this.farmDogAt && t - this.farmDogAt > Math.max(3 * this.dogEvery, 90_000)) this.farmSeenAt = t;
+      this.farmDogAt = t;
+      // its heartbeat moved: it is working (a long piece of work), not stuck
+      const b = this.farmBeat;
+      if (b) {
+        const n = Atomics.load(b.arr, 0);
+        if (n !== b.last) {
+          b.last = n;
+          this.farmSeenAt = this.now();
+        }
+      }
       if (!w || this.farmStarting || this.now() - (this.farmSeenAt ?? this.now()) < this.farmSilence) return;
       this.farmW = null;
       clearTimeout(this.farmTimer);
@@ -444,8 +558,8 @@ export class LabService {
       this.farmW = null;
     }
     this.farmStopping = false;
-    this.farmPersist();
-    this.farmPush();
+    await this.farmPersist();
+    this.farmPush(null);
     return this.farmState();
   }
 
@@ -475,6 +589,84 @@ export class LabService {
     const w = this.farmW;
     this.farmW = null;
     if (w) void w.terminate();
+  }
+
+  /** when each coin was first listed on each exchange (read once) */
+  listedOf() {
+    this.listedMem ??= this.read('cache/listed.json', {});
+    return this.listedMem;
+  }
+
+  /**
+   * A candle cache file, kept in memory once read: the edge finder asks for every coin and
+   * every candle size every 15 minutes, and reading and decoding megabytes of candles each
+   * time held the desktop process (and every window) up again and again. The last few
+   * dozen files are kept; the read itself runs off this thread.
+   */
+  async cachedBars(key) {
+    this.barMem ??= new Map();
+    const got = this.barMem.get(key);
+    if (got) {
+      this.barMem.delete(key);
+      this.barMem.set(key, got);
+      return got;
+    }
+    let bars = [];
+    try {
+      bars = JSON.parse(await fsp.readFile(join(this.dir, key), 'utf8'));
+      if (!Array.isArray(bars)) bars = [];
+    } catch {
+      bars = [];
+    }
+    this.remember(key, bars);
+    return bars;
+  }
+
+  remember(key, bars) {
+    this.barMem ??= new Map();
+    this.barMem.delete(key);
+    this.barMem.set(key, bars);
+    while (this.barMem.size > 80) this.barMem.delete(this.barMem.keys().next().value);
+  }
+
+  /**
+   * Writes a cache file only when it changed. When only newer candles were added (the usual
+   * top-up) they are appended to the end of the file; the whole file is written only the
+   * first time or when its history changed. Writes to one file go one after another.
+   */
+  async storeBars(key, before, after) {
+    this.remember(key, after);
+    const n = before.length;
+    const same = after.length === n && (n === 0 || after[n - 1] === before[n - 1]) && after[0] === before[0];
+    if (same) return;
+    const grown = n > 0 && after.length > n && after[0] === before[0] && after[n - 1] === before[n - 1];
+    const path = join(this.dir, key);
+    this.writing ??= new Map();
+    const job = (this.writing.get(key) ?? Promise.resolve()).then(async () => {
+      try {
+        if (grown) {
+          const fh = await fsp.open(path, 'r+');
+          try {
+            const { size } = await fh.stat();
+            const last = Buffer.alloc(1);
+            if (size >= 2) await fh.read(last, 0, 1, size - 1);
+            if (size >= 2 && last.toString() === ']') {
+              await fh.write(`,${JSON.stringify(after.slice(n)).slice(1)}`, size - 1);
+              return;
+            }
+          } finally {
+            await fh.close();
+          }
+        }
+        await fsp.mkdir(join(this.dir, 'cache'), { recursive: true });
+        await fsp.writeFile(`${path}.tmp`, JSON.stringify(after));
+        await fsp.rename(`${path}.tmp`, path);
+      } catch {
+        /* the Lab keeps going without its cache */
+      }
+    });
+    this.writing.set(key, job);
+    await job;
   }
 
   read(name, fallback) {
@@ -562,10 +754,10 @@ export class LabService {
     const order = (source === 'auto' ? SOURCES : o.any ? [source, ...SOURCES.filter((x) => x !== source)] : [source]).filter((x) => x !== o.skip);
     for (const id of order) {
       const key = `cache/${id}-${coin}-${tf}.json`;
-      const cached = this.read(key, []);
+      const cached = await this.cachedBars(key);
       const have = cached.filter((b) => b.time >= since);
       // a coin younger than the history asked for (SOL, DOGE on eight years): its first candle on this exchange, once known
-      const listed = this.read('cache/listed.json', {})[`${id}-${coin}-${tf}`] ?? 0;
+      const listed = this.listedOf()[`${id}-${coin}-${tf}`] ?? 0;
       try {
         const from = have.length && have[0].time <= Math.max(since, listed) + 7 * 24 * HOUR ? have[have.length - 1].time + tfH * HOUR : since;
         const fresh = from < this.now() - tfH * HOUR ? await this.fetchHistory(id, spotSymbol(id, coin), tf, from, need + 50) : [];
@@ -574,14 +766,14 @@ export class LabService {
         const closed = bars.filter((b) => b.time + tfH * HOUR <= this.now());
         if (closed.length < (o.min ?? 600)) throw new Error(`only ${closed.length} candles`);
         // the whole history was asked for and it starts later: that is when the coin was listed here (later refreshes only top it up)
-        if (from === since && closed[0].time > since + 7 * 24 * HOUR) {
-          const all = this.read('cache/listed.json', {});
+        if (from === since && closed[0].time > since + 7 * 24 * HOUR && this.listedOf()[`${id}-${coin}-${tf}`] !== closed[0].time) {
+          const all = this.listedOf();
           all[`${id}-${coin}-${tf}`] = closed[0].time;
           this.write('cache/listed.json', all);
         }
         // the cache keeps the older candles too: a shorter request must not throw away history a longer one will want
         const older = cached.filter((b) => b.time < closed[0].time);
-        this.write(key, older.length ? [...older, ...closed] : closed);
+        await this.storeBars(key, cached, older.length ? [...older, ...closed] : closed);
         return { bars: closed, source: id };
       } catch (err) {
         tried.push(`${id}: ${err?.message ?? err}`);
@@ -639,13 +831,36 @@ export class LabService {
   /** funding the swarm pays: Binance's for the long past, Hyperliquid's own (hourly) from its first record on */
   async hlFunding(coin, since) {
     const [bin, hl] = await Promise.all([
-      this.ccxt.fundingHistory('binanceusdm', `${coin}/USDT:USDT`, since).catch(() => []),
-      this.ccxt.fundingHistory('hyperliquid', `${coin}/USDC:USDC`, since).catch(() => []),
+      this.fundingRows('binanceusdm', `${coin}/USDT:USDT`, since).catch(() => []),
+      this.fundingRows('hyperliquid', `${coin}/USDC:USDC`, since).catch(() => []),
     ]);
     if (hl.length < 20) return bin;
     const hB = intervalOf(bin);
     const hH = intervalOf(hl);
     return [...bin.filter((r) => r.time < hl[0].time).map((r) => ({ ...r, h: hB })), ...hl.map((r) => ({ ...r, h: hH }))];
+  }
+
+  /**
+   * Funding history, kept in memory: the first time the whole stretch is downloaded, after
+   * that only the rows since the last one (years of rows were downloaded again for every
+   * coin and candle size every 15 minutes). Asked again within ten minutes: what is held.
+   */
+  async fundingRows(id, sym, since) {
+    this.fundMem ??= new Map();
+    const key = `${id}|${sym}`;
+    const m = this.fundMem.get(key);
+    const cut = (rows) => rows.filter((r) => r.time >= since);
+    if (m && m.rows.length && (m.from <= since || m.rows[0].time <= since + 9 * HOUR)) {
+      if (this.now() - m.at < 10 * 60_000) return cut(m.rows);
+      const last = m.rows[m.rows.length - 1].time;
+      const more = await this.ccxt.fundingHistory(id, sym, last + 1);
+      const rows = [...m.rows, ...more.filter((r) => r.time > last)];
+      this.fundMem.set(key, { rows, at: this.now(), from: m.from });
+      return cut(rows);
+    }
+    const rows = await this.ccxt.fundingHistory(id, sym, since);
+    if (rows.length) this.fundMem.set(key, { rows, at: this.now(), from: since });
+    return rows;
   }
 
   async funding(coin, since) {
@@ -654,7 +869,7 @@ export class LabService {
       ['hyperliquid', `${coin}/USDC:USDC`],
     ]) {
       try {
-        const rows = await this.ccxt.fundingHistory(id, sym, since);
+        const rows = await this.fundingRows(id, sym, since);
         if (rows.length > 20) return rows;
       } catch {
         /* next source */

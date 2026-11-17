@@ -5,7 +5,7 @@
 // forward-tested on fresh data, and put together as a team.
 import { describe, expect, it } from 'vitest';
 import { checkFlow, buildSpec, FLOW_DEFAULT, type Flow } from './flow';
-import { dailyOf, Farm, farmKey, farmKind, farmNiche, ladderOf, paceIdOf, PACES, scoreOf, STAGES, VAULT, type FarmSave, type Survivor } from './farm';
+import { dailyOf, Farm, farmKey, farmKind, farmNiche, ladderOf, paceIdOf, PACES, scoreOf, slipWhy, STAGES, VAULT, type FarmSave, type Survivor } from './farm';
 import { COSTS } from './backtest';
 import { ctxOf, type Market } from './library';
 import { runAll, withBench } from './research';
@@ -345,6 +345,16 @@ describe('fresh data: forward tests, the ladder and the fleet', () => {
     // a drop a little past its tested one is not the end of it (8 % against 8 % tested); a much deeper one is
     expect(ladderOf(fw(12, 0.04, 0.09))).toBe('proving');
     expect(ladderOf(fw(12, 0.04, 0.2))).toBe('faded');
+    // once proven it is kept while its Sharpe stays above the lower bar (0.5): one trade either way does not flip it
+    const proven = (x: ReturnType<typeof fw>) => ({ ...x, stage: 'proven' as const });
+    expect(ladderOf(fw(30, 0.04, 0.02, 0.6))).toBe('proving');
+    expect(ladderOf(proven(fw(30, 0.04, 0.02, 0.6)))).toBe('proven');
+    // a real slide still takes the badge away, and the reason is said
+    expect(ladderOf(proven(fw(30, 0.04, 0.02, 0.4)))).toBe('proving');
+    expect(slipWhy({ ...fw(30, 0.04, 0.02, 0.4), stage: 'proving' })).toMatch(/Sharpe on fresh data slid to 0\.40, under the 0\.50/);
+    expect(slipWhy({ ...fw(20, 0.04), stage: 'proving' })).toMatch(/20 trades on fresh data — proven needs 25/);
+    // a loss fades it, proven or not
+    expect(ladderOf(proven(fw(30, -0.02)))).toBe('faded');
     // fresh-data results move the score
     const base = { oos: { sharpe: 1.5, trades: 40 } as Survivor['oos'], nudge: { kept: 8, tried: 10 }, beat: 90 };
     expect(scoreOf({ ...base, forward: { bars: 100, trades: 10, ret: 0.05, sharpe: 2, maxDD: 0.02, days: 30 } })).toBeGreaterThan(scoreOf({ ...base, forward: null }));

@@ -6039,6 +6039,9 @@ table.grid.meme-tape td {
   padding: 2px 8px;
   line-height: 1.45;
 }
+.lab-line.warn {
+  color: var(--warn);
+}
 .lab-progress {
   display: flex;
   gap: 10px;

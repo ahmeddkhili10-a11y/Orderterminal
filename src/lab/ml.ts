@@ -9,6 +9,8 @@
 // Both are deterministic for a given seed, small, and serialise to JSON so a
 // deployed strategy carries its trained model with it.
 
+import { beat } from './beat';
+
 export const rngOf = (seed: number) => {
   let s = seed >>> 0 || 1;
   return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
@@ -191,6 +193,7 @@ export function fitForest(X: number[][], y: number[], opts: Partial<ForestOpts> 
   const oobSum = new Float64Array(n);
   const oobCnt = new Uint16Array(n);
   for (let k = 0; k < o.trees; k++) {
+    beat();
     const idx: number[] = [];
     const inBag = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
@@ -391,6 +394,7 @@ export function mlpTrainer(X: number[][], y: number[], opts: Partial<MLPOpts> = 
     const vLoss = nVal ? vl / nVal : trainLoss[trainLoss.length - 1];
     valLoss.push(vLoss);
     epoch++;
+    beat();
     if (vLoss < bestLoss - 1e-5) {
       bestLoss = vLoss;
       best = model();

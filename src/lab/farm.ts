@@ -214,17 +214,17 @@ export const LADDER: { id: Ladder; name: string; plain: string }[] = [
     id: "incubating",
     name: "Incubating",
     plain:
-      "Trading on fresh candles that arrived after it was found: fewer than 5 trades so far.",
+      "Trading on fresh candles that arrived after it was found: fewer than 8 trades so far, or not yet in profit.",
   },
   {
     id: "proving",
     name: "Proving",
-    plain: "5 to 14 trades on fresh data, still making money.",
+    plain: "8 or more trades on fresh data and making money, but not yet 25 trades with a Sharpe of 0.75 or more.",
   },
   {
     id: "proven",
     name: "Proven",
-    plain: "15 or more trades on fresh data, and still making money.",
+    plain: "25 or more trades on fresh data, in profit, with a Sharpe of 0.75 or more. It keeps the badge while its Sharpe stays above 0.5 and it stays in profit.",
   },
   {
     id: "faded",
@@ -270,6 +270,10 @@ export interface Survivor {
   score: number;
   forward: Forward | null;
   stage: Ladder;
+  /** when it was first proven on fresh data */
+  provenAt?: number;
+  /** it was proven and is not any more: when, and why (said on the screen) */
+  slip?: { at: number; why: string };
   summary: string[];
   /** significant on the unseen data after allowing for every bot that reached it (false-discovery rate 10 %): the top five is drawn from these, and from those proven on fresh data */
   sig: boolean;
@@ -678,7 +682,13 @@ export class Farm {
    * of weeks later — and its forward test then carries on into the candles
    * that arrive. As new candles come in the vault moves forward with them.
    */
-  setMarkets(byTf: Record<string, Market[]>) {
+  /**
+   * New candles. The survivors' fresh-data records are read again over them — all at once
+   * (tests), or with `defer`, a slice at a time between bots (forwardSome): on years of
+   * candles with a full board that is a minute or more of work on a fast computer, and the
+   * thread must keep answering while it does it.
+   */
+  setMarkets(byTf: Record<string, Market[]>, o: { defer?: boolean } = {}) {
     this.ctxs = {};
     this.inner = {};
     this.fwd = {};
@@ -728,7 +738,30 @@ export class Farm {
       ),
     );
     this.dataAt = this.now();
-    this.forwardAll();
+    if (o.defer) this.fwdQueue = this.survivors.map((s) => s.id);
+    else this.forwardAll();
+  }
+
+  /** survivors whose fresh-data record is still to be read again over the latest candles */
+  private fwdQueue: string[] = [];
+
+  forwardPending(): number {
+    return this.fwdQueue.length;
+  }
+
+  /** read some of the waiting fresh-data records again, for about `ms`; when the last is done the lists are redrawn */
+  forwardSome(ms = 250): number {
+    if (!this.fwdQueue.length) return 0;
+    const t0 = Date.now();
+    let n = 0;
+    while (this.fwdQueue.length && (n === 0 || Date.now() - t0 < ms)) {
+      const id = this.fwdQueue.shift()!;
+      const s = this.survivors.find((x) => x.id === id);
+      if (s) this.forwardOne(s);
+      n++;
+    }
+    if (!this.fwdQueue.length) this.forwardDone();
+    return n;
   }
 
   /** the styles that can be bred with the candles there are */
@@ -1597,7 +1630,7 @@ export class Farm {
     if (fw && fw.bars > 0) {
       s.forward = fw;
       s.vault = { bars: fw.bars, trades: fw.trades, ret: fw.ret, days: fw.days };
-      s.stage = ladderOf(s);
+      this.restage(s);
       if (s.stage === "faded")
         return {
           ok: false,
@@ -1665,17 +1698,34 @@ export class Farm {
     };
   }
 
+  /** read its stage again; note when it is first proven, and why, if it stops being proven */
+  private restage(s: Survivor) {
+    const prev = s.stage;
+    s.stage = ladderOf(s);
+    if (s.stage === "proven") {
+      s.provenAt ??= this.now();
+      s.slip = undefined;
+    } else if (prev === "proven") s.slip = { at: this.now(), why: slipWhy(s) };
+  }
+
+  private forwardOne(s: Survivor) {
+    const x = this.ctxFor(s.flow);
+    if (!x) return;
+    const fw = this.forwardOf(x.spec, s.tfH, s.coins, s.seenTo);
+    s.forward = fw && fw.bars > 0 ? fw : s.forward;
+    this.restage(s);
+    s.score = scoreOf(s);
+    // a kind that faded on fresh data has had its chance
+    if (s.stage === "faded") this.burn(s.flow);
+  }
+
   private forwardAll() {
-    for (const s of this.survivors) {
-      const x = this.ctxFor(s.flow);
-      if (!x) continue;
-      const fw = this.forwardOf(x.spec, s.tfH, s.coins, s.seenTo);
-      s.forward = fw && fw.bars > 0 ? fw : s.forward;
-      s.stage = ladderOf(s);
-      s.score = scoreOf(s);
-      // a kind that faded on fresh data has had its chance
-      if (s.stage === "faded") this.burn(s.flow);
-    }
+    this.fwdQueue = [];
+    for (const s of this.survivors) this.forwardOne(s);
+    this.forwardDone();
+  }
+
+  private forwardDone() {
     this.prune();
     this.rank();
     this.boardDirty = true;
@@ -2354,7 +2404,7 @@ export class Farm {
     this.pinned = new Set((s.pinned ?? []).filter((id) => this.survivors.some((x) => x.id === id)));
     this.poolIds = (s.teams ?? []).filter((t) => Array.isArray(t) && t.length >= 2);
     // the ladder is read again with today's rules (an earlier version called every vault result proven)
-    for (const x of this.survivors) x.stage = ladderOf(x);
+    for (const x of this.survivors) this.restage(x);
     this.reindex();
     for (const flow of s.population ?? []) {
       if (!STYLE_MAP[flow?.style]) continue;
@@ -2410,7 +2460,18 @@ export const PROVING_TRADES = 8;
  *               0.75 (and at least 40 % of its tested Sharpe) — not every
  *               survivor gets here, so the word means something
  */
-export function ladderOf(s: Pick<Survivor, "forward" | "oos">): Ladder {
+/** the Sharpe on fresh data a strategy needs to become proven, and the lower one it must stay above to remain proven */
+export const provenBar = (s: Pick<Survivor, "oos">) => Math.max(0.75, 0.4 * (s.oos.sharpe || 0));
+export const keepBar = (s: Pick<Survivor, "oos">) => Math.max(0.5, 0.25 * (s.oos.sharpe || 0));
+
+/**
+ * Where a survivor stands on fresh data. Proven is earned at the higher bar and kept
+ * while it stays above a lower one (hysteresis): one more trade that nudges its Sharpe
+ * from 0.76 to 0.74 does not take the badge away and give it back the next day. It loses
+ * it only on a real slide (the Sharpe under the lower bar, or no longer in profit) — and
+ * a loss or a deep drop fades it, as before.
+ */
+export function ladderOf(s: Pick<Survivor, "forward" | "oos"> & { stage?: Ladder }): Ladder {
   const f = s.forward;
   if (!f || f.bars < 2) return "new";
   if (
@@ -2419,13 +2480,19 @@ export function ladderOf(s: Pick<Survivor, "forward" | "oos">): Ladder {
   )
     return "faded";
   if (f.trades < PROVING_TRADES || f.ret < 0) return "incubating";
-  if (
-    f.trades >= PROVEN_TRADES &&
-    f.ret > 0 &&
-    f.sharpe >= Math.max(0.75, 0.4 * (s.oos.sharpe || 0))
-  )
-    return "proven";
+  const bar = s.stage === "proven" ? keepBar(s) : provenBar(s);
+  if (f.trades >= PROVEN_TRADES && f.ret > 0 && f.sharpe >= bar) return "proven";
   return "proving";
+}
+
+/** why a proven strategy is not proven any more, in words */
+export function slipWhy(s: Pick<Survivor, "forward" | "oos" | "stage">): string {
+  const f = s.forward;
+  if (!f) return "its fresh-data record could not be read";
+  if (s.stage === "faded") return f.ret < 0 ? `it lost money on fresh data (${(f.ret * 100).toFixed(1)} % over ${f.trades} trades)` : `it fell ${(f.maxDD * 100).toFixed(0)} % on fresh data, far more than in testing`;
+  if (f.ret <= 0) return `its fresh-data result fell to ${(f.ret * 100).toFixed(1)} %`;
+  if (f.trades < PROVEN_TRADES) return `${f.trades} trades on fresh data — proven needs ${PROVEN_TRADES} (an earlier version asked for fewer)`;
+  return `its Sharpe on fresh data slid to ${f.sharpe.toFixed(2)}, under the ${keepBar(s).toFixed(2)} it must stay above`;
 }
 
 /**

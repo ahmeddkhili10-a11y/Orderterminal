@@ -108,7 +108,8 @@ export function startLabLink() {
       .state()
       .then((farm) => useLab.setState({ farm }))
       .catch(() => {});
-    L.farm.onState((farm) => useLab.setState({ farm }));
+    // only what changed arrives (see farmPush in lab.mjs): merged, so the lists that did not change keep their identity and are not redrawn
+    L.farm.onState((part) => useLab.setState((s) => ({ farm: s.farm ? ({ ...s.farm, ...part } as FarmView) : (part as FarmView) })));
   }
 }
 

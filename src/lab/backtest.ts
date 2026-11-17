@@ -6,6 +6,7 @@
 // charged every bar a perpetual position is open. The result has the trades
 // (in R, the multiple of the risk taken) and a return for every bar, marked
 // to market at the close, for the statistics.
+import { beat } from './beat';
 import { errQuantile } from './garch';
 import type { MetaModel } from './ml';
 import { atr14, barsPerYear, benchBeta, garchOf, garchSigma, EXIT_DEFAULT, FILTER_MAP, SIGNAL_MAP, type Ctx, type ExitSpec, type Params } from './library';
@@ -237,6 +238,7 @@ export function signalOf(c: Ctx, s: StrategySpec): Int8Array {
  * entry signalled at bar i — the meta-labeller's hook.
  */
 export function backtest(c: Ctx, s: StrategySpec, from: number, to: number, costs: Costs = COSTS, gate?: (i: number, side: 1 | -1) => boolean, sigIn?: Int8Array): BTResult {
+  beat();
   const b = c.m.bars;
   const sig = sigIn ?? signalOf(c, s);
   const raw = rawSignal(c, s);

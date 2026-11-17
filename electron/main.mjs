@@ -1437,6 +1437,8 @@ app.whenReady().then(async () => {
         dir: join(app.getPath('userData'), 'lab'),
         makeWorker: () => new Worker(labWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
         makeFarmWorker: () => new Worker(farmWorkerPath, { resourceLimits: { maxOldGenerationSizeMb: 1536 } }),
+        // the smoothness check loads fresh candles every few seconds, to catch any hold-up it causes
+        farmEvery: Number(process.env.NOVUS_FARM_EVERY) || null,
         // the edge finder's engine died: said on the phone (it restarts by itself)
         onTrouble: (why) => care?.error('farm-died', `The edge finder's engine stopped (${String(why).slice(0, 140)}). It restarts by itself from what it last saved.`),
         // tests charge what your live trades really cost, once there are enough of them (never less than assumed)

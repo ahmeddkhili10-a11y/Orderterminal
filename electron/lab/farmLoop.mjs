@@ -2,13 +2,23 @@
 // one bot at a time, posting its state to the desktop process as it goes.
 // Kept apart from the thread wiring (farmWorker.mjs) so tests can drive it.
 import { Farm } from "../../src/lab/farm.ts";
+import { setBeat } from "../../src/lab/beat.ts";
 
+/** candles as they arrive: packed (six numbers a candle, see packMarkets in lab.mjs) or as objects */
+const unpack = (p) => {
+  const bars = new Array(p.length / 6);
+  for (let i = 0, k = 0; i < bars.length; i++, k += 6)
+    bars[i] = { time: p[k], open: p[k + 1], high: p[k + 2], low: p[k + 3], close: p[k + 4], volume: p[k + 5] };
+  return bars;
+};
 const toMarkets = (byTf) =>
   Object.fromEntries(
     Object.entries(byTf ?? {}).map(([tf, ms]) => [
       tf,
       ms.map((m) => ({
-        ...m,
+        coin: m.coin,
+        tfH: m.tfH,
+        bars: m.packed ? unpack(m.packed) : m.bars,
         funding: m.funding ? Float64Array.from(m.funding) : null,
       })),
     ]),
@@ -26,18 +36,46 @@ export function createFarmRunner(post, o = {}) {
   let deployed = [];
   let note = "";
   let looping = null;
+  // the heartbeat the desktop process watches (a counter in memory both threads share)
+  let beats = null;
+  const beat = () => {
+    if (beats) Atomics.add(beats, 0, 1);
+  };
   const state = () => farm?.state(running, note, "");
-  const send = () => farm && post({ type: "state", state: state() });
+  // what was last sent, field by field: only the fields that changed go over, so the desktop
+  // process and the screen do not handle (and redraw) the same lists every second and a half
+  let sent = new Map();
+  const changed = (st, full) => {
+    if (full) sent = new Map();
+    const out = {};
+    for (const [k, v] of Object.entries(st)) {
+      const j = JSON.stringify(v ?? null);
+      if (full || sent.get(k) !== j) {
+        sent.set(k, j);
+        out[k] = v;
+      }
+    }
+    return out;
+  };
+  const send = (full = false) => farm && post({ type: "state", full, state: changed(state(), full) });
+  // the save is turned into text here, in this thread, not in the desktop process
   const save = () =>
-    farm && post({ type: "save", save: farm.save(), state: state() });
+    farm && post({ type: "save", saveText: JSON.stringify(farm.save()), full: false, state: changed(state(), false) });
 
   async function loop() {
     let lastPost = 0;
     let lastSave = now();
     while (running) {
       const t0 = performance.now();
+      beat();
       try {
-        farm.step();
+        // fresh candles arrived: the survivors' fresh-data records are read again first, a slice at a time
+        // (the thread keeps answering; breeding carries on once they are all up to date)
+        const left = farm.forwardPending();
+        if (left) {
+          farm.forwardSome(300);
+          note = farm.forwardPending() ? `Checking ${left} strateg${left === 1 ? "y" : "ies"} against the newest candles…` : "";
+        } else farm.step();
       } catch (err) {
         note = `a bot could not be tested: ${String(err?.message ?? err).slice(0, 120)}`;
       }
@@ -61,17 +99,24 @@ export function createFarmRunner(post, o = {}) {
     async onMessage(msg) {
       if (msg.type === "start") {
         // the costs to test with: measured on your live trades once there are enough of them
-        farm = new Farm(msg.cfg, { save: msg.save ?? null, now, ...(msg.costs ? { costs: msg.costs } : {}) });
-        farm.setMarkets(toMarkets(msg.markets));
+        if (msg.beat) {
+          beats = new Int32Array(msg.beat);
+          setBeat(beat);
+        }
+        beat();
+        const saved = msg.saveText ? JSON.parse(msg.saveText) : (msg.save ?? null);
+        farm = new Farm(msg.cfg, { save: saved, now, ...(msg.costs ? { costs: msg.costs } : {}) });
+        farm.setMarkets(toMarkets(msg.markets), { defer: true });
         deployed = msg.deployed ?? [];
         farm.checkFleet(deployed);
         note = "";
         running = true;
-        send();
+        send(true);
         looping = loop();
       } else if (msg.type === "markets" && farm) {
-        // fresher candles: the survivors' and the fleet's forward tests move on
-        farm.setMarkets(toMarkets(msg.markets));
+        // fresher candles: the survivors' and the fleet's forward tests move on (read again a slice at a time)
+        beat();
+        farm.setMarkets(toMarkets(msg.markets), { defer: true });
         farm.checkFleet(deployed);
         send();
         save();
@@ -86,7 +131,7 @@ export function createFarmRunner(post, o = {}) {
       } else if (msg.type === "stop") {
         running = false;
         await looping;
-        if (farm) post({ type: "save", save: farm.save(), state: state() });
+        if (farm) post({ type: "save", saveText: JSON.stringify(farm.save()), full: true, state: changed(state(), true) });
         post({ type: "stopped" });
       }
     },

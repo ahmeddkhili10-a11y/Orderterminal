@@ -257,9 +257,13 @@ describe('the edge finder heals itself', () => {
     const second = worker;
     await until(() => second.runner.farm?.tried > 0);
     second.emit = () => false;
-    now += 2 * 60_000;
-    expect(await until(() => made.length === 3 && lab.farmState().running)).toBe(true);
+    // a real hang: its loop no longer runs, so its heartbeat stops too
     await stopLoop(second);
+    for (let i = 0; i < 14 && made.length < 3; i++) {
+      now += 10_000;
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    expect(await until(() => made.length === 3 && lab.farmState().running)).toBe(true);
     // stopped by hand while a restart is pending: it stays stopped
     const third = worker;
     third.emit('exit', 1);
@@ -269,6 +273,29 @@ describe('the edge finder heals itself', () => {
     await new Promise((r) => setTimeout(r, 60));
     expect(made.length).toBe(3);
     expect(lab.farmState()).toMatchObject({ running: false, wanted: false });
+  }, 60_000);
+
+  it('a thread that is busy (its heartbeat moving) is never taken for a hang, and a computer that slept is not either', async () => {
+    let now = T0;
+    const ccxt = exchange(() => now, { down: false });
+    let worker;
+    const made = [];
+    const lab = new LabService({ ccxt, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker, makeFarmWorker: () => (made.push((worker = inlineFarmWorker())), worker), now: () => now, retryPause: 1, reviveDelays: [5, 5], farmSilence: 60_000, dogEvery: 5 });
+    await lab.farmStart({ coins: ['BTC', 'ETH'], styles: ['intraday'] });
+    await until(() => worker.runner.farm?.tried > 3);
+    // it sends nothing for three minutes, but keeps working
+    worker.emit = () => false;
+    for (let i = 0; i < 18; i++) {
+      now += 10_000;
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    expect(made.length).toBe(1);
+    // the laptop sleeps for an hour with the thread stopped: on waking it is not restarted for it
+    await worker.runner.onMessage({ type: 'stop' });
+    now += 3_600_000;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(made.length).toBe(1);
+    await lab.farmStop();
   }, 60_000);
 });
 
@@ -460,5 +487,72 @@ describe('the Lab agent in the crypto swarm', () => {
     subs.get('BTC/USDC:USDC')?.({ kind: 'trades', trades: [{ p: 306.5, q: 1, s: 'buy', t: now }] });
     await vi.waitFor(() => expect(pos.closedAt).toBeTruthy());
     expect(pos.reason).toBe('time');
+  });
+});
+
+describe('the desktop process stays free while the edge finder runs', () => {
+  it('candles go to the thread packed, and come out the same', async () => {
+    const { packMarkets } = await import('./lab.mjs');
+    const bars = walk(500, Date.UTC(2026, 10, 1), 9);
+    const { markets, transfer } = packMarkets({ '1h': [{ coin: 'BTC', tfH: 1, bars, funding: bars.map((_, i) => i * 1e-6) }] });
+    expect(transfer.length).toBe(2);
+    expect(markets['1h'][0].packed).toBeInstanceOf(Float64Array);
+    const runner = createFarmRunner(() => {}, { sleep: () => new Promise((r) => setImmediate(r)) });
+    await runner.onMessage({ type: 'start', cfg: { coins: ['BTC'], styles: ['intraday'] }, markets });
+    await runner.onMessage({ type: 'stop' });
+    const got = runner.farm.markets?.['1h']?.[0] ?? null;
+    if (got) expect(got.bars).toEqual(bars);
+  });
+
+  it('candle files are read once, rewritten only when they change, and new candles appended', async () => {
+    const { readFileSync, statSync } = await import('node:fs');
+    let now = Date.UTC(2026, 10, 6, 12);
+    const all = walk(3000, now + 50 * HOUR, 5);
+    const ccxt = { history: vi.fn(async (_id, _sym, _tf, since) => all.filter((b) => b.time >= since && b.time + HOUR <= now)), fundingHistory: vi.fn(async () => []) };
+    const dir = mkdtempSync(join(tmpdir(), 'lab-'));
+    const lab = new LabService({ ccxt, dir, emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const a = await lab.candles('BTC', '1h', 0.2, 'binance');
+    const file = join(dir, 'cache/binance-BTC-1h.json');
+    const before = statSync(file).mtimeMs;
+    // asked again within the hour: nothing new, nothing written
+    await new Promise((r) => setTimeout(r, 20));
+    const b = await lab.candles('BTC', '1h', 0.2, 'binance');
+    expect(b.bars.length).toBe(a.bars.length);
+    expect(statSync(file).mtimeMs).toBe(before);
+    // three hours on: three new candles, appended to the file, which still reads back whole
+    now += 3 * HOUR;
+    const c = await lab.candles('BTC', '1h', 0.2, 'binance');
+    expect(c.bars[c.bars.length - 1].time).toBe(a.bars[a.bars.length - 1].time + 3 * HOUR);
+    const disk = JSON.parse(readFileSync(file, 'utf8'));
+    // the file keeps older candles too (a longer request will want them)
+    expect(disk.length).toBeGreaterThanOrEqual(c.bars.length);
+    expect(disk[disk.length - 1].time).toBe(c.bars[c.bars.length - 1].time);
+    expect(new Set(disk.map((x) => x.time)).size).toBe(disk.length);
+    // a new service reads the appended file as the old one left it
+    const lab2 = new LabService({ ccxt, dir, emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    ccxt.history.mockClear();
+    const d = await lab2.candles('BTC', '1h', 0.2, 'binance');
+    expect(d.bars.map((x) => x.time)).toEqual(c.bars.map((x) => x.time));
+  });
+
+  it('the screen is sent only what changed; saves are written as text and read back', async () => {
+    const now = Date.UTC(2026, 10, 6, 12);
+    const ccxt = { history: vi.fn(async (_id, sym, _tf, since) => trendWalk(6000, now, sym.startsWith('BTC') ? 3 : 4).filter((b) => b.time >= since)), fundingHistory: vi.fn(async () => []) };
+    const dir = mkdtempSync(join(tmpdir(), 'lab-'));
+    const pushed = [];
+    let worker;
+    const lab = new LabService({ ccxt, dir, emit: (ch, m) => ch === 'lab:farm' && pushed.push(m), makeWorker: inlineWorker, makeFarmWorker: () => (worker = inlineFarmWorker()), now: () => now });
+    await lab.farmStart({ coins: ['BTC'], styles: ['intraday'] });
+    for (let i = 0; i < 4000 && !(worker.runner.farm?.tried > 5 && pushed.length > 6); i++) await new Promise((r) => setImmediate(r));
+    // later updates carry the counters but not lists that did not change
+    const later = pushed.slice(-3);
+    expect(later.some((m) => 'tried' in m && !('cfg' in m && 'tops' in m && 'teams' in m && 'blocks' in m && 'top' in m && 'kept' in m && 'fleet' in m))).toBe(true);
+    // what the screen holds after merging is the whole picture
+    const merged = pushed.reduce((a, m) => ({ ...a, ...m }), {});
+    expect(merged.tried).toBe(lab.farmState().tried);
+    await lab.farmStop();
+    const lab2 = new LabService({ ccxt, dir, emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    expect(lab2.farmState().tried).toBe(lab.farmState().tried);
+    expect(lab2.farmSavedObj()?.tried).toBe(lab.farmState().tried);
   });
 });

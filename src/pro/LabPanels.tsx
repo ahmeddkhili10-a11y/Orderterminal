@@ -26,9 +26,13 @@ function NeedsDesktop() {
   return <div className="pro-empty">The Strategy Lab runs in the desktop app: it downloads years of candles and researches them in the background.</div>;
 }
 
+/** the Lab's status and last result — not the edge finder's state, which changes every few seconds (these panels do not show it) */
 function useLabLink() {
   useEffect(() => startLabLink(), []);
-  return useLab();
+  const status = useLab((s) => s.status);
+  const result = useLab((s) => s.result);
+  const loaded = useLab((s) => s.loaded);
+  return { status, result, loaded };
 }
 
 export function PaperCite({ p }: { p: Paper }) {
