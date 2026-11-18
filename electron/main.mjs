@@ -1161,7 +1161,7 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
     commandsFor = sig;
     commands = new TelegramCommands(s.fields.token, chat, () => ({ ...tgStatus, wallet: walletReply() }), fetch, (e) => console.warn('telegram', e?.message ?? e), {
       answerBasics: () => basicsOn,
-      command: async (cmd) => (cmd === '/teams' ? approvals.pool() : remote.command(cmd)),
+      command: async (cmd) => (cmd === '/teams' ? approvals.pool() : cmd === '/stars' ? approvals.starPool() : remote.command(cmd)),
       callback: (data) => (String(data).startsWith('rc:') ? remote.tap(data) : approvals.tap(data)),
     });
     void commands.run();
@@ -1363,11 +1363,13 @@ app.whenReady().then(async () => {
     deploy: async (m, authority) => {
       await services;
       const built = buildSpec(m.flow);
-      lab.deploy({ spec: { ...built.spec, name: m.name }, tfH: m.tfH, stats: { sharpe: m.oos.sharpe, t: m.oos.t, dsr: m.dsr, trades: m.oos.trades, ...testedStats(m.oos, m.tfH), verdict: `edge finder · team · ${m.stage} · from your phone` }, authority }, { crypto: true, meme: false }, m.coins);
+      lab.deploy({ spec: { ...built.spec, name: m.name }, tfH: m.tfH, stats: { sharpe: m.oos.sharpe, t: m.oos.t, dsr: m.dsr, trades: m.oos.trades, ...testedStats(m.oos, m.tfH), verdict: `edge finder · ${m.via === 'star' ? 'star (over 200 % a year)' : 'team'} · ${m.stage} · from your phone` }, authority }, { crypto: true, meme: false }, m.coins);
       log('info', `deployed "${m.name}" from Telegram (${authority})`);
     },
     swarm: () => (cswarm ? { running: cswarm.running, mode: cswarm.mode } : null),
     waiting: () => lab?.farmState().teamWait ?? [],
+    // proven on fresh data and over 200 % a year: offered one by one
+    stars: () => lab?.farmState().stars ?? [],
   });
   remote = new Remote({ db, swarm: () => cswarm, bots: () => bots, wanted: (on) => care?.setWanted('swarm', on) });
   // when this computer last saw Novus Ordo running (for the crash report), and — if you asked for it —

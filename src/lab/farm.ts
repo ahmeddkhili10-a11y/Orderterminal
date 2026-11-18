@@ -356,6 +356,8 @@ export interface FarmState {
   teamWait?: TeamWait[];
   /** the strategies you chose to keep (never dropped, whatever happens) */
   kept?: Survivor[];
+  /** proven on fresh data and over 200 % a year (at 1× or sized up): each is offered on the phone to deploy on its own */
+  stars?: Survivor[];
   /** the five best still standing at each pace: proven on fresh data first, then significant, then by score */
   tops?: PaceBoard[];
   /** bots that trained well but are copies of a kind already held or already ruled out: not tested again */
@@ -2153,6 +2155,14 @@ export class Farm {
     });
   }
 
+  /** the stars: proven on fresh data and over 200 % a year — the best first (at most ten) */
+  stars(): Survivor[] {
+    return this.survivors
+      .filter(isStar)
+      .sort((a, b) => starRet(b) - starRet(a))
+      .slice(0, 10);
+  }
+
   /** keep a strategy for good (or let it go again): a kept one is never pruned or hidden */
   pin(id: string, on: boolean) {
     if (on && this.survivors.some((x) => x.id === id)) this.pinned.add(id);
@@ -2370,6 +2380,7 @@ export class Farm {
       teams: this.teams(),
       teamWait: this.teamWait(),
       kept: this.survivors.filter((x) => this.pinned.has(x.id)).map(lite),
+      stars: this.stars().map(lite),
     };
   }
 
@@ -2527,6 +2538,13 @@ export function slipWhy(s: Pick<Survivor, "forward" | "oos" | "stage">): string 
  * these make teams, and only teams of these are offered to deploy.
  */
 export const provenEdge = (s: Pick<Survivor, "stage" | "sig">) => s.stage === "proven" && !!s.sig;
+
+/** a year's return on data it never saw: the better of 1× and sized up (to a 15 % worst drop, at most 5×) */
+export const starRet = (s: Pick<Survivor, "oos">) => Math.max(s.oos.cagr, sizedUp(s.oos.cagr, s.oos.maxDD).ret);
+/** a year's return a strategy must beat to be offered on its own: 200 % */
+export const STAR_RET = 2;
+/** proven on fresh data, and over 200 % a year at 1× or sized up: offered on the phone to deploy on its own */
+export const isStar = (s: Pick<Survivor, "stage" | "oos">) => s.stage === "proven" && starRet(s) > STAR_RET;
 
 /**
  * What a result is worth sized up: the test trades one times the account, with no

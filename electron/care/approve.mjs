@@ -13,6 +13,7 @@
 // that are not ready are never offered with buttons.
 import { randomBytes } from 'node:crypto';
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
+import { paceIdOf, sizedUp } from '../../src/lab/farm.ts';
 
 const DAY = 86_400_000;
 export const OFFER_TTL = 3 * DAY;
@@ -37,6 +38,25 @@ export function teamText(t, { title, swarm } = {}) {
   return L.join('\n');
 }
 
+/** a strategy proven on fresh data and over 200 % a year, in words, for the phone */
+export function starText(s, { title, swarm } = {}) {
+  const o = s.oos ?? {};
+  const z = sizedUp(o.cagr ?? 0, o.maxDD ?? 0);
+  const f = s.forward;
+  const pace = PACE[paceIdOf(s.style)] ?? paceIdOf(s.style);
+  const L = [title ?? '⭐ <b>A proven strategy over 200 % a year</b>'];
+  L.push(`<b>${e(s.name)}</b> · ${pace} · ${e((s.coins ?? []).join(' '))}`);
+  L.push(`On data it never saw: <b>${pct(o.cagr, 0)} a year</b> at 1× · Sharpe ${num(o.sharpe)} · worst drop ${pct(-(o.maxDD ?? 0))} · ${o.trades ?? 0} trades`);
+  L.push(`Sized up to a ${pct(-z.maxDD, 0)} worst drop (${z.lev.toFixed(1)}×): <b>${pct(z.ret, 0)} a year</b> — losses grow by the same multiple`);
+  if (f) L.push(`Fresh data (since it was found): ${pct(f.ret)} over ${f.trades} trades, Sharpe ${num(f.sharpe)}, worst drop ${pct(-f.maxDD)}${s.provenAt ? ` · proven since ${new Date(s.provenAt).toISOString().slice(0, 10)}` : ''}`);
+  L.push(s.sig ? '✓ Also significant on the unseen data after allowing for every bot tried.' : '⚠ Proven on fresh data, but not significant on the unseen data once every bot tried is allowed for — weigh that before deploying.');
+  if (swarm) L.push(`The crypto swarm is ${swarm.running ? `running (${swarm.mode === 'live' ? '<b>LIVE</b>' : 'paper'})` : '<b>stopped</b> — start it in Novus Ordo to trade what you deploy'}.`);
+  L.push('<i>Council decides: the council can block its signals. Trade as tested: only Guardian and Risk can stop a trade. The swarm sizes each trade by its own risk rules, not at the sized-up multiple. Past results do not promise future ones.</i>');
+  return L.join('\n');
+}
+
+const memberOf = (m) => ({ id: m.id, name: m.name, pace: m.pace ?? paceIdOf(m.style), flow: m.flow, tfH: m.tfH, coins: m.coins, oos: m.oos, dsr: m.dsr, stage: m.stage });
+
 export class Approvals {
   /**
    * @param o {{ db: { get(k), set(k, v) }, teams: () => any[], deployed: () => string[],
@@ -51,6 +71,8 @@ export class Approvals {
     this.swarmFn = o.swarm ?? (() => null);
     /** while no team is ready: each pace's proven edges and its closest candidate */
     this.waitFn = o.waiting ?? (() => []);
+    /** proven strategies over 200 % a year: each offered on its own */
+    this.starsFn = o.stars ?? (() => []);
     this.now = o.now ?? Date.now;
   }
 
@@ -69,8 +91,21 @@ export class Approvals {
   make(team) {
     const all = this.offers();
     const token = randomBytes(6).toString('hex');
-    all[token] = { key: team.key, at: this.now(), members: team.members.map((m) => ({ id: m.id, name: m.name, pace: m.pace, flow: m.flow, tfH: m.tfH, coins: m.coins, oos: m.oos, dsr: m.dsr, stage: m.stage })), stats: { sharpe: team.sharpe, ret: team.ret, maxDD: team.maxDD } };
+    all[token] = { kind: 'team', key: team.key, at: this.now(), members: team.members.map(memberOf), stats: { sharpe: team.sharpe, ret: team.ret, maxDD: team.maxDD } };
     this.save(all);
+    return this.buttons(token);
+  }
+
+  /** an offer for one strategy (a star): the same three buttons */
+  makeStar(s) {
+    const all = this.offers();
+    const token = randomBytes(6).toString('hex');
+    all[token] = { kind: 'star', key: s.id, at: this.now(), members: [{ ...memberOf(s), via: 'star' }] };
+    this.save(all);
+    return this.buttons(token);
+  }
+
+  buttons(token) {
     return [
       [{ text: '✅ Deploy · council decides', callback_data: `nd:${token}:c` }],
       [{ text: '✅ Deploy · trade as tested', callback_data: `nd:${token}:t` }],
@@ -88,9 +123,33 @@ export class Approvals {
     return (this.teamsFn() ?? []).filter((t) => t.ready && !(sent[t.key] && now - sent[t.key] < 7 * DAY) && t.members.some((m) => !deployed.has(m.name))).slice(0, 3 - today);
   }
 
-  /** the messages to send now: each ready team with its buttons */
+  /** the stars not offered yet (each once a week at most, three a day at most, never one already deployed) */
+  starsDue() {
+    const sent = this.db.get('approve:starSent') ?? {};
+    const now = this.now();
+    const today = Object.values(sent).filter((t) => now - t < DAY).length;
+    if (today >= 3) return [];
+    const deployed = new Set(this.deployedFn());
+    return (this.starsFn() ?? []).filter((s) => !(sent[s.id] && now - sent[s.id] < 7 * DAY) && !deployed.has(s.name)).slice(0, 3 - today);
+  }
+
+  /** /stars: every star, each with its buttons — or what is missing */
+  starPool() {
+    const stars = this.starsFn() ?? [];
+    if (!stars.length) return [{ html: '⭐ <b>No strategy is over 200 % a year and proven yet.</b>\nOne is offered here, with Deploy buttons, the moment one is: proven on fresh data (25+ trades, in profit, Sharpe 0.75+) and over 200 % a year on data it never saw — at 1× or sized up to a 15 % worst drop.' }];
+    const swarm = this.swarmFn();
+    return stars.map((s, i) => ({ html: starText(s, { title: `⭐ <b>Star ${i + 1} of ${stars.length}</b> · proven, over 200 % a year`, swarm: i === 0 ? swarm : null }), keyboard: this.makeStar(s) }));
+  }
+
+  /** the messages to send now: each ready team with its buttons, and each new star */
   check() {
     const out = [];
+    const starSent = this.db.get('approve:starSent') ?? {};
+    for (const s of this.starsDue()) {
+      out.push({ html: starText(s, { swarm: this.swarmFn() }), keyboard: this.makeStar(s) });
+      starSent[s.id] = this.now();
+    }
+    if (out.length) this.db.set('approve:starSent', starSent);
     const sent = this.db.get('approve:sent') ?? {};
     for (const t of this.due()) {
       out.push({ html: teamText(t, { swarm: this.swarmFn() }), keyboard: this.make(t) });
@@ -134,12 +193,14 @@ export class Approvals {
       this.save(all);
       return 'OK — not deployed. Send /teams to see the pool again.';
     }
-    // checked again now: every member must still be a proven edge in today's pool
-    const standing = new Set((this.teamsFn() ?? []).filter((t) => t.ready).flatMap((t) => t.members.map((mm) => mm.id)));
+    // checked again now: a team's members must still be proven edges in today's pool; a star must still be proven and over 200 %
+    const star = o.kind === 'star';
+    const standing = new Set(star ? (this.starsFn() ?? []).map((s) => s.id) : (this.teamsFn() ?? []).filter((t) => t.ready).flatMap((t) => t.members.map((mm) => mm.id)));
     const lapsed = o.members.filter((mm) => !standing.has(mm.id));
     if (lapsed.length) {
       o.done = 'refused: no longer proven';
       this.save(all);
+      if (star) return `⛔ <b>Not deployed.</b> ${e(o.members[0].name.split(' · ')[0])} is no longer proven and over 200 % a year on the latest candles. Send /stars for the ones that are.`;
       return `⛔ <b>Not deployed.</b> ${lapsed.map((mm) => e(mm.name.split(' · ')[0])).join(', ')} ${lapsed.length === 1 ? 'is' : 'are'} no longer a proven edge in the pool, so this team no longer qualifies. Send /teams for the teams that do.`;
     }
     const authority = what === 't' ? 'tested' : 'council';

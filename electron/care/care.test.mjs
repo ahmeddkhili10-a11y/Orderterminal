@@ -485,3 +485,36 @@ describe('crash reports', () => {
     expect(sent.filter((h) => /edge finder stopped/.test(h))).toHaveLength(1);
   });
 });
+
+describe('a proven strategy over 200 % a year is offered on its own', () => {
+  const star = (id, extra = {}) => ({ id, name: `Order block retest · ${id}`, style: 'intraday', coins: ['BTC', 'ETH'], flow: {}, tfH: 1, stage: 'proven', sig: false, dsr: 0.6, provenAt: Date.UTC(2026, 10, 1), oos: { cagr: 0.6, sharpe: 2.4, maxDD: 0.1, trades: 80, t: 3 }, forward: { ret: 0.09, trades: 31, sharpe: 1.8, maxDD: 0.04, bars: 900, days: 60 }, ...extra });
+  it('offers it once with its numbers and buttons, deploys it on a tap, and refuses if it no longer qualifies', async () => {
+    const { isStar, starRet } = await import('../../src/lab/farm.ts');
+    // 60 % a year with a 10 % worst drop: 1.5× to a 15 % drop is 90 % — not a star; 30 % with a 2 % drop sized up 5× is 150 % — not either
+    expect(isStar(star('a'))).toBe(false);
+    // 45 % a year with a 3 % worst drop: 5× is 225 % — a star; so is 210 % at 1×; a strategy not proven never is
+    expect(isStar(star('b', { oos: { cagr: 0.45, sharpe: 3, maxDD: 0.03, trades: 90 } }))).toBe(true);
+    expect(isStar(star('c', { oos: { cagr: 2.1, sharpe: 2, maxDD: 0.3, trades: 60 } }))).toBe(true);
+    expect(isStar(star('d', { stage: 'proving', oos: { cagr: 2.1, sharpe: 2, maxDD: 0.3, trades: 60 } }))).toBe(false);
+    expect(starRet(star('b', { oos: { cagr: 0.45, sharpe: 3, maxDD: 0.03, trades: 90 } }))).toBeCloseTo(2.25);
+    let stars = [star('b', { oos: { cagr: 0.45, sharpe: 3, maxDD: 0.03, trades: 90 } })];
+    const t = Date.UTC(2026, 10, 18, 9);
+    const db = memDb();
+    const deployed = [];
+    const a = new Approvals({ db, teams: () => [], stars: () => stars, deployed: () => deployed.map((d) => d.name), deploy: async (m, auth) => deployed.push({ name: m.name, auth, via: m.via }), swarm: () => ({ running: true, mode: 'paper' }), now: () => t });
+    const out = a.check();
+    expect(out).toHaveLength(1);
+    expect(out[0].html).toMatch(/over 200 % a year[\s\S]*Order block retest · b[\s\S]*Intraday[\s\S]*\+45% a year[\s\S]*5\.0×\): <b>\+225% a year[\s\S]*31 trades[\s\S]*not significant/);
+    expect(out[0].keyboard.flat().map((b) => b.text)).toEqual(['✅ Deploy · council decides', '✅ Deploy · trade as tested', '✖ Not now']);
+    expect(a.check()).toHaveLength(0);
+    const reply = await a.tap(out[0].keyboard[0][0].callback_data);
+    expect(reply).toMatch(/Deployed to the crypto swarm.*council decides/);
+    expect(deployed).toEqual([{ name: 'Order block retest · b', auth: 'council', via: 'star' }]);
+    // offered again from /stars, but by the time of the tap it has slipped: nothing is deployed
+    const kb = a.starPool()[0].keyboard;
+    stars = [];
+    expect(await a.tap(kb[1][0].callback_data)).toMatch(/no longer proven and over 200 %/);
+    expect(deployed).toHaveLength(1);
+    expect(a.starPool()[0].html).toMatch(/No strategy is over 200 % a year and proven yet/);
+  });
+});

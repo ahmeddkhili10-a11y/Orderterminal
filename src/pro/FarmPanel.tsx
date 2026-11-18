@@ -11,6 +11,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { desktop, type FarmView } from "../desktop/bridge";
 import { sendToBot } from "../lab/bridge";
 import {
+  isStar,
   LADDER,
   sizedUp,
   STAGES,
@@ -427,6 +428,7 @@ const TeamPool = memo(TeamPoolView);
 const Fleet = memo(FleetView);
 
 function evidence(s: Survivor): { text: string; tone: string } {
+  if (isStar(s)) return { text: "⭐ Proven · over 200 %", tone: "up b" };
   if (s.stage === "proven")
     return { text: s.sig ? "Proven · significant" : "Proven on fresh data", tone: "up b" };
   if (s.stage === "proving")
