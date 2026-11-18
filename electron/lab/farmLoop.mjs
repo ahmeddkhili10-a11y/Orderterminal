@@ -71,11 +71,13 @@ export function createFarmRunner(post, o = {}) {
       try {
         // fresh candles arrived: the survivors' fresh-data records are read again first, a slice at a time
         // (the thread keeps answering; breeding carries on once they are all up to date)
+        // (breeding carries on beside it: a slice of re-reading, then a bot)
         const left = farm.forwardPending();
         if (left) {
-          farm.forwardSome(300);
+          farm.forwardSome(250);
           note = farm.forwardPending() ? `Checking ${left} strateg${left === 1 ? "y" : "ies"} against the newest candles…` : "";
-        } else farm.step();
+        }
+        farm.step();
       } catch (err) {
         note = `a bot could not be tested: ${String(err?.message ?? err).slice(0, 120)}`;
       }

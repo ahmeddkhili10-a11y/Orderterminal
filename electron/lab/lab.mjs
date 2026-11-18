@@ -277,6 +277,12 @@ export class LabService {
     let hlError = '';
     const useHl = cfg.hl !== false;
     let error = '';
+    const longest = Math.max(0, ...Object.entries(years).filter(([tf]) => tf !== '1d').map(([, y]) => y));
+    const fundSince = (_coin, first) => Math.min(first, this.now() - longest * 365 * 24 * HOUR);
+    // candles a little behind (a missed refresh, under two candles or two hours old) are not a problem to retry fast for
+    const late = [];
+    const behind = (tf, bars) => this.now() - (bars[bars.length - 1].time + TF_H[tf] * HOUR);
+    const isLate = (tf, bars) => behind(tf, bars) < Math.max(2 * TF_H[tf], 2) * HOUR;
     for (const [tf, yrs] of Object.entries(years)) {
       const ms = [];
       for (const coin of cfg.coins) {
@@ -293,7 +299,7 @@ export class LabService {
             }
           }
           if (got.stale) {
-            stale.push(`${coin} ${tf}`);
+            (isLate(tf, got.bars) ? late : stale).push(`${coin} ${tf}`);
             error ||= got.error;
           }
           // candles already in the farm that are fresher than what could be had now are kept
@@ -311,7 +317,9 @@ export class LabService {
           let funding = null;
           if (this.cfg.funding && tf !== '1d') {
             try {
-              funding = alignFunding(got.bars, await (useHl ? this.hlFunding(coin, got.bars[0].time) : this.funding(coin, got.bars[0].time)), TF_H[tf]);
+              // funding is asked once per coin for the longest stretch any pace needs (the other sizes reuse it)
+              const fSince = fundSince(coin, got.bars[0].time);
+              funding = alignFunding(got.bars, await (useHl ? this.hlFunding(coin, fSince, got.hl || null) : this.funding(coin, fSince)), TF_H[tf]);
             } catch {
               /* the funding rules sit this one out */
             }
@@ -321,7 +329,7 @@ export class LabService {
           error ||= String(err?.message ?? err);
           if (last) {
             ms.push(last);
-            stale.push(`${coin} ${tf}`);
+            (isLate(tf, last.bars) ? late : stale).push(`${coin} ${tf}`);
           } else missing.push(`${coin} ${tf}`);
         }
       }
@@ -329,7 +337,7 @@ export class LabService {
     }
     this.farmNote = '';
     this.farmLast = out;
-    return { markets: out, stale, missing, error: error.slice(0, 300), hl: useHl ? { on: hlOn, off: hlOff, error: hlError.slice(0, 200) } : null };
+    return { markets: out, stale, missing, late, error: error.slice(0, 300), hl: useHl ? { on: hlOn, off: hlOff, error: hlError.slice(0, 200) } : null };
   }
 
   /** how the edge finder's data is doing, for the screen */
@@ -340,7 +348,12 @@ export class LabService {
       ok,
       stale: r.stale,
       missing: r.missing,
+      // a refresh missed but the candles are still recent (under three candles old): retried on the usual clock
+      late: r.late ?? [],
+      lateError: r.late?.length ? r.error : '',
       error: ok ? '' : r.error,
+      // the exchange asked us to slow down: the next try waits longer
+      limited: /429|rate.?limit|too many|ddos|exceeded/i.test(r.error ?? ''),
       // how many loads in a row have had a problem
       tries: ok ? 0 : prev.tries + 1,
       lastOkAt: ok ? this.now() : prev.lastOkAt,
@@ -361,7 +374,7 @@ export class LabService {
     const fast = this.farmCfg.styles.some((s) => STYLE_MAP[s]?.tfH < 1);
     const usual = this.farmEvery ?? (fast ? 15 * 60_000 : 30 * 60_000);
     const d = this.farmData;
-    const ms = d && !d.ok ? Math.min(usual, [60_000, 120_000, 300_000, 600_000][d.tries - 1] ?? 900_000) : usual;
+    const ms = d && !d.ok ? Math.min(usual, Math.max(d.limited ? 300_000 : 0, [60_000, 120_000, 300_000, 600_000][d.tries - 1] ?? 900_000)) : usual;
     if (d) d.nextTryAt = this.now() + ms;
     this.farmTimer = setTimeout(() => void this.farmRefresh(), ms);
     this.farmTimer.unref?.();
@@ -464,9 +477,12 @@ export class LabService {
       const r = await this.farmMarkets(this.farmCfg);
       const was = this.farmData && !this.farmData.ok;
       const d = this.farmHealth(r);
-      if (this.farmW && Object.keys(r.markets).length && (this.farmNewest() > before || (was && d.ok))) {
+      const due = !this.farmSentAt || this.now() - this.farmSentAt >= 10 * 60_000 || (was && d.ok);
+      if (this.farmW && Object.keys(r.markets).length && (this.farmNewest() > (this.farmSentTo ?? before) || (was && d.ok)) && due) {
         const packed = packMarkets(r.markets);
         this.farmW.postMessage({ type: 'markets', markets: packed.markets }, packed.transfer);
+        this.farmSentAt = this.now();
+        this.farmSentTo = this.farmNewest();
       }
     } catch (err) {
       this.farmHealth({ markets: {}, stale: ['every market'], missing: [], error: String(err?.message ?? err).slice(0, 300) });
@@ -802,7 +818,9 @@ export class LabService {
     } catch (err) {
       // a coin the exchange does not list will not appear on a second try
       if (/not listed|does not have|BadSymbol/i.test(String(err?.message ?? err))) throw err;
-      await new Promise((r) => setTimeout(r, this.retryPause));
+      // asked to slow down (Hyperliquid allows so many requests a minute): wait it out before the second try
+      const limited = /429|rate.?limit|too many|ddos|exceeded/i.test(String(err?.message ?? err) + (err?.constructor?.name ?? ''));
+      await new Promise((r) => setTimeout(r, limited ? this.retryPause * 12 : this.retryPause));
       return once();
     }
   }
@@ -829,10 +847,13 @@ export class LabService {
   }
 
   /** funding the swarm pays: Binance's for the long past, Hyperliquid's own (hourly) from its first record on */
-  async hlFunding(coin, since) {
+  async hlFunding(coin, since, hlFrom = null) {
+    // Hyperliquid's own funding is needed only where its own prices are (its last 5,000 candles): asking it for years
+    // of hourly rows was dozens of requests a coin, enough to hit its limit and have the candles refused too
+    const hlSince = hlFrom ? Math.max(since, hlFrom - 2 * 24 * HOUR) : since;
     const [bin, hl] = await Promise.all([
       this.fundingRows('binanceusdm', `${coin}/USDT:USDT`, since).catch(() => []),
-      this.fundingRows('hyperliquid', `${coin}/USDC:USDC`, since).catch(() => []),
+      this.fundingRows('hyperliquid', `${coin}/USDC:USDC`, hlSince).catch(() => []),
     ]);
     if (hl.length < 20) return bin;
     const hB = intervalOf(bin);
@@ -841,26 +862,64 @@ export class LabService {
   }
 
   /**
-   * Funding history, kept in memory: the first time the whole stretch is downloaded, after
-   * that only the rows since the last one (years of rows were downloaded again for every
-   * coin and candle size every 15 minutes). Asked again within ten minutes: what is held.
+   * Funding history, kept on disk and in memory: the first time the stretch is downloaded,
+   * after that only the rows since the last one (once every half hour at most — funding is
+   * paid every hour or eight), and only the older rows when a longer stretch is wanted.
+   * Years of rows used to be downloaded again for every coin and candle size every 15
+   * minutes and at every start.
    */
   async fundingRows(id, sym, since) {
     this.fundMem ??= new Map();
     const key = `${id}|${sym}`;
-    const m = this.fundMem.get(key);
-    const cut = (rows) => rows.filter((r) => r.time >= since);
-    if (m && m.rows.length && (m.from <= since || m.rows[0].time <= since + 9 * HOUR)) {
-      if (this.now() - m.at < 10 * 60_000) return cut(m.rows);
-      const last = m.rows[m.rows.length - 1].time;
-      const more = await this.ccxt.fundingHistory(id, sym, last + 1);
-      const rows = [...m.rows, ...more.filter((r) => r.time > last)];
-      this.fundMem.set(key, { rows, at: this.now(), from: m.from });
-      return cut(rows);
+    const file = `cache/funding-${id}-${sym.replace(/[^A-Za-z0-9]+/g, '_')}.json`;
+    let m = this.fundMem.get(key);
+    if (!m) {
+      try {
+        const d = JSON.parse(await fsp.readFile(join(this.dir, file), 'utf8'));
+        if (Array.isArray(d?.rows) && d.rows.length) m = { rows: d.rows, from: d.from ?? d.rows[0].time, at: 0 };
+      } catch {
+        /* none yet */
+      }
     }
-    const rows = await this.ccxt.fundingHistory(id, sym, since);
-    if (rows.length) this.fundMem.set(key, { rows, at: this.now(), from: since });
-    return rows;
+    const cut = (rows) => rows.filter((r) => r.time >= since);
+    const keep = async (next) => {
+      this.fundMem.set(key, next);
+      try {
+        await fsp.mkdir(join(this.dir, 'cache'), { recursive: true });
+        await fsp.writeFile(join(this.dir, `${file}.tmp`), JSON.stringify({ from: next.from, rows: next.rows }));
+        await fsp.rename(join(this.dir, `${file}.tmp`), join(this.dir, file));
+      } catch {
+        /* the Lab keeps going without its cache */
+      }
+    };
+    if (!m || !m.rows.length) {
+      const rows = await this.ccxt.fundingHistory(id, sym, since);
+      if (rows.length) await keep({ rows, at: this.now(), from: since });
+      return rows;
+    }
+    let rows = m.rows;
+    let changed = false;
+    // a longer stretch than held: the older rows, in front
+    if (since < m.from && since < rows[0].time - 9 * HOUR) {
+      const older = (await this.ccxt.fundingHistory(id, sym, since, 20_000, rows[0].time)).filter((r) => r.time < rows[0].time);
+      rows = [...older, ...rows];
+      changed = true;
+    }
+    // the newest rows, at most every half hour
+    if (this.now() - m.at >= 30 * 60_000) {
+      const last = rows[rows.length - 1].time;
+      const more = await this.ccxt.fundingHistory(id, sym, last + 1);
+      const add = more.filter((r) => r.time > last);
+      if (add.length) {
+        rows = [...rows, ...add];
+        changed = true;
+      }
+      m = { ...m, at: this.now() };
+    }
+    const next = { rows, at: m.at, from: Math.min(m.from, since) };
+    if (changed) await keep(next);
+    else this.fundMem.set(key, next);
+    return cut(rows);
   }
 
   async funding(coin, since) {

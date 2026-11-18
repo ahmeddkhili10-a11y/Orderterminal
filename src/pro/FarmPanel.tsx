@@ -785,6 +785,13 @@ function DetailView({
 }
 
 /** the edge finder at a glance: the engine, its data, what is standing, how the search is going */
+/** an exchange's error, in words */
+function whyWords(e: string): string {
+  if (/429|rate.?limit|too many|ddos|exceeded/i.test(e)) return "the exchange asked for fewer requests a minute (a rate limit) — it waits five minutes before trying again.";
+  if (/did not answer|timed? ?out|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|network|fetch failed/i.test(e)) return "no answer from the exchange (the internet connection, or the exchange is slow).";
+  return e.length > 160 ? `${e.slice(0, 160)}…` : e;
+}
+
 function Status({ farm, now }: { farm: FarmView; now: number }) {
   const d = farm.data;
   const mins = (t: number) => Math.max(0, Math.round((t - now) / 60_000));
@@ -824,11 +831,17 @@ function Status({ farm, now }: { farm: FarmView; now: number }) {
               refreshed. It carries on with the candles it has and tries again
               {d!.nextTryAt ? ` in ${mins(d!.nextTryAt) || "under 1"} min` : " shortly"} (try{" "}
               {d!.tries + 1}); nothing needs doing.
+              {d!.error && <span className="farm-why" data-why> Why: {whyWords(d!.error)}</span>}
             </>
           ) : (
             <>
               newest candle {newest} UTC · loaded {ago(farm.dataAt, now)}
               {d?.nextTryAt ? ` · next check in ${mins(d.nextTryAt)} min` : ""}
+              {d?.late?.length ? (
+                <span data-late title={d.lateError ? whyWords(d.lateError) : ""}>
+                  {` · ${d.late.length} market${d.late.length === 1 ? "" : "s"} missed a refresh (${d.late.slice(0, 2).join(", ")}${d.late.length > 2 ? "…" : ""}); their candles are still recent`}
+                </span>
+              ) : null}
               {d?.hl && (
                 <span data-hl={d.hl.off.length ? "partial" : "on"} title={d.hl.off.length ? `Not on Hyperliquid's prices: ${d.hl.off.join(", ")}${d.hl.error ? ` — ${d.hl.error}` : ""}` : "The recent stretch — the vault and fresh data — is Hyperliquid's own prices and funding"}>
                   {" · "}

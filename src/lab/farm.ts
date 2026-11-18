@@ -371,6 +371,11 @@ export interface FarmState {
     lastOkAt: number;
     checkedAt: number;
     nextTryAt: number;
+    /** a refresh missed, but the candles are still recent (under three candles old) */
+    late?: string[];
+    lateError?: string;
+    /** the exchange asked for fewer requests: the next try waits longer */
+    limited?: boolean;
     /** tested on Hyperliquid's own recent prices: for which markets, and why not for the others */
     hl?: { on: string[]; off: string[]; error: string } | null;
   } | null;
@@ -738,12 +743,25 @@ export class Farm {
       ),
     );
     this.dataAt = this.now();
-    if (o.defer) this.fwdQueue = this.survivors.map((s) => s.id);
-    else this.forwardAll();
+    // only the survivors on candles that moved on are read again (a new 15-minute candle does not change a daily record)
+    const newest: Record<string, number> = {};
+    for (const [tf, ms] of Object.entries(byTf)) newest[tf] = Math.max(0, ...ms.map((m) => m.bars[m.bars.length - 1]?.time ?? 0));
+    const moved = (tfH: number) => {
+      const tf = tfH === 24 ? "1d" : tfH < 1 ? `${Math.round(tfH * 60)}m` : `${tfH}h`;
+      return !this.newest || newest[tf] !== this.newest[tf];
+    };
+    if (o.defer) {
+      const again = this.survivors.filter((s) => moved(s.tfH)).map((s) => s.id);
+      // anything still waiting from the last delivery stays in the queue
+      this.fwdQueue = [...new Set([...this.fwdQueue, ...again])];
+    } else this.forwardAll();
+    this.newest = newest;
   }
 
   /** survivors whose fresh-data record is still to be read again over the latest candles */
   private fwdQueue: string[] = [];
+  /** the newest candle of each candle size, as of the last delivery */
+  private newest: Record<string, number> | null = null;
 
   forwardPending(): number {
     return this.fwdQueue.length;
@@ -760,7 +778,8 @@ export class Farm {
       if (s) this.forwardOne(s);
       n++;
     }
-    if (!this.fwdQueue.length) this.forwardDone();
+    // read in slices while the farm runs: the lists take the new order on their usual 20-second clock (no extra reshuffle)
+    if (!this.fwdQueue.length) this.forwardDone(false);
     return n;
   }
 
@@ -1722,13 +1741,13 @@ export class Farm {
   private forwardAll() {
     this.fwdQueue = [];
     for (const s of this.survivors) this.forwardOne(s);
-    this.forwardDone();
+    this.forwardDone(true);
   }
 
-  private forwardDone() {
+  private forwardDone(redraw: boolean) {
     this.prune();
     this.rank();
-    this.boardDirty = true;
+    if (redraw) this.boardDirty = true;
     this.poolAt = 0;
   }
 

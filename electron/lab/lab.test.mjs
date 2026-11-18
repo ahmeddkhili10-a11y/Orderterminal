@@ -556,3 +556,52 @@ describe('the desktop process stays free while the edge finder runs', () => {
     expect(lab2.farmSavedObj()?.tried).toBe(lab.farmState().tried);
   });
 });
+
+describe('funding history is light on the exchanges', () => {
+  it('is kept on disk, topped up at most every half hour, extended backwards only when asked for more, and Hyperliquid is asked only where its prices are', async () => {
+    let now = Date.UTC(2026, 10, 10);
+    const rows = (from, to, h) => Array.from({ length: Math.floor((to - from) / (h * HOUR)) }, (_, i) => ({ time: from + i * h * HOUR, rate: 0.0001 }));
+    const calls = [];
+    const ccxt = {
+      history: vi.fn(async () => []),
+      fundingHistory: vi.fn(async (id, _sym, since, _max, until = Infinity) => {
+        calls.push({ id, since });
+        return rows(Math.max(since, Date.UTC(2023, 4, 1)), Math.min(now, until), id === 'hyperliquid' ? 1 : 8);
+      }),
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'lab-'));
+    const lab = new LabService({ ccxt, dir, emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    const since = now - 365 * DAY;
+    const a = await lab.fundingRows('binanceusdm', 'BTC/USDT:USDT', since);
+    expect(a.length).toBeGreaterThan(1000);
+    // asked again soon after: nothing is downloaded
+    await lab.fundingRows('binanceusdm', 'BTC/USDT:USDT', since);
+    expect(calls.length).toBe(1);
+    // a longer stretch: only the older part is downloaded
+    const b = await lab.fundingRows('binanceusdm', 'BTC/USDT:USDT', since - 365 * DAY);
+    expect(calls.length).toBe(2);
+    expect(calls[1].since).toBe(since - 365 * DAY);
+    expect(b[0].time).toBeLessThan(a[0].time);
+    expect(new Set(b.map((r) => r.time)).size).toBe(b.length);
+    // a new start reads it from disk, and after half an hour only the newest rows are asked for
+    now += 31 * 60_000;
+    const lab2 = new LabService({ ccxt, dir, emit: () => {}, makeWorker: inlineWorker, now: () => now });
+    await lab2.fundingRows('binanceusdm', 'BTC/USDT:USDT', since);
+    expect(calls.length).toBe(3);
+    expect(calls[2].since).toBeGreaterThan(now - 9 * HOUR);
+    // Hyperliquid's own funding: from where its prices start, not years back
+    const hlFrom = now - 200 * DAY;
+    await lab2.hlFunding('ETH', now - 5 * 365 * DAY, hlFrom);
+    const hl = calls.filter((c) => c.id === 'hyperliquid');
+    expect(hl.length).toBe(1);
+    expect(hl[0].since).toBe(hlFrom - 2 * DAY);
+  });
+
+  it('a market that only missed a refresh, with recent candles, is noted but not an alarm', () => {
+    const lab = new LabService({ ccxt: {}, dir: mkdtempSync(join(tmpdir(), 'lab-')), emit: () => {}, makeWorker: inlineWorker });
+    const d = lab.farmHealth({ markets: { '1h': [] }, stale: [], missing: [], late: ['BTC 1h'], error: 'hyperliquid 429 Too Many Requests' });
+    expect(d).toMatchObject({ ok: true, late: ['BTC 1h'], limited: true });
+    const e = lab.farmHealth({ markets: { '1h': [] }, stale: ['BTC 1h'], missing: [], late: [], error: 'hyperliquid 429 Too Many Requests' });
+    expect(e).toMatchObject({ ok: false, limited: true });
+  });
+});
