@@ -3,6 +3,10 @@
 // Kept apart from the thread wiring (farmWorker.mjs) so tests can drive it.
 import { Farm } from "../../src/lab/farm.ts";
 import { setBeat } from "../../src/lab/beat.ts";
+import { setCacheCap } from "../../src/lab/library.ts";
+
+// the worked-out series the rules reuse are kept to about 320 MB (they grew without end and ran laptops short of memory)
+setCacheCap(320e6);
 
 /** candles as they arrive: packed (six numbers a candle, see packMarkets in lab.mjs) or as objects */
 const unpack = (p) => {

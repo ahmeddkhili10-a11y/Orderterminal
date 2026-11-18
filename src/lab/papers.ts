@@ -27,6 +27,27 @@ export const PAPERS: Record<string, Paper> = {
     venue: 'Practitioner method popularised among retail traders (c. 2023) — not peer-reviewed',
     finding: 'A higher-timeframe candle’s high and low frame the next: a run past one side that closes back inside tends to travel to the other. Unverified: the Lab tests it.',
   },
+  smc: {
+    id: 'smc',
+    cite: 'Smart Money Concepts (practitioner method)',
+    title: 'Smart Money Concepts: market structure, breaks of structure, changes of character, order blocks, inducement and supply and demand zones',
+    venue: 'Practitioner method grown out of ICT’s teaching (c. 2020 on) — not peer-reviewed',
+    finding: 'Reads the trend from swing points and trades where large orders are thought to rest: breaks and changes of structure, the stops beyond minor swings, and the bases strong moves start from. Unverified: the Lab tests each rule.',
+  },
+  lmw00: {
+    id: 'lmw00',
+    cite: 'Lo, Mamaysky & Wang (2000)',
+    title: 'Foundations of technical analysis: computational algorithms, statistical inference, and empirical implementation',
+    venue: 'Journal of Finance 55(4)',
+    finding: 'Defines chart patterns from smoothed swing highs and lows by algorithm, and finds several carry information about the next returns — the basis for reading swing structure by rule rather than by eye.',
+  },
+  kar87: {
+    id: 'kar87',
+    cite: 'Karpoff (1987)',
+    title: 'The relation between price changes and trading volume: a survey',
+    venue: 'Journal of Financial and Quantitative Analysis 22(1)',
+    finding: 'Volume rises with the size of price moves and differs between rises and falls: volume and price together say more than price alone.',
+  },
   wyck: {
     id: 'wyck',
     cite: 'Wyckoff (1931); Pruden (2007)',

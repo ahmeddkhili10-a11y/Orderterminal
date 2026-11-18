@@ -287,3 +287,133 @@ describe('more ICT, Candle Range Theory and price action', () => {
     expect(performance.now() - started).toBeLessThan(8000);
   });
 });
+
+describe('Smart Money Concepts and Wyckoff', () => {
+  const t0 = Date.UTC(2026, 0, 5);
+  /** volumes that vary a little (a flat volume has no spread to measure a surge against), with a surge where asked */
+  const vol = (b: B[], surge: number[] = []) => b.map((x, i) => ({ ...x, volume: surge.includes(i) ? 2000 : 100 + (i % 5) * 7 }));
+  it('market structure: a break down, a change of character up, then a break of structure up', () => {
+    const rows = [
+      ...flat(10),
+      [100, 100.2, 99, 99.2],
+      [99.2, 99.8, 99.1, 99.6],
+      [99.6, 100, 99.3, 99.8],
+      [99.8, 99.9, 98.5, 98.6],
+      [98.6, 99.5, 98.4, 99.4],
+      [99.4, 100.4, 99.2, 100.2],
+      [100.2, 100.3, 99.6, 99.8],
+      [99.8, 100.1, 99.5, 99.7],
+      [99.7, 101, 99.6, 100.9],
+      [100.9, 101.2, 100.5, 100.7],
+      [100.7, 100.9, 100.2, 100.4],
+      [100.4, 100.8, 100.1, 100.6],
+      [100.6, 101.8, 100.5, 101.6],
+    ];
+    const b = bars(t0, rows);
+    expect(at(SIGNAL_MAP.choch.compute(ctx(b), { k: 2 }))).toEqual([[18, 1]]);
+    expect(at(SIGNAL_MAP.bos.compute(ctx(b), { k: 2 }))).toEqual([[22, 1]]);
+    const f = FILTER_MAP.structure.compute(ctx(b), { k: 2 });
+    expect([f.long[15], f.short[15], f.long[20], f.short[20]]).toEqual([0, 1, 1, 0]);
+  });
+
+  it('a demand zone: the first return to the base under a strong move is bought', () => {
+    const rows = flat(30);
+    rows[28] = [100, 100.2, 99.9, 100.1];
+    rows[29] = [100.1, 100.2, 99.95, 100.1];
+    const b = bars(t0, [...rows, [100.1, 102.5, 100, 102.4], [102.4, 102.6, 101.5, 101.8], [101.8, 101.9, 100.1, 100.5]]);
+    expect(at(SIGNAL_MAP.sdzone.compute(ctx(b), { k: 1.5, age: 48 }))).toEqual([[32, 1]]);
+  });
+
+  it('Wyckoff: a sign of strength out of a tight range, its last point of support, a selling climax, stopping volume', () => {
+    const sos = vol(bars(t0, [...flat(60), [100, 102, 99.9, 101.8], [101.8, 102, 101.2, 101.5], [101.5, 101.6, 100.6, 100.9]]), [60]);
+    expect(at(SIGNAL_MAP.wysos.compute(ctx(sos), { lookback: 48, w: 5, mode: 0 }))).toEqual([[60, 1]]);
+    expect(at(SIGNAL_MAP.wysos.compute(ctx(sos), { lookback: 48, w: 5, mode: 1 }))).toEqual([[62, 1]]);
+    const sc = vol(bars(t0, [...flat(80), [100, 100.2, 97.5, 97.8], [97.8, 99, 97.6, 98.8], [98.8, 100.6, 98.7, 100.5]]), [80]);
+    expect(at(SIGNAL_MAP.climax.compute(ctx(sc), { lookback: 72, v: 2 }))).toEqual([[82, 1]]);
+    const ef = vol(bars(t0, [...flat(60), [99.8, 99.9, 99.2, 99.7]]), [60]);
+    expect(at(SIGNAL_MAP.effort.compute(ctx(ef), { lookback: 24, v: 1.5 }))).toEqual([[60, 1]]);
+    // the same narrow candle on ordinary volume is nothing
+    expect(at(SIGNAL_MAP.effort.compute(ctx(vol(bars(t0, [...flat(60), [99.8, 99.9, 99.2, 99.7]]))), { lookback: 24, v: 1.5 }))).toEqual([]);
+  });
+
+  it('every new block is in the bot builder, cites its sources, says it is a practitioner method, runs fast, and is bred', async () => {
+    const ids = ['bos', 'choch', 'idm', 'sdzone', 'wysos', 'climax', 'effort'];
+    for (const id of ids) {
+      const sig = SIGNAL_MAP[id];
+      expect(STRATEGIES.some((s) => s.signal === id)).toBe(true);
+      expect(sig.papers.every((p) => PAPERS[p])).toBe(true);
+      expect(sig.rationale).toMatch(/not a peer-reviewed one/);
+      for (const [k, vs] of Object.entries(sig.grid)) expect(sig.describe({ ...Object.fromEntries(Object.entries(sig.grid).map(([a, v]) => [a, v[0]])), [k]: vs[vs.length - 1] }).length).toBeGreaterThan(20);
+    }
+    expect(FILTER_MAP.structure.papers.every((p) => PAPERS[p])).toBe(true);
+    expect(MODELS.some((m) => (typeof m.filter === 'function' ? m.filter({ L: 24 } as never).id : m.filter.id) === 'structure')).toBe(true);
+    // two years of 15-minute candles, every setting
+    let s = 17;
+    let p = 100;
+    const n = 70_000;
+    const walk = Array.from({ length: n }, (_, i) => {
+      s = (s * 16807) % 2147483647;
+      const o = p;
+      p *= 1 + (s / 2147483647 - 0.5) * 0.006;
+      return { time: t0 + i * 900_000, open: o, high: Math.max(o, p) * 1.001, low: Math.min(o, p) * 0.999, close: p, volume: 100 + (s % 97) };
+    });
+    const c = ctxOf({ coin: 'ETH', tfH: 0.25, bars: walk, funding: null } as never);
+    const started = performance.now();
+    let fired = 0;
+    for (const id of ids) {
+      const sig = SIGNAL_MAP[id];
+      for (const pr of Object.entries(sig.grid).reduce<Record<string, number>[]>((acc, [k, vs]) => acc.flatMap((x) => vs.map((v) => ({ ...x, [k]: v }))), [{}])) {
+        const out = sig.compute(c, pr);
+        expect(out.length).toBe(n);
+        fired += out.some((x) => x !== 0) ? 1 : 0;
+      }
+    }
+    expect(performance.now() - started).toBeLessThan(8000);
+    expect(fired).toBeGreaterThan(10);
+    // the edge finder draws them
+    const { Farm } = await import('./farm');
+    const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday', 'scalp'] }, { seed: 5 });
+    const w = (seed: number) => {
+      let q = seed;
+      let px = 100;
+      return Array.from({ length: 3000 }, (_, i) => {
+        q = (q * 16807) % 2147483647;
+        const o = px;
+        px *= 1 + (q / 2147483647 - 0.5) * 0.01;
+        return { time: t0 + i * HOUR, open: o, high: Math.max(o, px) * 1.002, low: Math.min(o, px) * 0.998, close: px, volume: 100 + (q % 50) };
+      });
+    };
+    farm.setMarkets({ '1h': [{ coin: 'BTC', tfH: 1, bars: w(3), funding: null }, { coin: 'ETH', tfH: 1, bars: w(5), funding: null }] } as never);
+    const seen = new Set<string>();
+    const models = new Set<string>();
+    for (let i = 0; i < 3000; i++) {
+      const f = farm.randomFlow();
+      f?.strategies.forEach((x) => seen.add(x));
+      f?.models.forEach((x) => models.add(x));
+    }
+    for (const id of ['bos', 'choch', 'idm', 'sdzone', 'wysos', 'wylps', 'climax', 'effort']) expect(seen.has(id)).toBe(true);
+    expect(models.has('structure')).toBe(true);
+  });
+});
+
+describe('the edge finder keeps its memory in bounds', () => {
+  it('kept series stay under the budget, the least recently used going first, and are worked out again when needed', async () => {
+    const { setCacheCap, cacheUse, releaseCtx } = await import('./library');
+    setCacheCap(2_000_000);
+    try {
+      const t0 = Date.UTC(2026, 0, 5);
+      const b = bars(t0, Array.from({ length: 20_000 }, (_, i) => [100 + Math.sin(i / 50), 101 + Math.sin(i / 50), 99 + Math.sin(i / 50), 100 + Math.sin(i / 50)]));
+      const c = ctx(b);
+      const first = SIGNAL_MAP.sweep.compute(c, { lookback: 24 });
+      for (const lookback of [72, 168, 24, 72, 168]) SIGNAL_MAP.sweep.compute(c, { lookback });
+      for (const lookback of [24, 120, 480]) FILTER_MAP.pd.compute(c, { lookback });
+      expect(cacheUse().bytes).toBeLessThanOrEqual(2_000_000);
+      // the same answer after its series were let go
+      expect([...SIGNAL_MAP.sweep.compute(c, { lookback: 24 })]).toEqual([...first]);
+      releaseCtx(c);
+      expect(c.cache.size).toBe(0);
+    } finally {
+      setCacheCap(0);
+    }
+  });
+});

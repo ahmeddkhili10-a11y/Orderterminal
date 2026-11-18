@@ -61,6 +61,7 @@ import {
   type StyleId,
 } from "./flow";
 import {
+  releaseCtx,
   barsPerYear,
   ctxOf,
   SIGNAL_MAP,
@@ -694,6 +695,8 @@ export class Farm {
    * thread must keep answering while it does it.
    */
   setMarkets(byTf: Record<string, Market[]>, o: { defer?: boolean } = {}) {
+    // the old candles' worked-out series are let go at once (with a memory budget set)
+    for (const set of [this.ctxs, this.inner, this.fwd]) for (const cs of Object.values(set ?? {})) for (const c of cs) releaseCtx(c);
     this.ctxs = {};
     this.inner = {};
     this.fwd = {};
@@ -843,8 +846,10 @@ export class Farm {
    */
   private weight(key: string): number {
     const st = this.stats.get(key);
-    if (!st) return 1;
-    return Math.max(0.15, Math.min(4, (10 * (st.pass + 2 * st.surv + 1)) / (st.n + 10)));
+    // a block barely tried yet (one added in an update) is drawn twice as often until it has had a fair hearing
+    if (!st) return 2;
+    const w = Math.max(0.15, Math.min(4, (10 * (st.pass + 2 * st.surv + 1)) / (st.n + 10)));
+    return st.n < 40 ? Math.max(w, 2) : w;
   }
 
   /** one of the ids, drawn by what the farm has learned about them */

@@ -60,9 +60,86 @@ export const ctxOf = (m: Market, trainEnd = m.bars.length, seed = 7): Ctx => ({ 
 export const H = (c: Ctx, hours: number) => Math.max(2, Math.round(hours / c.m.tfH));
 export const barsPerYear = (tfH: number) => (24 * 365) / tfH;
 
+/**
+ * The worked-out series each rule reuses (averages, ranges, gaps...) are kept on its
+ * context. The edge finder breeds bots with ever new settings, so without a limit they pile
+ * up for hours — gigabytes on 15-minute candles — until the computer runs short of memory and
+ * the thread stalls. With a budget set (the edge finder's thread sets one), the least
+ * recently used are let go first and simply worked out again if asked for. With none (every
+ * other use), nothing changes.
+ */
+let cacheCap = 0;
+let cacheBytes = 0;
+const cacheOrder = new Map<string, { c: Ctx; key: string; bytes: number }>();
+const ctxIds = new WeakMap<Ctx, number>();
+let nextCtx = 1;
+const idOf = (c: Ctx) => {
+  let id = ctxIds.get(c);
+  if (!id) ctxIds.set(c, (id = nextCtx++));
+  return id;
+};
+const sizeOf = (v: unknown): number => {
+  if (ArrayBuffer.isView(v)) return v.byteLength;
+  if (Array.isArray(v)) return v.length * 8 + (v.length && typeof v[0] === 'object' && v[0] ? v.length * 32 : 0);
+  if (v && typeof v === 'object') {
+    let n = 64;
+    for (const x of Object.values(v)) if (ArrayBuffer.isView(x) || Array.isArray(x)) n += sizeOf(x);
+    return n;
+  }
+  return 16;
+};
+/** limit the kept series to about `bytes` (0: no limit) */
+export function setCacheCap(bytes: number) {
+  cacheCap = bytes;
+  if (!bytes) {
+    cacheOrder.clear();
+    cacheBytes = 0;
+  }
+}
+/** a context that is no longer used: its kept series are let go at once */
+export function releaseCtx(c: Ctx) {
+  if (!cacheCap) return;
+  const id = idOf(c);
+  for (const key of c.cache.keys()) {
+    const k = `${id}|${key}`;
+    const e = cacheOrder.get(k);
+    if (e) {
+      cacheBytes -= e.bytes;
+      cacheOrder.delete(k);
+    }
+  }
+  c.cache.clear();
+}
+export const cacheUse = () => ({ bytes: cacheBytes, entries: cacheOrder.size });
+
 function cached<T>(c: Ctx, key: string, f: () => T): T {
-  if (!c.cache.has(key)) c.cache.set(key, f());
-  return c.cache.get(key) as T;
+  if (c.cache.has(key)) {
+    if (cacheCap) {
+      const k = `${idOf(c)}|${key}`;
+      const e = cacheOrder.get(k);
+      if (e) {
+        cacheOrder.delete(k);
+        cacheOrder.set(k, e);
+      }
+    }
+    return c.cache.get(key) as T;
+  }
+  const v = f();
+  c.cache.set(key, v);
+  if (cacheCap) {
+    const bytes = sizeOf(v);
+    cacheOrder.set(`${idOf(c)}|${key}`, { c, key, bytes });
+    cacheBytes += bytes;
+    // over budget: the least recently used go (never the one just made)
+    for (const [k, e] of cacheOrder) {
+      if (cacheBytes <= cacheCap || cacheOrder.size <= 1) break;
+      if (e.c === c && e.key === key) continue;
+      e.c.cache.delete(e.key);
+      cacheBytes -= e.bytes;
+      cacheOrder.delete(k);
+    }
+  }
+  return v;
 }
 const close = (c: Ctx) => cached(c, 'close', () => Float64Array.from(c.m.bars, (b) => b.close));
 const smaH = (c: Ctx, h: number) => cached(c, `sma${H(c, h)}`, () => sma(close(c), H(c, h)));
@@ -694,6 +771,43 @@ function orderBlocks(c: Ctx, k: number): { bull: ({ lo: number; hi: number } | n
   });
 }
 const WYCKOFF_NOTE = ' A practitioner method (Wyckoff), not a peer-reviewed one: the Lab tests whether it holds on crypto, with costs, on data it never saw.';
+const SMC_NOTE = ' A practitioner method (Smart Money Concepts), not a peer-reviewed one: the Lab tests whether it holds on crypto, with costs, on data it never saw.';
+const VSA_NOTE = ' A practitioner method (Wyckoff, and volume spread analysis after Tom Williams), not a peer-reviewed one — volume does carry information prices alone do not (Blume, Easley & O’Hara; Karpoff): the Lab tests whether this holds on crypto, with costs, on data it never saw.';
+/**
+ * Market structure the Smart Money Concepts way, from swing points (`k` candles either side):
+ * a close beyond the last swing high is a break of structure (BOS) when the structure was
+ * already up, a change of character (CHoCH) when it was down — and the mirror at swing lows.
+ * Each swing level breaks once. `trend` is the structure after each candle (+1 up, −1 down, 0 not yet).
+ */
+function structureOf(c: Ctx, k: number): { trend: Int8Array; bos: Int8Array; choch: Int8Array } {
+  return cached(c, `smc${k}`, () => {
+    const b = c.m.bars;
+    const { hi, lo } = pivots(c, k);
+    const trend = new Int8Array(b.length);
+    const bos = new Int8Array(b.length);
+    const choch = new Int8Array(b.length);
+    let swingH = NaN;
+    let swingL = NaN;
+    let t = 0;
+    for (let i = 0; i < b.length; i++) {
+      if (Number.isFinite(hi[i])) swingH = hi[i];
+      if (Number.isFinite(lo[i])) swingL = lo[i];
+      if (Number.isFinite(swingH) && b[i].close > swingH) {
+        if (t === -1) choch[i] = 1;
+        else bos[i] = 1;
+        t = 1;
+        swingH = NaN;
+      } else if (Number.isFinite(swingL) && b[i].close < swingL) {
+        if (t === 1) choch[i] = -1;
+        else bos[i] = -1;
+        t = -1;
+        swingL = NaN;
+      }
+      trend[i] = t;
+    }
+    return { trend, bos, choch };
+  });
+}
 const CANDLE_NOTE = ' Candlestick patterns are practitioner lore (Nison); tests of them are mixed (Caginalp & Laurent found some predictive power): the Lab tests whether this one holds on crypto, with costs, on data it never saw.';
 
 
@@ -2266,6 +2380,264 @@ export const SIGNALS: SignalDef[] = [
     },
     describe: (p) => `after a range no wider than ${p.w} ATR over ${hrs(p.lookback)}, buy a dip below its low that closes back inside (a spring); sell the mirror at its high (an upthrust)`,
   },
+  // ---------- Smart Money Concepts ----------
+  {
+    id: 'bos',
+    name: 'SMC break of structure (continuation)',
+    family: 'trend',
+    papers: ['smc', 'lmw00'],
+    rationale: 'Smart Money Concepts read the trend from swing points: higher highs and higher lows are an uptrend. A close beyond the last swing high while the structure is already up is a break of structure — the trend carrying on: follow it (the mirror in a downtrend).' + SMC_NOTE,
+    grid: { k: [2, 3, 5] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 36, onFlip: false },
+    compute: (c, p) => {
+      const { bos, trend } = structureOf(c, p.k);
+      const out = state(c.m.bars.length);
+      // a continuation needs a trend that was already there before this candle
+      for (let i = 1; i < out.length; i++) if (bos[i] && trend[i - 1] === bos[i]) out[i] = bos[i];
+      return out;
+    },
+    describe: (p) => `swing points ${p.k} candles either side: when the structure is up and a candle closes above the last swing high (a break of structure), buy — the mirror in a downtrend`,
+  },
+  {
+    id: 'choch',
+    name: 'SMC change of character (reversal)',
+    family: 'reversion',
+    papers: ['smc', 'lmw00'],
+    rationale: 'The first close beyond the last swing high while the structure was down is a change of character — the first sign the sellers have lost control. Smart Money traders take the new direction from there (the mirror at a swing low in an uptrend).' + SMC_NOTE,
+    grid: { k: [2, 3, 5] },
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 36, onFlip: false },
+    compute: (c, p) => {
+      const { choch } = structureOf(c, p.k);
+      return Int8Array.from(choch);
+    },
+    describe: (p) => `swing points ${p.k} candles either side: when the structure is down and a candle closes above the last swing high (a change of character), buy — the mirror when an uptrend breaks its last swing low`,
+  },
+  {
+    id: 'idm',
+    name: 'SMC inducement sweep',
+    family: 'trend',
+    papers: ['smc', 'osler05'],
+    rationale: 'After a break of structure, the first pullback leaves a small swing low — the inducement, where early buyers put their stops. Smart Money teaches that price takes those stops before the trend resumes: buy the candle that runs below the inducement and closes back above it (the mirror in a downtrend).' + SMC_NOTE,
+    grid: { k: [2, 3], age: [24, 72] },
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 36, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const { bos, choch } = structureOf(c, p.k + 1);
+      const { hi, lo } = pivots(c, p.k);
+      const maxAge = H(c, p.age);
+      const out = state(b.length);
+      let dir = 0;
+      let at = -1;
+      let level = NaN;
+      for (let i = 0; i < b.length; i++) {
+        const brk = bos[i] || choch[i];
+        if (brk) {
+          dir = brk;
+          at = i;
+          level = NaN;
+          continue;
+        }
+        if (!dir) continue;
+        if (i - at > maxAge) {
+          dir = 0;
+          continue;
+        }
+        // the first minor swing after the break is the inducement
+        if (!Number.isFinite(level)) {
+          if (dir === 1 && Number.isFinite(lo[i])) level = lo[i];
+          if (dir === -1 && Number.isFinite(hi[i])) level = hi[i];
+          continue;
+        }
+        if (dir === 1 && b[i].low < level && b[i].close > level) {
+          out[i] = 1;
+          dir = 0;
+        } else if (dir === -1 && b[i].high > level && b[i].close < level) {
+          out[i] = -1;
+          dir = 0;
+        }
+      }
+      return out;
+    },
+    describe: (p) => `after a break of structure, the first small swing low (${p.k} candles either side) is the inducement: buy a candle that runs below it and closes back above, within ${hrs(p.age)} (the mirror after a break down)`,
+  },
+  {
+    id: 'sdzone',
+    name: 'Supply and demand zone retest',
+    family: 'trend',
+    papers: ['smc', 'osler03'],
+    rationale: 'A base of small candles followed by a strong move leaves a demand zone (rally from a base) or a supply zone (drop from a base): orders were filled there faster than price could print. The first return to the base is bought (or sold), expecting the unfilled orders still to be waiting.' + SMC_NOTE,
+    grid: { k: [1.5, 2.5], age: [48, 168] },
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 36, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const maxAge = H(c, p.age);
+      const out = state(b.length);
+      let D: { lo: number; hi: number; at: number } | null = null;
+      let S: { lo: number; hi: number; at: number } | null = null;
+      for (let i = 4; i < b.length; i++) {
+        const a = A[i - 1];
+        if (!(a > 0)) continue;
+        // the base: one to three small candles (range under 0.6 ATR) right before a strong candle
+        const body = b[i].close - b[i].open;
+        if (Math.abs(body) >= p.k * a) {
+          let lo = Infinity;
+          let hi = -Infinity;
+          let n = 0;
+          for (let j = i - 1; j >= i - 3 && b[j].high - b[j].low < 0.6 * a; j--) {
+            lo = Math.min(lo, b[j].low);
+            hi = Math.max(hi, b[j].high);
+            n++;
+          }
+          if (n) {
+            if (body > 0) D = { lo, hi, at: i };
+            else S = { lo, hi, at: i };
+          }
+          continue;
+        }
+        if (D && i > D.at + 1) {
+          if (i - D.at > maxAge || b[i].close < D.lo) D = null;
+          else if (b[i].low <= D.hi) {
+            out[i] = 1;
+            D = null;
+          }
+        }
+        if (S && i > S.at + 1) {
+          if (i - S.at > maxAge || b[i].close > S.hi) S = null;
+          else if (b[i].high >= S.lo) {
+            out[i] = -1;
+            S = null;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) => `a base of one to three small candles followed by a move of ${p.k} ATR or more is a demand (or supply) zone: trade the first return to it within ${hrs(p.age)}`,
+  },
+  // ---------- Wyckoff and volume spread ----------
+  {
+    id: 'wysos',
+    name: 'Wyckoff sign of strength and last point of support',
+    family: 'breakout',
+    papers: ['wyck', 'beo94', 'kar87'],
+    rationale: "After a tight trading range (accumulation), Wyckoff's sign of strength is a wide candle on heavy volume closing above the range: demand has overcome supply. Buy it — or (the other style) wait for the last point of support, the first pullback to the top of the range that holds. The mirror after distribution: the sign of weakness and the last point of supply." + VSA_NOTE,
+    grid: { lookback: [48, 120], w: [5, 8], mode: [0, 1] },
+    exit: { stopAtr: 1.5, targetR: 2.5, maxBars: 48, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const vz = cached(c, `vz${H(c, 48)}`, () => volZ(b, H(c, 48)));
+      const out = state(b.length);
+      let up: { top: number; at: number } | null = null;
+      let dn: { bot: number; at: number } | null = null;
+      for (let i = n; i < b.length; i++) {
+        const a = A[i - 1];
+        if (!(a > 0) || !Number.isFinite(hh[i])) continue;
+        const tight = hh[i] - ll[i] <= p.w * a;
+        const wide = b[i].high - b[i].low >= 1.2 * a;
+        const heavy = vz[i] >= 1.5;
+        if (tight && wide && heavy && b[i].close > hh[i]) {
+          if (p.mode === 0) out[i] = 1;
+          else up = { top: hh[i], at: i };
+          continue;
+        }
+        if (tight && wide && heavy && b[i].close < ll[i]) {
+          if (p.mode === 0) out[i] = -1;
+          else dn = { bot: ll[i], at: i };
+          continue;
+        }
+        if (up && i > up.at) {
+          if (i - up.at > n || b[i].close < up.top - 0.5 * a) up = null;
+          else if (b[i].low <= up.top + 0.3 * a && b[i].close > up.top) {
+            out[i] = 1;
+            up = null;
+          }
+        }
+        if (dn && i > dn.at) {
+          if (i - dn.at > n || b[i].close > dn.bot + 0.5 * a) dn = null;
+          else if (b[i].high >= dn.bot - 0.3 * a && b[i].close < dn.bot) {
+            out[i] = -1;
+            dn = null;
+          }
+        }
+      }
+      return out;
+    },
+    describe: (p) =>
+      p.mode === 0
+        ? `after a range no wider than ${p.w} ATR over ${hrs(p.lookback)}, buy a wide candle on heavy volume that closes above it (a sign of strength); sell the mirror (a sign of weakness)`
+        : `after a sign of strength out of a range of ${p.w} ATR or less over ${hrs(p.lookback)}, buy the first pullback to the top of the range that closes back above it (the last point of support); the mirror after a sign of weakness`,
+  },
+  {
+    id: 'climax',
+    name: 'Wyckoff selling and buying climax',
+    family: 'reversion',
+    papers: ['wyck', 'beo94', 'kar87'],
+    rationale: 'A selling climax: at the end of a fall, a very wide candle on extreme volume at a new low — panic selling absorbed by large buyers. When a candle soon after closes above the climax candle (the automatic rally), the fall is likely over: buy. The mirror at a top is a buying climax.' + VSA_NOTE,
+    grid: { lookback: [72, 168], v: [2, 3] },
+    exit: { stopAtr: 2, targetR: 2, maxBars: 48, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const vz = cached(c, `vz${H(c, 48)}`, () => volZ(b, H(c, 48)));
+      const out = state(b.length);
+      let sc: { hi: number; at: number } | null = null;
+      let bc: { lo: number; at: number } | null = null;
+      for (let i = n; i < b.length; i++) {
+        const a = A[i - 1];
+        if (!(a > 0)) continue;
+        const wide = b[i].high - b[i].low >= 1.8 * a;
+        if (wide && vz[i] >= p.v && b[i].low < ll[i] && b[i].close < b[i].open) sc = { hi: b[i].high, at: i };
+        else if (wide && vz[i] >= p.v && b[i].high > hh[i] && b[i].close > b[i].open) bc = { lo: b[i].low, at: i };
+        else {
+          if (sc && i - sc.at <= 3 && b[i].close > sc.hi) {
+            out[i] = 1;
+            sc = null;
+          } else if (sc && i - sc.at > 3) sc = null;
+          if (bc && i - bc.at <= 3 && b[i].close < bc.lo) {
+            out[i] = -1;
+            bc = null;
+          } else if (bc && i - bc.at > 3) bc = null;
+        }
+      }
+      return out;
+    },
+    describe: (p) => `a candle at a new ${hrs(p.lookback)} low, at least 1.8 ATR wide on volume ${p.v} standard deviations above normal, is a selling climax: buy when one of the next three candles closes above it (the mirror at a top)`,
+  },
+  {
+    id: 'effort',
+    name: 'Effort without result (stopping volume)',
+    family: 'reversion',
+    papers: ['wyck', 'beo94', 'kar87'],
+    rationale: "Wyckoff's law of effort and result: heavy volume should move price. At a new low, a narrow candle on very heavy volume that closes in its upper half is effort without result — the selling is being absorbed (stopping volume). Buy it; the mirror at a high." + VSA_NOTE,
+    grid: { lookback: [24, 72], v: [1.5, 2.5] },
+    exit: { stopAtr: 1.5, targetR: 2, maxBars: 24, onFlip: false },
+    compute: (c, p) => {
+      const b = c.m.bars;
+      const A = atr14(c);
+      const n = H(c, p.lookback);
+      const hh = cached(c, `hp${n}`, () => hiPrev(b, n));
+      const ll = cached(c, `lp${n}`, () => loPrev(b, n));
+      const vz = cached(c, `vz${H(c, 48)}`, () => volZ(b, H(c, 48)));
+      const out = state(b.length);
+      for (let i = n; i < b.length; i++) {
+        const a = A[i - 1];
+        const r = b[i].high - b[i].low;
+        if (!(a > 0) || !(r > 0) || !(vz[i] >= p.v) || r > 0.8 * a) continue;
+        const pos = (b[i].close - b[i].low) / r;
+        if (b[i].low < ll[i] && pos >= 0.5) out[i] = 1;
+        else if (b[i].high > hh[i] && pos <= 0.5) out[i] = -1;
+      }
+      return out;
+    },
+    describe: (p) => `at a new ${hrs(p.lookback)} low, a narrow candle (under 0.8 ATR) on volume ${p.v} standard deviations above normal that closes in its upper half: buy (the mirror at a high)`,
+  },
 ];
 
 // ---------- the filters ----------
@@ -2622,6 +2994,23 @@ export const FILTERS: FilterDef[] = [
             : p.anchor === 2
               ? "only with the day's candle from midnight New York: longs above that open, shorts below"
               : "only with the day's candle: longs above the daily open (00:00 UTC), shorts below",
+  },
+  {
+    id: 'structure',
+    name: 'SMC market structure',
+    papers: ['smc', 'lmw00'],
+    rationale: 'Trade only with the market structure: longs while the last break was up (higher highs and higher lows), shorts while it was down — the first rule of Smart Money Concepts.' + SMC_NOTE,
+    grid: { k: [3, 5, 10] },
+    compute: (c, p) => {
+      const { trend } = structureOf(c, p.k);
+      const a = allow(trend.length);
+      for (let i = 0; i < trend.length; i++) {
+        a.long[i] = trend[i] === 1 ? 1 : 0;
+        a.short[i] = trend[i] === -1 ? 1 : 0;
+      }
+      return a;
+    },
+    describe: (p) => `only with the market structure (swing points ${p.k} candles either side): longs while it is up, shorts while it is down`,
   },
 ];
 
