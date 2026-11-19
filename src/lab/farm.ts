@@ -2157,11 +2157,21 @@ export class Farm {
 
   /** the stars: proven on fresh data and over 200 % a year — the best first (at most ten) */
   stars(): Survivor[] {
-    return this.survivors
-      .filter(isStar)
-      .sort((a, b) => starRet(b) - starRet(a))
-      .slice(0, 10);
+    // re-ordered with the lists, on their 20-second clock, so the screen holds still
+    const at = this.board?.at ?? -1;
+    if (!this.starIds || this.starIds.at !== at)
+      this.starIds = {
+        at,
+        ids: this.survivors
+          .filter(isStar)
+          .sort((a, b) => starRet(b) - starRet(a))
+          .slice(0, 10)
+          .map((x) => x.id),
+      };
+    const byId = new Map(this.survivors.map((x) => [x.id, x]));
+    return this.starIds.ids.map((id) => byId.get(id)).filter((x): x is Survivor => !!x && x.stage !== "faded");
   }
+  private starIds: { at: number; ids: string[] } | null = null;
 
   /** keep a strategy for good (or let it go again): a kept one is never pruned or hidden */
   pin(id: string, on: boolean) {

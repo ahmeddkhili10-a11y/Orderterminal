@@ -117,7 +117,9 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
       : []);
   const kept = farm.kept ?? [];
   const keptIds = new Set(kept.map((x) => x.id));
-  const all = [...kept, ...boards.flatMap((b) => b.rows)];
+  // proven and over 200 % a year: the ones offered on the phone, listed whether or not they make a pace's top five
+  const stars = farm.stars ?? [];
+  const all = [...kept, ...stars, ...boards.flatMap((b) => b.rows)];
   listed.current = all;
   const found = all.find((s) => s.id === sel) ?? null;
   if (found) shown.current = found;
@@ -129,6 +131,8 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
       const i = b.rows.findIndex((r) => r.id === s.id);
       if (i >= 0) return { n: i + 1, pace: b.name };
     }
+    const k = stars.findIndex((r) => r.id === s.id);
+    if (k >= 0) return { n: k + 1, pace: "⭐ Stars" };
     return null;
   };
   const running = farm.running;
@@ -230,6 +234,20 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
               <span className="muted">never dropped · {kept.length}</span>
             </div>
             <Table rows={kept} sel={pick?.id ?? null} onSel={setSel} />
+          </div>
+        )}
+        {stars.length > 0 && (
+          <div data-stars>
+            <div className="pro-section farm-board-head">
+              <span>⭐ STARS — PROVEN AND OVER 200 % A YEAR (OFFERED ON YOUR PHONE)</span>
+              <span className="muted">{stars.length} · /stars on Telegram</span>
+            </div>
+            {c.explain && (
+              <div className="lab-line muted">
+                Proven on fresh data and over 200 % a year on data they never saw, at 1× or sized up to a 15 % worst drop. Each pace’s top five below is ordered by overall quality (steadiness, fresh data, significance), not by return — so a star can be missing from it.
+              </div>
+            )}
+            <Table rows={stars} sel={pick?.id ?? null} onSel={setSel} />
           </div>
         )}
         {boards.map((b) => (
