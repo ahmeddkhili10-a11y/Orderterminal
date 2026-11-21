@@ -25,7 +25,7 @@
     "dist:linux": "npm run build && npm run build:main && electron-builder --linux AppImage",
     "e2e:desktop": "npm run build && npm run build:main && node e2e/desktop.mjs",
     "e2e:smooth": "npm run build && npm run build:main && node e2e/smooth.mjs",
-    "dist:win:local": "npm run build && npm run build:main && electron-builder --win dir --x64 -c.win.signAndEditExecutable=false && node scripts/set-exe-icon.mjs && electron-builder --win portable zip --x64 --prepackaged release/win-unpacked -c.win.signAndEditExecutable=false"
+    "dist:win:local": "npm run build && npm run build:main && electron-builder --win dir --x64 -c.win.signAndEditExecutable=false && node scripts/set-exe-icon.mjs && electron-builder --win nsis portable zip --x64 --prepackaged release/win-unpacked -c.win.signAndEditExecutable=false"
   },
   "engines": {
     "node": ">=22"

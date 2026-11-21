@@ -20,7 +20,7 @@
         var errors = [];
         function show() {
           var root = document.getElementById('root');
-          if (!root || root.firstChild || !errors.length) return;
+          if (!root || (root.firstChild && root.firstChild.id !== 'boot-splash') || !errors.length) return;
           root.innerHTML =
             '<div style="color:#c9cdd3;font:14px/1.6 system-ui,sans-serif;padding:48px;max-width:760px">' +
             '<b style="color:#fff">Novus Ordo failed to start.</b><br>' +
@@ -39,7 +39,8 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="boot-splash" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#000;color:#9aa3ad;font:13px/1.5 system-ui,sans-serif;letter-spacing:.18em"><img src="./apple-touch-icon.png" alt="" width="96" height="96" style="opacity:.92;animation:bootpulse 1.6s ease-in-out infinite" /><div>NOVUS ORDO</div><div style="font-size:11px;letter-spacing:.08em;color:#5f6770">Starting…</div></div></div>
+    <style>@keyframes bootpulse{0%,100%{opacity:.55}50%{opacity:1}}</style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

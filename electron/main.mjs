@@ -1387,6 +1387,10 @@ app.whenReady().then(async () => {
   if (app.isPackaged && process.platform !== 'linux' && db.get('autoStart') === undefined) {
     db.set('autoStart', true);
     setAutoStart(true);
+  } else if (app.isPackaged && process.platform !== 'linux' && db.get('autoStart')) {
+    // pointed at this copy each start: moving from the portable file to the installed app must not leave
+    // Windows starting the slow portable one (it unpacks itself on every start)
+    setAutoStart(true);
   }
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
@@ -1421,7 +1425,21 @@ app.whenReady().then(async () => {
     if (screens) screens.quitting = true;
   });
   log('info', 'window created');
-  services = import('./ccxt-service.mjs')
+  // the heavy part (the exchange library, the Lab, the swarm, the bots) starts once the window has drawn
+  // its first screen: loading it first kept the page from loading — a blank window for seconds, longer
+  // from a cold start — and anything that needs it waits on this promise
+  let startServices;
+  const go = new Promise((resolve) => (startServices = resolve));
+  {
+    const kick = () => setTimeout(() => startServices(), 150);
+    win?.webContents.once('did-finish-load', kick);
+    setTimeout(() => startServices(), 8000).unref?.();
+  }
+  services = go
+    .then(() => {
+      log('info', 'starting exchange services');
+      return import('./ccxt-service.mjs');
+    })
     .then(async (m) => {
       await m.loadCcxt();
       ccxtSvc = new m.CcxtService(vault, { db, onClock: (name, diff) => log('warn', `${name}: PC clock is ${Math.round(diff)} ms off the exchange — signing with exchange time`) });
