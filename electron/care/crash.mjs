@@ -25,6 +25,15 @@ export function markRunning(dir, now = Date.now()) {
   return prev;
 }
 
+/** Novus Ordo is restarting itself (safe mode, a restored backup, a setting): the next start is told it was planned, not a crash */
+export function markRestart(dir, reason, now = Date.now()) {
+  try {
+    writeFileSync(join(dir, FLAG), JSON.stringify({ t: now, restart: String(reason).slice(0, 120) }));
+  } catch {
+    /* nothing to do */
+  }
+}
+
 /** the session closed properly */
 export function markStopped(dir) {
   try {

@@ -8,7 +8,7 @@ import { backText, clearedText, dailyText, problemsOf, weeklyText } from './repo
 import { Care, localDay } from './care.mjs';
 import { Approvals } from './approve.mjs';
 import { Remote } from './remote.mjs';
-import { markRunning, markStopped, tidyErrors, crashText, wakeText } from './crash.mjs';
+import { markRestart, markRunning, markStopped, tidyErrors, crashText, wakeText } from './crash.mjs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -456,6 +456,9 @@ describe('crash reports', () => {
     expect(markRunning(dir, 2000)).toBeNull();
     // not closed: found at the next start
     expect(markRunning(dir, 3000)).toMatchObject({ t: 2000 });
+    // it restarted itself on purpose (safe mode after a graphics crash): the next start sees a planned restart, not a crash
+    markRestart(dir, 'safe mode: GPU process crashed', 4000);
+    expect(markRunning(dir, 5000)).toMatchObject({ t: 4000, restart: 'safe mode: GPU process crashed' });
   });
   it('the last errors from the log, without signatures, keys or addresses, each once', () => {
     const log = [

@@ -20,7 +20,7 @@ import { fromBot, fromSwarm, TradeJournal } from './care/journal.mjs';
 import { Care } from './care/care.mjs';
 import { Approvals } from './care/approve.mjs';
 import { Remote } from './care/remote.mjs';
-import { crashText, lastErrors, markRunning, markStopped, wakeText } from './care/crash.mjs';
+import { crashText, lastErrors, markRunning, markRestart, markStopped, wakeText } from './care/crash.mjs';
 import { buildSpec } from '../src/lab/flow.ts';
 import { testedStats } from '../src/lab/live.ts';
 import { costsForTests, measureCosts } from './care/costs.mjs';
@@ -148,6 +148,7 @@ function relaunchSafe(reason) {
   } catch (e) {
     log('error', 'could not write safe-mode flag', e);
   }
+  markRestart(userDataDir, `safe mode: ${reason}`);
   const portable = process.env.PORTABLE_EXECUTABLE_FILE;
   app.relaunch(portable ? { execPath: portable, args: [] } : undefined);
   app.exit(0);
@@ -157,6 +158,7 @@ function relaunchSafe(reason) {
 function leaveSafeMode() {
   rmSync(SAFE_FLAG, { force: true });
   log('info', 'leaving safe mode');
+  markRestart(userDataDir, 'leaving safe mode');
   const portable = process.env.PORTABLE_EXECUTABLE_FILE;
   app.relaunch(portable ? { execPath: portable, args: [] } : { args: process.argv.slice(1).filter((a) => a !== '--safe-mode') });
   app.exit(0);
@@ -170,6 +172,11 @@ if (!primary) {
   app.quit();
 } else {
   unclean = markRunning(userDataDir);
+  // it restarted itself on purpose (safe mode, a restore): not a crash to report
+  if (unclean?.restart) {
+    log('info', `restarted by itself: ${unclean.restart}`);
+    unclean = null;
+  }
   if (unclean) log('warn', `the last session did not close properly (started ${new Date(unclean.t || 0).toISOString()})`);
 }
 
@@ -256,7 +263,18 @@ function createWindow() {
     // a window that is still one flat colour after 15 s is not rendering: retry without the GPU
     setTimeout(() => void checkBlank(w), 15_000);
   });
-  wc.on('did-fail-load', (_e, code, desc, url) => log('error', `page failed to load (${code} ${desc}) ${url}`));
+  wc.on('did-fail-load', (_e, code, desc, url, mainFrame) => {
+    log('error', `page failed to load (${code} ${desc}) ${url}`);
+    // the page itself (not a picture in it) failed: tried again once, a second later
+    if (mainFrame !== false && code !== -3 && !w.__retried && !w.isDestroyed()) {
+      w.__retried = true;
+      setTimeout(() => {
+        if (w.isDestroyed()) return;
+        if (process.env.VITE_DEV_SERVER_URL) void w.loadURL(process.env.VITE_DEV_SERVER_URL);
+        else void w.loadFile(join(root, 'dist', 'index.html')).catch((e) => log('error', 'loadFile failed again', e));
+      }, 1000);
+    }
+  });
   wc.on('render-process-gone', (_e, d) => {
     log('error', `window renderer gone: ${d.reason} (exit ${d.exitCode})`);
     if (d.reason !== 'clean-exit') {
@@ -1301,6 +1319,7 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
     return { storage: r.storage, keys: r.keys, trades: r.trades };
   });
   handle('app:restart', () => {
+    markRestart(userDataDir, 'restart asked for');
     const portable = process.env.PORTABLE_EXECUTABLE_FILE;
     app.relaunch(portable ? { execPath: portable, args: [] } : { args: process.argv.slice(1) });
     setTimeout(() => app.exit(0), 300);
@@ -1328,9 +1347,10 @@ app.whenReady().then(async () => {
         cancelId: 1,
       });
       if (pick === 0) {
+        markRestart(userDataDir, 'database busy — trying again');
         const portable = process.env.PORTABLE_EXECUTABLE_FILE;
         app.relaunch(portable ? { execPath: portable, args: [] } : { args: process.argv.slice(1) });
-      }
+      } else markStopped(userDataDir);
       app.exit(0);
       return;
     }
@@ -1534,10 +1554,26 @@ app.whenReady().then(async () => {
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
 
+let gpuCrashes = 0;
 app.on('child-process-gone', (_e, d) => {
   log('error', `${d.type} process gone: ${d.reason} (exit ${d.exitCode})`);
-  if (d.reason !== 'clean-exit' && d.reason !== 'killed') care?.error(`proc:${d.type}`, `A part of Novus Ordo stopped (${d.type}: ${d.reason}). ${d.type === 'GPU' ? 'It restarts without the graphics card (safe mode).' : 'It carries on.'}`);
-  if (d.type === 'GPU' && d.reason !== 'clean-exit') relaunchSafe(`GPU process ${d.reason}`);
+  if (d.reason !== 'clean-exit' && d.reason !== 'killed') care?.error(`proc:${d.type}`, `A part of Novus Ordo stopped (${d.type}: ${d.reason}). ${d.type === 'GPU' ? 'It carried on; from the next start it draws without the graphics card (safe mode — Help menu to change).' : 'It carries on.'}`);
+  if (d.type === 'GPU' && d.reason !== 'clean-exit' && d.reason !== 'killed' && !safeMode) {
+    // the graphics process restarts by itself and the window usually carries on: no restart of the whole app
+    // (that cut the page off mid-load and looked like a crash). The next start draws without the graphics card;
+    // this one is restarted that way only if the window really stays blank, or the graphics crash again.
+    gpuCrashes++;
+    try {
+      writeFileSync(SAFE_FLAG, JSON.stringify({ v: 2, reason: `GPU process ${d.reason}`, at: new Date().toISOString() }));
+    } catch (e) {
+      log('error', 'could not write safe-mode flag', e);
+    }
+    if (gpuCrashes >= 2) relaunchSafe(`GPU process ${d.reason} again`);
+    else
+      setTimeout(() => {
+        if (win && !win.isDestroyed()) void checkBlank(win);
+      }, 6000);
+  }
 });
 
 app.on('second-instance', () => {
