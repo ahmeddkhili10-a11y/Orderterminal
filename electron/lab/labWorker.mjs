@@ -2,6 +2,7 @@
 // from the desktop process's event loop, reporting progress as it goes.
 import { parentPort } from 'node:worker_threads';
 import { evaluate, research, scoreVariants } from '../../src/lab/research.ts';
+import { retune } from '../../src/lab/retune.ts';
 
 parentPort.on('message', async (msg) => {
   try {
@@ -10,6 +11,9 @@ parentPort.on('message', async (msg) => {
       parentPort.postMessage({ type: 'result', result });
     } else if (msg.type === 'evaluate') {
       parentPort.postMessage({ type: 'result', result: evaluate(msg.markets, msg.spec, msg.isShare, msg.costs) });
+    } else if (msg.type === 'retune') {
+      // the re-tuner: a deployed strategy's settings checked again on the latest candles
+      parentPort.postMessage({ type: 'result', result: retune(msg.markets, msg.spec, { costs: msg.costs }) });
     } else if (msg.type === 'score') {
       // the optimizer: versions of a strategy measured inside the training years
       const result = scoreVariants(msg.markets, msg.specs, msg.isShare, msg.costs, (done, total) => (done % 3 === 0 || done === total) && parentPort.postMessage({ type: 'progress', progress: { stage: 'Trying changes on the training years', done, total } }));

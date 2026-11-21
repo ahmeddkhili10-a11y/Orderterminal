@@ -19,6 +19,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { fromBot, fromSwarm, TradeJournal } from './care/journal.mjs';
 import { Care } from './care/care.mjs';
 import { Approvals } from './care/approve.mjs';
+import { Probation } from './care/probation.mjs';
+import { Retuner } from './care/retune.mjs';
 import { Remote } from './care/remote.mjs';
 import { crashText, lastErrors, markRunning, markRestart, markStopped, wakeText } from './care/crash.mjs';
 import { buildSpec } from '../src/lab/flow.ts';
@@ -197,6 +199,8 @@ let care = null;
 let screenState = 'ok';
 /** ready teams offered on Telegram with Deploy buttons (care/approve.mjs) */
 let approvals = null;
+let probation = null;
+let retuner = null;
 /** the swarm from the phone: /positions, /pause, /resume, /stop, /start (care/remote.mjs) */
 let remote = null;
 /** start (or restart) the Telegram poller for the chosen bot: set once the IPC handlers exist */
@@ -1180,10 +1184,22 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
     commands = new TelegramCommands(s.fields.token, chat, () => ({ ...tgStatus, wallet: walletReply() }), fetch, (e) => console.warn('telegram', e?.message ?? e), {
       answerBasics: () => basicsOn,
       command: async (cmd) => (cmd === '/teams' ? approvals.pool() : cmd === '/stars' ? approvals.starPool() : remote.command(cmd)),
-      callback: (data) => (String(data).startsWith('rc:') ? remote.tap(data) : approvals.tap(data)),
+      callback: (data) => (String(data).startsWith('rc:') ? remote.tap(data) : String(data).startsWith('pb:') ? probation.tap(data) : String(data).startsWith('rt:') ? retuner.tap(data) : approvals.tap(data)),
     });
     void commands.run();
   };
+  // every three hours: the monthly re-tuner checks one overdue deployed strategy in the Lab's worker (only while the Lab is idle)
+  setInterval(async () => {
+    if (!care?.running || !lab || !retuner) return;
+    try {
+      const r = await retuner.check();
+      if (!r) return;
+      const s = vault.reveal(care.cfg.secretId);
+      if (s.kind === 'telegram' && s.fields.token && s.fields.chatId) await tgSendKeyboard(s.fields.token, s.fields.chatId, r.html, r.keyboard);
+    } catch (err) {
+      log('warn', `re-tuner: ${err?.message ?? err}`);
+    }
+  }, 3 * 3_600_000).unref?.();
   // every five minutes: a team that has become ready is offered on the phone, with its Deploy buttons
   setInterval(async () => {
     if (!care?.running || care.cfg.offers === false || !commands || !lab) return;
@@ -1374,7 +1390,24 @@ app.whenReady().then(async () => {
     screen: () => screenState,
     assumedCosts: () => ({ feeBps: lab?.cfg.feeBps ?? 4.5, slipBps: lab?.cfg.slipBps ?? 2 }),
     log,
+    // probation and the automatic pause, after each 30-minute health check
+    onHealth: async (hs) => {
+      if (!probation) return [];
+      const { messages, handled } = probation.review(hs);
+      for (const m of messages) {
+        try {
+          const s = vault.reveal(care.cfg.secretId);
+          if (m.keyboard && s.kind === 'telegram' && s.fields.token && s.fields.chatId) await tgSendKeyboard(s.fields.token, s.fields.chatId, m.html, m.keyboard);
+          else await care.send(m.html, 'probation');
+        } catch (err) {
+          log('warn', `probation message: ${err?.message ?? err}`);
+        }
+      }
+      return handled;
+    },
   });
+  probation = new Probation({ db, lab: () => lab });
+  retuner = new Retuner({ db, lab: () => lab, log });
   approvals = new Approvals({
     db,
     teams: () => lab?.farmState().teams ?? [],

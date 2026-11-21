@@ -88,6 +88,7 @@ import {
   deflatedSharpe,
   monteCarlo,
   ncdf,
+  nwT,
   pbo,
   perf,
   randomEntryTest,
@@ -275,6 +276,12 @@ export interface Survivor {
   provenAt?: number;
   /** it was proven and is not any more: when, and why (said on the screen) */
   slip?: { at: number; why: string };
+  /** its rules re-tested on coins it was never bred on (the second half of their history): how many of them were in profit, pooled, and the chance of that by luck */
+  confirm?: { coins: string[]; up: number; trades: number; ret: number; sharpe: number; t: number; p: number; q?: number; at: number };
+  /** confirmed on coins it never saw (false-discovery rate 10 % over every strategy re-tested, in profit on at least two of three coins): the second route to significant */
+  confirmed?: boolean;
+  /** what deploying it means in plain numbers (worked out for the screen and the phone) */
+  card?: DeployCard;
   summary: string[];
   /** significant on the unseen data after allowing for every bot that reached it (false-discovery rate 10 %): the top five is drawn from these, and from those proven on fresh data */
   sig: boolean;
@@ -388,6 +395,8 @@ export interface PaceBoard {
   id: string;
   name: string;
   rows: Survivor[];
+  /** the same pace's top five by a year's return (at 1× or sized up), proven first */
+  byRet?: Survivor[];
   /** survivors held at this pace, and how many are still standing */
   held: number;
   live: number;
@@ -426,6 +435,9 @@ export interface Team {
     sig: boolean;
     oos: { sharpe: number; t: number; trades: number; winRate?: number; avgR?: number; bars?: number; maxDD?: number };
     dsr: number;
+    /** what deploying it means in plain numbers */
+    card?: DeployCard;
+    confirmed?: boolean;
   }[];
   /** the team as one portfolio over the days every member has */
   sharpe: number;
@@ -616,6 +628,7 @@ export class Farm {
   private kindsFloor = 0;
   /** the lists on the screen: worked out again on a steady clock, not at every bot */
   private board: { at: number; ids: Record<string, string[]> } | null = null;
+  private boardByRet: Record<string, string[]> = {};
   private boardDirty = true;
   private seen = new Map<string, number>();
   private queue: Ind[] = [];
@@ -1731,7 +1744,93 @@ export class Farm {
     if (s.stage === "proven") {
       s.provenAt ??= this.now();
       s.slip = undefined;
+      // newly proven: re-tested on coins it never saw
+      if (!s.confirm && !this.confQueue.includes(s.id)) this.confQueue.push(s.id);
     } else if (prev === "proven") s.slip = { at: this.now(), why: slipWhy(s) };
+  }
+
+  // ---------- confirmation on coins it never saw ----------
+
+  /** the coins kept apart for confirmation, by candle size (never bred on) */
+  private conf: Record<string, Ctx[]> = {};
+  private confQueue: string[] = [];
+
+  /**
+   * Coins the edge finder never breeds on, kept apart to confirm what it finds. Their contexts
+   * learn (where a rule learns) on the first half of each coin's history; the test is the second.
+   */
+  setConfirm(byTf: Record<string, Market[]> | null | undefined) {
+    for (const cs of Object.values(this.conf)) for (const c of cs) releaseCtx(c);
+    this.conf = {};
+    for (const [tf, ms0] of Object.entries(byTf ?? {})) {
+      const ms = ms0.filter((m) => m.bars.length >= 500 && !this.cfg.coins.includes(m.coin));
+      if (!ms.length) continue;
+      // the bitcoin bench (rules that read bitcoin) from the breeding candles
+      const btc = this.fwd[tf]?.find((c) => /^BTC/i.test(c.m.coin))?.m;
+      const withB = btc ? withBench([btc, ...ms]).filter((m) => m !== btc) : ms;
+      this.conf[tf] = withB.map((m, k) => ctxOf(m, Math.floor(m.bars.length * 0.5), 77 + k));
+    }
+    // every proven strategy is re-tested on the new candles
+    this.confQueue = this.survivors.filter((x) => x.stage === "proven").map((x) => x.id);
+  }
+
+  confirmPending(): number {
+    return this.confQueue.length;
+  }
+
+  /** re-test some waiting strategies on the confirmation coins, for about `ms` */
+  confirmSome(ms = 200): number {
+    if (!this.confQueue.length) return 0;
+    const t0 = Date.now();
+    let n = 0;
+    while (this.confQueue.length && (n === 0 || Date.now() - t0 < ms)) {
+      const id = this.confQueue.shift()!;
+      const s = this.survivors.find((x) => x.id === id);
+      if (s && s.stage === "proven") this.confirmOne(s);
+      n++;
+    }
+    this.confirmQ();
+    return n;
+  }
+
+  private confirmOne(s: Survivor) {
+    const built = buildSpec(s.flow);
+    const cs = this.conf[built.timeframe];
+    if (!cs?.length) return;
+    // the rules as they are, without anything fitted to the coins it was bred on
+    const { meta: _m, autoMeta: _a, coinWeights: _c, ...spec } = built.spec;
+    const per = cs.map((c) => ({ coin: c.m.coin, bt: backtest(c, spec as StrategySpec, c.trainEnd, c.m.bars.length, this.costs) }));
+    const trades = per.flatMap((q) => q.bt.trades);
+    const acc = new Map<number, [number, number]>();
+    for (const { bt } of per)
+      for (let i = 0; i < bt.rets.length; i++) {
+        const a = acc.get(bt.times[i]) ?? [0, 0];
+        a[0] += bt.rets[i];
+        a[1]++;
+        acc.set(bt.times[i], a);
+      }
+    const times = [...acc.keys()].filter(Boolean).sort((a, b) => a - b);
+    const rets = Float64Array.from(times, (t) => acc.get(t)![0] / acc.get(t)![1]);
+    const p = perf(rets, trades, barsPerYear(built.style.tfH), 0);
+    const up = per.filter((q) => q.bt.rets.reduce((a, r) => a + r, 0) > 0 && q.bt.trades.length > 0).length;
+    const t = rets.length > 30 ? nwT(rets) : 0;
+    s.confirm = { coins: cs.map((c) => c.m.coin), up, trades: trades.length, ret: p.totalReturn, sharpe: p.sharpe, t: Number.isFinite(t) ? t : 0, p: Number.isFinite(t) ? 1 - ncdf(t) : 1, at: this.now() };
+  }
+
+  /** the false-discovery rate over every strategy re-tested (10 %): confirmed when it passes, is in profit on two of three coins and traded enough */
+  private confirmQ() {
+    const tested = this.survivors.filter((x) => x.confirm);
+    const byP = [...tested].sort((a, b) => a.confirm!.p - b.confirm!.p);
+    const M = byP.length;
+    let q = 1;
+    for (let k = M - 1; k >= 0; k--) {
+      q = Math.min(q, (byP[k].confirm!.p * M) / (k + 1));
+      byP[k].confirm!.q = q;
+    }
+    for (const x of tested) {
+      const c = x.confirm!;
+      x.confirmed = (c.q ?? 1) <= FDR && c.up >= Math.min(2, c.coins.length) && c.trades >= 20 && c.ret > 0;
+    }
   }
 
   private forwardOne(s: Survivor) {
@@ -2090,26 +2189,34 @@ export class Farm {
       });
     if (stale) {
       const ids: Record<string, string[]> = {};
+      const byRet: Record<string, string[]> = {};
       for (const p of groups) {
         const was = new Set(this.board?.ids[p.id] ?? []);
         const adj = (s: Survivor) => s.score * (was.has(s.id) ? 1.15 : 1);
-        ids[p.id] = liveOf(p.id)
-          .sort(
-            (a, b) =>
-              STAGE_RANK[b.stage] - STAGE_RANK[a.stage] ||
-              Number(b.sig) - Number(a.sig) ||
-              adj(b) - adj(a),
-          )
-          .slice(0, 5)
-          .map((s) => s.id);
+        const ranked = liveOf(p.id).sort(
+          (a, b) =>
+            STAGE_RANK[b.stage] - STAGE_RANK[a.stage] ||
+            Number(b.sig || !!b.confirmed) - Number(a.sig || !!a.confirmed) ||
+            adj(b) - adj(a),
+        );
+        ids[p.id] = varied(ranked, 5).map((s) => s.id);
+        // the same pace by return (the screen's "by return" switch), on the same clock
+        byRet[p.id] = varied(
+          liveOf(p.id).sort((a, b) => STAGE_RANK[b.stage] - STAGE_RANK[a.stage] || starRet(b) - starRet(a)),
+          5,
+        ).map((s) => s.id);
       }
       this.board = { at: t, ids };
+      this.boardByRet = byRet;
       this.boardDirty = false;
     }
     return groups.map((p) => ({
       id: p.id,
       name: p.name,
       rows: (this.board!.ids[p.id] ?? [])
+        .map((id) => byId.get(id))
+        .filter((s): s is Survivor => !!s),
+      byRet: (this.boardByRet[p.id] ?? [])
         .map((id) => byId.get(id))
         .filter((s): s is Survivor => !!s),
       held: this.survivors.filter((s) => paceIdOf(s.style) === p.id).length,
@@ -2146,7 +2253,7 @@ export class Farm {
       const f = next?.forward;
       const missing: string[] = [];
       if (next) {
-        if (!next.sig) missing.push("not yet significant on the unseen data");
+        if (!next.sig && !next.confirmed) missing.push(next.confirm ? "not significant, and not confirmed on new coins" : "not yet significant on the unseen data (it is re-tested on new coins once proven)");
         if (!f || f.trades < PROVEN_TRADES) missing.push(`${f?.trades ?? 0} of ${PROVEN_TRADES} fresh-data trades`);
         else if (!(f.ret > 0)) missing.push("not in profit on fresh data");
         else if (next.stage !== "proven") missing.push(`fresh-data Sharpe ${f.sharpe.toFixed(2)} (needs 0.75)`);
@@ -2301,6 +2408,8 @@ export class Farm {
           sig: m.sig,
           oos: { sharpe: m.oos.sharpe, t: m.oos.t, trades: m.oos.trades, winRate: m.oos.winRate, avgR: m.oos.avgR, bars: m.oos.bars, maxDD: m.oos.maxDD },
           dsr: m.dsr,
+          card: deployCard(m),
+          confirmed: m.confirmed,
         })),
         sharpe,
         maxDD: ddOf(port),
@@ -2450,6 +2559,7 @@ export class Farm {
     this.poolIds = (s.teams ?? []).filter((t) => Array.isArray(t) && t.length >= 2);
     // the ladder is read again with today's rules (an earlier version called every vault result proven)
     for (const x of this.survivors) this.restage(x);
+    this.confirmQ();
     this.reindex();
     for (const flow of s.population ?? []) {
       if (!STYLE_MAP[flow?.style]) continue;
@@ -2547,7 +2657,28 @@ export function slipWhy(s: Pick<Survivor, "forward" | "oos" | "stage">): string 
  * candles since: 25 or more trades, in profit, Sharpe at least 0.75). Only
  * these make teams, and only teams of these are offered to deploy.
  */
-export const provenEdge = (s: Pick<Survivor, "stage" | "sig">) => s.stage === "proven" && !!s.sig;
+export const provenEdge = (s: Pick<Survivor, "stage" | "sig"> & { confirmed?: boolean }) => s.stage === "proven" && (!!s.sig || !!s.confirmed);
+
+/** a strategy's family: the bot builder group of its main entry rule (trend following, ICT, Smart Money…) */
+export const groupOf = (s: Pick<Survivor, "flow">) => STRATEGIES.find((o) => o.id === s.flow?.strategies?.[0])?.group ?? "other";
+
+/** the first `n` of a ranked list with at most two of any family — the rest only when there are not enough families */
+export function varied<T extends Pick<Survivor, "flow">>(ranked: T[], n: number, per = 2): T[] {
+  const out: T[] = [];
+  const count = new Map<string, number>();
+  for (const s of ranked) {
+    if (out.length >= n) break;
+    const f = groupOf(s);
+    if ((count.get(f) ?? 0) >= per) continue;
+    count.set(f, (count.get(f) ?? 0) + 1);
+    out.push(s);
+  }
+  for (const s of ranked) {
+    if (out.length >= n) break;
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
 
 /** a year's return on data it never saw: the better of 1× and sized up (to a 15 % worst drop, at most 5×) */
 export const starRet = (s: Pick<Survivor, "oos">) => Math.max(s.oos.cagr, sizedUp(s.oos.cagr, s.oos.maxDD).ret);
@@ -2577,9 +2708,61 @@ export const resultKey = (s: Pick<Survivor, "id" | "tfH" | "oos">) =>
 /** a survivor without the long series (for the screen: they are not drawn, only used here) */
 const lite = (s: Survivor): Survivor => ({
   ...s,
+  card: deployCard(s),
   daily: undefined,
   forward: s.forward ? { ...s.forward, daily: undefined } : null,
 });
+
+/** what deploying a strategy means, in plain numbers */
+export interface DeployCard {
+  /** how often it trades on the unseen stretch (all its coins together) */
+  perWeek: number | null;
+  /** the worst drop in 95 of 100 shuffled orders of its trades, at 1 % risk a trade */
+  dd95: number | null;
+  /** the longest it spent below its previous best on the unseen stretch, in days */
+  recoverDays: number | null;
+  /** its worst drop as tested, and the yearly return at 1× */
+  maxDD: number;
+  ret: number;
+}
+
+export function deployCard(s: Pick<Survivor, "oos" | "tfH" | "mc" | "daily">): DeployCard {
+  const years = s.oos?.bars ? s.oos.bars / barsPerYear(s.tfH) : 0;
+  let recoverDays: number | null = null;
+  const r = s.daily?.r;
+  if (r?.length) {
+    let eq = 1;
+    let peak = 1;
+    let since = 0;
+    let longest = 0;
+    for (let i = 0; i < r.length; i++) {
+      eq *= 1 + r[i];
+      if (eq >= peak) {
+        peak = eq;
+        since = i;
+      } else longest = Math.max(longest, i - since);
+    }
+    recoverDays = longest;
+  }
+  return {
+    perWeek: years > 0 ? s.oos.trades / years / 52 : null,
+    dd95: Number.isFinite(s.mc?.dd95) ? s.mc.dd95 : null,
+    recoverDays,
+    maxDD: s.oos?.maxDD ?? 0,
+    ret: s.oos?.cagr ?? 0,
+  };
+}
+
+/** the deploy card in words (the phone and the screen say the same) */
+export function cardWords(c: DeployCard | undefined): string[] {
+  if (!c) return [];
+  const out: string[] = [];
+  if (c.perWeek !== null) out.push(c.perWeek >= 1 ? `about ${c.perWeek.toFixed(c.perWeek < 10 ? 1 : 0)} trades a week` : `about one trade every ${Math.max(1, Math.round(7 / Math.max(c.perWeek, 0.01)))} days`);
+  if (c.dd95 !== null) out.push(`a bad run: −${Math.round(c.dd95 * 100)} % (worst drop in 95 of 100 shuffled orders, at 1 % risk a trade)`);
+  if (c.recoverDays !== null) out.push(`longest stretch below its best: ${c.recoverDays} day${c.recoverDays === 1 ? "" : "s"}`);
+  out.push("starts on probation at ¼ size; full size once its first 12 live trades are on track");
+  return out;
+}
 
 /** the leaderboard score: the unseen Sharpe, worth more when it survived its nudges well, beat more random bots, traded enough and kept its edge at double costs; fresh data counts on top */
 export function scoreOf(

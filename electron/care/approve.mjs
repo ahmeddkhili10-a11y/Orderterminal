@@ -13,7 +13,7 @@
 // that are not ready are never offered with buttons.
 import { randomBytes } from 'node:crypto';
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
-import { paceIdOf, sizedUp } from '../../src/lab/farm.ts';
+import { cardWords, paceIdOf, sizedUp } from '../../src/lab/farm.ts';
 
 const DAY = 86_400_000;
 export const OFFER_TTL = 3 * DAY;
@@ -31,8 +31,9 @@ export function teamText(t, { title, swarm } = {}) {
   L.push(`Sized up to a ${pct(-t.maxDD * lev, 0)} worst drop (${lev.toFixed(1)}×): <b>${pct(t.ret * lev, 0)} a year</b>`);
   for (const m of t.members) {
     const f = m.fresh;
-    L.push(`• <b>${PACE[m.pace] ?? m.pace}</b> — ${e(m.name)}\n   fresh data ${f ? `${pct(f.ret)} over ${f.trades} trades (worst drop ${pct(-f.maxDD)})` : 'none yet'} · Sharpe ${num(m.sharpe)} alone · ${Math.round(m.weight * 100)}% of the risk`);
+    L.push(`• <b>${PACE[m.pace] ?? m.pace}</b> — ${e(m.name)}\n   fresh data ${f ? `${pct(f.ret)} over ${f.trades} trades (worst drop ${pct(-f.maxDD)})` : 'none yet'} · Sharpe ${num(m.sharpe)} alone · ${Math.round(m.weight * 100)}% of the risk${m.card ? `\n   ${cardWords(m.card).slice(0, 2).join(' · ')}` : ''}`);
   }
+  L.push('<b>What deploying means:</b> each member starts on probation at ¼ size; full size once its first 12 live trades are on track.');
   if (swarm) L.push(`The crypto swarm is ${swarm.running ? `running (${swarm.mode === 'live' ? '<b>LIVE</b>' : 'paper'})` : '<b>stopped</b> — start it in Novus Ordo to trade what you deploy'}.`);
   L.push('<i>Council decides: the council can block its signals. Trade as tested: only Guardian and Risk can stop a trade. Past results do not promise future ones.</i>');
   return L.join('\n');
@@ -49,7 +50,10 @@ export function starText(s, { title, swarm } = {}) {
   L.push(`On data it never saw: <b>${pct(o.cagr, 0)} a year</b> at 1× · Sharpe ${num(o.sharpe)} · worst drop ${pct(-(o.maxDD ?? 0))} · ${o.trades ?? 0} trades`);
   L.push(`Sized up to a ${pct(-z.maxDD, 0)} worst drop (${z.lev.toFixed(1)}×): <b>${pct(z.ret, 0)} a year</b> — losses grow by the same multiple`);
   if (f) L.push(`Fresh data (since it was found): ${pct(f.ret)} over ${f.trades} trades, Sharpe ${num(f.sharpe)}, worst drop ${pct(-f.maxDD)}${s.provenAt ? ` · proven since ${new Date(s.provenAt).toISOString().slice(0, 10)}` : ''}`);
-  L.push(s.sig ? '✓ Also significant on the unseen data after allowing for every bot tried.' : '⚠ Proven on fresh data, but not significant on the unseen data once every bot tried is allowed for — weigh that before deploying.');
+  const card = cardWords(s.card);
+  if (card.length) L.push(`<b>What deploying means:</b>\n${card.map((x) => `• ${x}`).join('\n')}`);
+  const c = s.confirm;
+  L.push(s.sig ? '✓ Also significant on the unseen data after allowing for every bot tried.' : s.confirmed && c ? `✓ Confirmed on coins it was never bred on (${e(c.coins.join(', '))}): in profit on ${c.up} of ${c.coins.length}, ${c.trades} trades.` : '⚠ Proven on fresh data, but neither significant on the unseen data (once every bot tried is allowed for) nor confirmed on new coins yet — weigh that before deploying.');
   if (swarm) L.push(`The crypto swarm is ${swarm.running ? `running (${swarm.mode === 'live' ? '<b>LIVE</b>' : 'paper'})` : '<b>stopped</b> — start it in Novus Ordo to trade what you deploy'}.`);
   L.push('<i>Council decides: the council can block its signals. Trade as tested: only Guardian and Risk can stop a trade. The swarm sizes each trade by its own risk rules, not at the sized-up multiple. Past results do not promise future ones.</i>');
   return L.join('\n');

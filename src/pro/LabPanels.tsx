@@ -913,6 +913,16 @@ export function LabDeployed() {
                 </td>
                 <td className="l" data-health={health[d.id]?.status ?? 'none'}>
                   <HealthBadge h={health[d.id]} />
+                  <div className="muted" data-size={Number.isFinite(d.scale) && d.scale! < 1 ? 'probation' : 'full'}>
+                    {!d.on && d.pausedBy === 'health'
+                      ? '⏸ paused by the health check (see Telegram)'
+                      : Number.isFinite(d.scale) && d.scale! < 1
+                        ? `on probation · ¼ size${d.probation?.why ? ` (${d.probation.why})` : ' until 12 live trades are on track'}`
+                        : d.graduatedAt
+                          ? 'full size · earned on live trades'
+                          : 'full size'}
+                    {d.retunedAt ? ` · re-tuned ${new Date(d.retunedAt).toISOString().slice(0, 10)}` : ''}
+                  </div>
                 </td>
                 <td className="l">
                   <AuthoritySwitch d={d} compact />
@@ -935,7 +945,7 @@ export function LabDeployed() {
             Costs in every test: {status.costs.feeBps} bps fees + {status.costs.slipBps} bps slippage a fill — {status.costs.why}.
           </div>
         )}
-        <div className="lab-line muted">HEALTH compares each strategy's real trades (paper and live) since it was deployed with its test. It tells you on Telegram when one falls behind; switching it off stays your decision.</div>
+        <div className="lab-line muted">HEALTH compares each strategy's real trades (paper and live) since it was deployed with its test. A new deployment trades at ¼ size (probation) until 12 trades are on track; one that falls behind goes back to ¼; one that clearly stopped working is paused and you are asked on Telegram to resume or retire it.</div>
         <div className="pro-section">WHAT THE LAB AGENT HAS SAID</div>
         {said.map((l) => (
           <div key={l.t} className="lab-line mono">

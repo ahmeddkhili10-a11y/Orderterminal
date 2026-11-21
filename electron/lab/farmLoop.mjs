@@ -80,6 +80,9 @@ export function createFarmRunner(post, o = {}) {
         if (left) {
           farm.forwardSome(250);
           note = farm.forwardPending() ? `Checking ${left} strateg${left === 1 ? "y" : "ies"} against the newest candles…` : "";
+        } else if (farm.confirmPending()) {
+          // proven strategies re-tested on coins they never saw, a slice at a time
+          farm.confirmSome(200);
         }
         farm.step();
       } catch (err) {
@@ -113,6 +116,7 @@ export function createFarmRunner(post, o = {}) {
         const saved = msg.saveText ? JSON.parse(msg.saveText) : (msg.save ?? null);
         farm = new Farm(msg.cfg, { save: saved, now, ...(msg.costs ? { costs: msg.costs } : {}) });
         farm.setMarkets(toMarkets(msg.markets), { defer: true });
+        farm.setConfirm(toMarkets(msg.confirm));
         deployed = msg.deployed ?? [];
         farm.checkFleet(deployed);
         note = "";
@@ -123,6 +127,7 @@ export function createFarmRunner(post, o = {}) {
         // fresher candles: the survivors' and the fleet's forward tests move on (read again a slice at a time)
         beat();
         farm.setMarkets(toMarkets(msg.markets), { defer: true });
+        if (msg.confirm) farm.setConfirm(toMarkets(msg.confirm));
         farm.checkFleet(deployed);
         send();
         save();

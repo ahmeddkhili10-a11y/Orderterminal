@@ -107,7 +107,7 @@ export function kellyOf(rs) {
 
 /**
  * The position size for a candidate.
- * @param o { price, stop, side, equity, book, openNotional, expR, maxLev, sizeMult }
+ * @param o { price, stop, side, equity, book, openNotional, expR, maxLev, sizeMult, probation }
  * @returns {{ qty, notional, riskUsd, riskPct, mult, lev, why } | { skip: string }}
  */
 export function sizeTrade(o, cfg = RISK_DEFAULTS) {
@@ -132,6 +132,11 @@ export function sizeTrade(o, cfg = RISK_DEFAULTS) {
     const m = Math.max(0.5, o.sizeMult);
     mult *= m;
     notes.push(`strategy asks for ${m.toFixed(2)}× in this volatility`);
+  }
+  // a newly deployed Lab strategy is on probation: a quarter of the size until its first live trades match its test
+  if (Number.isFinite(o.probation) && o.probation < 1) {
+    mult *= Math.max(0.1, o.probation);
+    notes.push(`on probation: ${o.probation <= 0.25 ? '¼' : `${o.probation.toFixed(2)}×`} size until its live trades match its test`);
   }
   if (Number.isFinite(o.expR)) {
     if (o.expR >= 0.3) (mult *= 1.15), notes.push('strong odds +15%');

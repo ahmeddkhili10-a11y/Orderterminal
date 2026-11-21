@@ -6793,3 +6793,23 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
 .health-stopped { color: var(--sell); }
 .health-behind { color: var(--warn); }
 .farm-team-picks { margin: 6px 10px 2px; }
+
+.farm-card {
+  margin: 4px 8px 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pro-line, rgba(255, 255, 255, 0.12));
+  border-left: 3px solid var(--pro-head, #ffd200);
+  line-height: 1.5;
+}
+.farm-card b {
+  display: block;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.farm-sort {
+  display: inline-flex;
+  gap: 4px;
+  margin-right: 10px;
+}

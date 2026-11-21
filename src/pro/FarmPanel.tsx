@@ -11,6 +11,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { desktop, type FarmView } from "../desktop/bridge";
 import { sendToBot } from "../lab/bridge";
 import {
+  cardWords,
   isStar,
   LADDER,
   sizedUp,
@@ -57,6 +58,8 @@ const STAGE_TONE: Record<string, string> = {
 
 export interface FarmConfig {
   explain: boolean;
+  /** each pace's top five: best overall (quality) or best return */
+  sort?: "quality" | "return";
 }
 export const FARM_PANEL_DEFAULTS: FarmConfig = { explain: true };
 
@@ -119,7 +122,9 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
   const keptIds = new Set(kept.map((x) => x.id));
   // proven and over 200 % a year: the ones offered on the phone, listed whether or not they make a pace's top five
   const stars = farm.stars ?? [];
-  const all = [...kept, ...stars, ...boards.flatMap((b) => b.rows)];
+  const byReturn = c.sort === "return";
+  const rowsOf = (b: PaceBoard) => (byReturn ? b.byRet ?? b.rows : b.rows);
+  const all = [...kept, ...stars, ...boards.flatMap((b) => rowsOf(b)), ...boards.flatMap((b) => b.byRet ?? [])];
   listed.current = all;
   const found = all.find((s) => s.id === sel) ?? null;
   if (found) shown.current = found;
@@ -128,7 +133,7 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
     found ?? (sel && shown.current?.id === sel ? shown.current : null) ?? all[0] ?? null;
   const rankOf = (s: Survivor) => {
     for (const b of boards) {
-      const i = b.rows.findIndex((r) => r.id === s.id);
+      const i = rowsOf(b).findIndex((r) => r.id === s.id);
       if (i >= 0) return { n: i + 1, pace: b.name };
     }
     const k = stars.findIndex((r) => r.id === s.id);
@@ -166,6 +171,14 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
             )
           }
         />
+        <span className="farm-sort" data-sort>
+          <button className={`chip ${byReturn ? "" : "active"}`} onClick={() => setConfig({ sort: "quality" })} title="Each pace's top five by overall quality: steadiness, fresh data, significance">
+            Best overall
+          </button>
+          <button className={`chip ${byReturn ? "active" : ""}`} onClick={() => setConfig({ sort: "return" })} title="Each pace's top five by a year's return (at 1× or sized up), proven first">
+            Best return
+          </button>
+        </span>
         <label className="check">
           <input
             type="checkbox"
@@ -254,7 +267,8 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
           <div key={b.id} data-board={b.id}>
             <div className="pro-section farm-board-head">
               <span>
-                {b.name.toUpperCase()} — TOP {Math.max(5, b.rows.length)}
+                {b.name.toUpperCase()} — TOP {Math.max(5, rowsOf(b).length)}
+                {byReturn ? " BY RETURN" : ""}
               </span>
               <span className="muted">
                 {b.live
@@ -262,8 +276,8 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
                   : "none standing yet"}
               </span>
             </div>
-            {b.rows.length ? (
-              <Table rows={b.rows} sel={pick?.id ?? null} onSel={setSel} />
+            {rowsOf(b).length ? (
+              <Table rows={rowsOf(b)} sel={pick?.id ?? null} onSel={setSel} />
             ) : (
               <div className="lab-line muted farm-none">
                 {running || starting
@@ -448,7 +462,7 @@ const Fleet = memo(FleetView);
 function evidence(s: Survivor): { text: string; tone: string } {
   if (isStar(s)) return { text: "⭐ Proven · over 200 %", tone: "up b" };
   if (s.stage === "proven")
-    return { text: s.sig ? "Proven · significant" : "Proven on fresh data", tone: "up b" };
+    return { text: s.sig ? "Proven · significant" : s.confirmed ? "Proven · confirmed on new coins" : "Proven on fresh data", tone: "up b" };
   if (s.stage === "proving")
     return { text: s.slip ? "Proving · was proven" : s.sig ? "Proving · significant" : "Proving on fresh data", tone: "up" };
   if (s.sig) return { text: "Significant", tone: "up" };
@@ -675,6 +689,19 @@ function DetailView({
         {rank ? `${rank.pace.toUpperCase()} #${rank.n} — ` : "NO LONGER LISTED — "}
         {s.name.toUpperCase()}
       </div>
+      {s.card && (
+        <div className="farm-card" data-card>
+          <b>WHAT DEPLOYING IT MEANS</b>
+          {cardWords(s.card).map((x) => (
+            <div key={x}>• {x}</div>
+          ))}
+        </div>
+      )}
+      {s.confirm && (
+        <div className={`lab-line ${s.confirmed ? "up" : "muted"}`} data-confirm>
+          {s.confirmed ? "✓ Confirmed" : "Not confirmed"} on coins it was never bred on ({s.confirm.coins.join(", ")}): in profit on {s.confirm.up} of {s.confirm.coins.length}, {s.confirm.trades} trades, {pct(s.confirm.ret)} pooled, Sharpe {num(s.confirm.sharpe)} — the chance of that by luck, allowing for every strategy re-tested, {num((s.confirm.q ?? s.confirm.p) * 100, 1)} %.
+        </div>
+      )}
       {s.stage === "proven" && s.provenAt ? (
         <div className="lab-line up" data-proven-since>
           ✓ Proven on fresh data since {new Date(s.provenAt).toISOString().slice(0, 10)} — it keeps the badge while it stays in profit with a Sharpe above 0.5 there.

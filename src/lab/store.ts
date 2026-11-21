@@ -32,6 +32,15 @@ export interface LabDeployed {
   on: boolean;
   /** council: the swarm's council can block its signals · tested: only the safety bots (Guardian, Risk) can */
   authority?: Authority;
+  /** its size: ¼ on probation (a new deployment, or one that fell behind), 1 once its live trades matched its test */
+  scale?: number;
+  probation?: { since: number; why?: string } | null;
+  graduatedAt?: number;
+  /** switched off by you, or paused by the health check (you are asked on the phone) */
+  pausedBy?: 'you' | 'health' | null;
+  /** its settings were re-tuned (with your tap) */
+  retunedAt?: number;
+  retuneNote?: string;
 }
 export type Authority = 'council' | 'tested';
 

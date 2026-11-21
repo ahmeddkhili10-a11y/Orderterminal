@@ -38,6 +38,9 @@ export const MAX_YEARS = { '15m': 1 };
 export const FARM_YEARS = { '4h': 5, '1d': 6 };
 /** the most coins the edge finder breeds on at once (each coin and pace costs memory: more than this can run a laptop out of it) */
 export const FARM_MAX_COINS = 8;
+/** liquid coins kept apart to confirm what the edge finder finds: the first three not among the coins it breeds on */
+export const CONFIRM_POOL = ['LINK', 'LTC', 'ADA', 'AVAX', 'DOT', 'BCH', 'TRX', 'NEAR', 'ATOM', 'UNI'];
+export const confirmCoins = (coins) => CONFIRM_POOL.filter((c) => !coins.includes(c)).slice(0, 3);
 const SOURCES = ['binance', 'okx', 'bybit', 'hyperliquid'];
 const HOUR = 3_600_000;
 
@@ -335,9 +338,25 @@ export class LabService {
       }
       if (ms.length) out[tf] = ms;
     }
+    // the confirmation coins: the long history alone (no Hyperliquid join, no funding); a coin that cannot be had is left out
+    const confirm = {};
+    for (const [tf, yrs] of Object.entries(years)) {
+      const ms = [];
+      for (const coin of confirmCoins(cfg.coins)) {
+        const last = this.farmConfirm?.[tf]?.find((m) => m.coin === coin);
+        try {
+          const got = await this.candles(coin, tf, yrs, 'binance', { any: true, skip: 'hyperliquid' });
+          ms.push(last && last.bars[last.bars.length - 1].time >= got.bars[got.bars.length - 1].time ? last : { coin, tfH: TF_H[tf], bars: got.bars, funding: null });
+        } catch {
+          if (last) ms.push(last);
+        }
+      }
+      if (ms.length) confirm[tf] = ms;
+    }
+    this.farmConfirm = confirm;
     this.farmNote = '';
     this.farmLast = out;
-    return { markets: out, stale, missing, late, error: error.slice(0, 300), hl: useHl ? { on: hlOn, off: hlOff, error: hlError.slice(0, 200) } : null };
+    return { markets: out, confirm, stale, missing, late, error: error.slice(0, 300), hl: useHl ? { on: hlOn, off: hlOff, error: hlError.slice(0, 200) } : null };
   }
 
   /** how the edge finder's data is doing, for the screen */
@@ -437,7 +456,8 @@ export class LabService {
       // the heartbeat: the thread counts up as it works, so a long stretch of work is not taken for a hang
       const beat = typeof SharedArrayBuffer === 'function' ? new SharedArrayBuffer(4) : null;
       this.farmBeat = beat ? { arr: new Int32Array(beat), last: 0 } : null;
-      w.postMessage({ type: 'start', cfg: next, saveText: this.farmSavedText(), markets: packed.markets, deployed: this.fleetOf(), costs: this.testCosts(), beat }, packed.transfer);
+      const packedC = packMarkets(r.confirm ?? {});
+      w.postMessage({ type: 'start', cfg: next, saveText: this.farmSavedText(), markets: packed.markets, confirm: packedC.markets, deployed: this.fleetOf(), costs: this.testCosts(), beat }, [...packed.transfer, ...packedC.transfer]);
       this.farmBegan = this.now();
       // fresher candles every so often: the survivors' and the fleet's forward tests move on
       this.farmSchedule();
@@ -480,7 +500,8 @@ export class LabService {
       const due = !this.farmSentAt || this.now() - this.farmSentAt >= 10 * 60_000 || (was && d.ok);
       if (this.farmW && Object.keys(r.markets).length && (this.farmNewest() > (this.farmSentTo ?? before) || (was && d.ok)) && due) {
         const packed = packMarkets(r.markets);
-        this.farmW.postMessage({ type: 'markets', markets: packed.markets }, packed.transfer);
+        const packedC = packMarkets(r.confirm ?? {});
+        this.farmW.postMessage({ type: 'markets', markets: packed.markets, confirm: packedC.markets }, [...packed.transfer, ...packedC.transfer]);
         this.farmSentAt = this.now();
         this.farmSentTo = this.farmNewest();
       }
@@ -1022,6 +1043,39 @@ export class LabService {
     }
   }
 
+  /** is the Lab's worker free (no research, test or optimisation of yours running)? */
+  idle() {
+    return !this.worker && !this.retuning;
+  }
+
+  /**
+   * The re-tuner, for one deployed strategy: its settings checked again on the latest candles,
+   * in the Lab's worker (never on the desktop process's thread). Only when the Lab is idle.
+   */
+  async retune(d) {
+    if (!this.idle()) throw new Error('the Lab is busy');
+    this.retuning = true;
+    try {
+      return await this.retuneNow(d);
+    } finally {
+      this.retuning = false;
+    }
+  }
+
+  async retuneNow(d) {
+    const tf = d.tfH === 24 ? '1d' : d.tfH < 1 ? `${Math.round(d.tfH * 60)}m` : `${d.tfH}h`;
+    const years = d.tfH >= 24 ? 6 : d.tfH >= 4 ? 4 : d.tfH >= 1 ? 2 : 1;
+    const { markets } = await this.markets({ ...this.cfg, coins: d.coins, timeframe: tf, years });
+    if (!markets.length) throw new Error('no history downloaded');
+    if (this.worker) throw new Error('the Lab is busy');
+    try {
+      return await this.inWorker({ type: 'retune', markets: markets.map((m) => ({ ...m, funding: m.funding ? Float64Array.from(m.funding) : null })), spec: d.spec, costs: this.testCosts() });
+    } finally {
+      this.progress = null;
+      this.push();
+    }
+  }
+
   inWorker(msg) {
     return new Promise((resolve, reject) => {
       const w = this.makeWorker();
@@ -1071,7 +1125,8 @@ export class LabService {
       st = { sharpe: t.oos.sharpe, t: t.oos.t, dsr: t.dsr, trades: t.oos.trades, verdict: t.verdict, winRate: t.oos.winRate, avgR: t.oos.avgR, perYear: yrs > 0 ? t.oos.trades / yrs : undefined, maxDD: t.oos.maxDD };
     }
     if (!s) throw new Error('nothing to deploy');
-    const d = { id: randomUUID(), spec: s, tfH: tf ?? 1, coins: coins ?? this.cfg.coins, targets, stats: st ?? { sharpe: 0, t: 0, dsr: 0, trades: 0, verdict: 'untested' }, deployedAt: this.now(), on: true, authority: authority === 'tested' ? 'tested' : 'council' };
+    // every new deployment starts on probation: a quarter of the size until its first live trades match its test
+    const d = { id: randomUUID(), spec: s, tfH: tf ?? 1, coins: coins ?? this.cfg.coins, targets, stats: st ?? { sharpe: 0, t: 0, dsr: 0, trades: 0, verdict: 'untested' }, deployedAt: this.now(), on: true, authority: authority === 'tested' ? 'tested' : 'council', scale: 0.25, probation: { since: this.now() } };
     this.deployedList = [...this.deployedList, d];
     this.write('deployed.json', this.deployedList);
     this.push();
@@ -1094,8 +1149,23 @@ export class LabService {
     this.push();
   }
 
-  toggle(id, on) {
-    this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, on } : d));
+  /** a deployed strategy's size: ¼ on probation, 1 once it has earned it (and the reason, for the screen) */
+  setScale(id, scale, why = '') {
+    this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, scale, probation: scale < 1 ? { since: this.now(), why } : null, graduatedAt: scale >= 1 ? this.now() : d.graduatedAt } : d));
+    this.write('deployed.json', this.deployedList);
+    this.push();
+  }
+
+  /** a strategy's settings changed (the re-tuner, with your tap): the same deployment, new rules */
+  setSpec(id, spec, note = '') {
+    this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, spec, retunedAt: this.now(), retuneNote: note } : d));
+    this.write('deployed.json', this.deployedList);
+    this.push();
+    this.farmFleet();
+  }
+
+  toggle(id, on, by = 'you') {
+    this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, on, pausedBy: on ? null : by } : d));
     this.write('deployed.json', this.deployedList);
     this.push();
   }

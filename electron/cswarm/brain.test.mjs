@@ -67,6 +67,10 @@ describe('crypto swarm brain', () => {
     const smaller = sizeTrade({ price: 100_000, stop: 99_000, side: 'buy', equity: 1000, book, openNotional: 0, sizeMult: 0.6 });
     expect(bigger.riskUsd).toBeCloseTo(base.riskUsd, 9);
     expect(smaller.riskUsd).toBeLessThan(base.riskUsd);
+    // a strategy on probation: a quarter of the size, said in the sizing note — never below the account's minimum risk
+    const prob = sizeTrade({ price: 100_000, stop: 99_000, side: 'buy', equity: 1000, book, openNotional: 0, probation: 0.25 });
+    expect(prob.riskUsd).toBeLessThan(base.riskUsd * 0.6);
+    expect(prob.why).toMatch(/on probation: ¼ size/);
   });
 
   it('a Lab strategy deployed "as tested": the opinion bots only advise; Guardian and Risk still stop it', () => {

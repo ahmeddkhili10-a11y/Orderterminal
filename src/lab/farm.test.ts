@@ -5,7 +5,7 @@
 // forward-tested on fresh data, and put together as a team.
 import { describe, expect, it } from 'vitest';
 import { checkFlow, buildSpec, FLOW_DEFAULT, type Flow } from './flow';
-import { dailyOf, Farm, farmKey, farmKind, farmNiche, ladderOf, paceIdOf, PACES, scoreOf, slipWhy, STAGES, VAULT, type FarmSave, type Survivor } from './farm';
+import { dailyOf, Farm, farmKey, farmKind, farmNiche, ladderOf, paceIdOf, PACES, provenEdge, scoreOf, slipWhy, STAGES, VAULT, type FarmSave, type Survivor } from './farm';
 import { COSTS } from './backtest';
 import { ctxOf, type Market } from './library';
 import { runAll, withBench } from './research';
@@ -517,7 +517,7 @@ describe('significance allows for every bot tried', () => {
     expect(wait.map((x) => x.pace)).toEqual(['scalp', 'intraday', 'swing']);
     // (w2 is a proven edge on paper, but it loses on the team's days: it counts here, and still makes no team)
     expect(wait[2].proven).toBe(1);
-    expect(wait[2].best!.missing).toContain('not yet significant on the unseen data');
+    expect(wait[2].best!.missing.join()).toMatch(/not yet significant on the unseen data/);
     expect(wait[0].proven).toBeGreaterThan(0);
     w1.sig = true;
     expect(farm.teams(true).length).toBeGreaterThan(0);
@@ -762,5 +762,46 @@ describe('one survivor of a kind, and steady lists', () => {
     // the three that are proving stay, though their scores are the lowest
     for (const id of ['s0', 's1', 's2']) expect(again.survivors.some((s) => s.id === id)).toBe(true);
     expect(again.survivors.some((s) => s.id === 's3')).toBe(false);
+  });
+});
+
+describe('confirmation on coins it never saw', () => {
+  it('a proven trend rule is re-tested on new trending coins and confirmed — on coins with no trend it is not — and confirmed counts as a proven edge', () => {
+    const run = (trend: number) => {
+      const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 4 });
+      farm.setMarkets(trending());
+      const f = flow({ strategies: ['tsmom'], tunes: { 'strategy:tsmom': { lookback: 72 } }, takeProfit: 'trail' });
+      const s = { id: 'x1', name: 'Ride the trend', flow: f, style: 'intraday', tfH: 1, coins: ['BTC', 'ETH'], stage: 'proven', sig: false, oos: { sharpe: 1, maxDD: 0.1, cagr: 0.2, trades: 50 }, forward: { bars: 900, trades: 30, ret: 0.05, sharpe: 1, maxDD: 0.03, days: 40 }, score: 1 } as unknown as Survivor;
+      farm.survivors.push(s);
+      farm.setConfirm({ '1h': [market('LINK', 6000, 11, trend), market('LTC', 6000, 12, trend), market('ADA', 6000, 13, trend)] });
+      expect(farm.confirmPending()).toBe(1);
+      while (farm.confirmPending()) farm.confirmSome(1000);
+      return s;
+    };
+    const good = run(1);
+    expect(good.confirm).toMatchObject({ coins: ['LINK', 'LTC', 'ADA'] });
+    expect(good.confirm!.trades).toBeGreaterThan(20);
+    expect(good.confirmed).toBe(true);
+    expect(provenEdge(good)).toBe(true);
+    const bad = run(0);
+    expect(bad.confirmed).toBe(false);
+    expect(provenEdge(bad)).toBe(false);
+  });
+});
+
+describe('variety in the top lists, and the deploy card', () => {
+  it('at most two of a family in a top five, unless there are not enough families', async () => {
+    const { varied, deployCard, cardWords } = await import('./farm');
+    const mk = (id: string, s: string) => ({ id, flow: { strategies: [s] } }) as never as Survivor;
+    // five trend-following bots ranked first, then one ICT and one breakout
+    const ranked = [mk('a', 'tsmom'), mk('b', 'mac'), mk('c', 'tma'), mk('d', 'macd'), mk('e', 'kalman'), mk('f', 'fvg'), mk('g', 'donchian')];
+    expect(varied(ranked, 5).map((x) => x.id)).toEqual(['a', 'b', 'f', 'g', 'c']);
+    expect(varied(ranked.slice(0, 5), 5).map((x) => x.id)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    // the card: trades a week, a bad run from the shuffles, the longest time below its best
+    const card = deployCard({ tfH: 1, oos: { bars: 8760, trades: 104, maxDD: 0.05, cagr: 0.3 }, mc: { dd95: 0.12, pLoss: 0.1 }, daily: { d0: 0, r: [0.01, -0.02, 0.005, 0.005, 0.02, -0.01] } } as never);
+    expect(card.perWeek).toBeCloseTo(2, 5);
+    expect(card.dd95).toBe(0.12);
+    expect(card.recoverDays).toBe(3);
+    expect(cardWords(card).join(' | ')).toMatch(/about 2\.0 trades a week \| a bad run: −12 %.*\| longest stretch below its best: 3 days \| starts on probation at ¼ size/);
   });
 });

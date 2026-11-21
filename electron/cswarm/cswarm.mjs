@@ -412,7 +412,7 @@ export class CryptoSwarm {
         const price = Number.isFinite(cs.price) ? cs.price : sig.price;
         const shift = price - sig.price;
         const stats = d.stats ? ` (tested: Sharpe ${d.stats.sharpe.toFixed(2)}, t ${d.stats.t.toFixed(1)}, ${d.stats.verdict})` : '';
-        this.propose(cs.coin, 'lab', { ...sig, price, stop: sig.stop + shift, target: sig.target + shift, setup: `Lab · ${sig.setup}`, why: `${sig.why}${stats}`, labId: d.id, labTfH: tfH, labHoldMs: d.spec.exit.maxBars * tfH * HOUR, authority: d.authority === 'tested' ? 'tested' : 'council' });
+        this.propose(cs.coin, 'lab', { ...sig, price, stop: sig.stop + shift, target: sig.target + shift, setup: `Lab · ${sig.setup}`, why: `${sig.why}${stats}`, labId: d.id, labTfH: tfH, labHoldMs: d.spec.exit.maxBars * tfH * HOUR, authority: d.authority === 'tested' ? 'tested' : 'council', probation: Number.isFinite(d.scale) ? d.scale : 1 });
       }
     }
   }
@@ -536,7 +536,7 @@ export class CryptoSwarm {
     const book = this.book();
     const open = this.open();
     const gate = riskGate(book, equity, open.length, c.risk, t);
-    const size = gate ? null : sizeTrade({ price: p.price, stop: p.stop, side: p.side, equity, book, openNotional: open.reduce((a, q) => a + q.notional, 0), expR: odds.expR, maxLev: c.risk.perCoinLeverage, sizeMult: p.sizeMult }, c.risk);
+    const size = gate ? null : sizeTrade({ price: p.price, stop: p.stop, side: p.side, equity, book, openNotional: open.reduce((a, q) => a + q.notional, 0), expR: odds.expR, maxLev: c.risk.perCoinLeverage, sizeMult: p.sizeMult, probation: p.probation }, c.risk);
     const sizeNote = size && !size.skip ? `risking ${size.riskPct.toFixed(2)}% of the account (${usd(size.riskUsd)}) on a ${usd(size.notional)} position, ${size.lev.toFixed(1)}× the account${size.why ? ` — ${size.why}` : ''}` : '';
     const v = councilR({ cand, odds, riskGate: gate ?? size?.skip ?? null, sizeNote }, c.council);
     this.discuss(cand, v);

@@ -26,7 +26,8 @@ await seedDesktopLedger(userData);
 {
   const dir = join(userData, 'lab', 'cache');
   mkdirSync(dir, { recursive: true });
-  const coins = ['BTC', 'ETH', 'SOL', 'BNB'];
+  // the four it breeds on, and the first three confirmation coins (never bred on) the edge finder re-tests proven strategies on
+  const coins = ['BTC', 'ETH', 'SOL', 'BNB', 'LINK', 'LTC', 'ADA'];
   coins.forEach((coin, ci) => {
     let seed = 20261117 + ci * 7919;
     const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);

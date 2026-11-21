@@ -37,6 +37,8 @@ export class Care {
     this.swarmFn = o.swarm;
     this.labFn = o.lab;
     this.botsFn = o.bots;
+    /** after each health check: probation and the automatic pause (returns the strategies it told you about itself) */
+    this.onHealth = o.onHealth ?? null;
     this.screenFn = o.screen ?? (() => 'ok');
     this.assumed = o.assumedCosts ?? (() => ({ feeBps: 4.5, slipBps: 2 }));
     this.now = o.now ?? Date.now;
@@ -217,7 +219,13 @@ export class Care {
     } catch {
       return;
     }
-    for (const h of worsened(this.st.health, hs)) await this.send(healthText(h), `health ${h.name}`);
+    let handled = [];
+    try {
+      handled = (await this.onHealth?.(hs)) ?? [];
+    } catch (err) {
+      this.log('warn', `probation: ${err?.message ?? err}`);
+    }
+    for (const h of worsened(this.st.health, hs)) if (!handled.includes(h.id)) await this.send(healthText(h), `health ${h.name}`);
     this.st.health = Object.fromEntries(hs.map((h) => [h.id, h.status]));
     this.save();
   }

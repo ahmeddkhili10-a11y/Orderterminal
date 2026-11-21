@@ -7,6 +7,8 @@ import { rateOn, ratesFromChart, taxCsv, taxYearOf, taxYearRange } from './tax.m
 import { backText, clearedText, dailyText, problemsOf, weeklyText } from './reports.mjs';
 import { Care, localDay } from './care.mjs';
 import { Approvals } from './approve.mjs';
+import { Probation } from './probation.mjs';
+import { Retuner } from './retune.mjs';
 import { Remote } from './remote.mjs';
 import { markRestart, markRunning, markStopped, tidyErrors, crashText, wakeText } from './crash.mjs';
 import { mkdtempSync } from 'node:fs';
@@ -507,7 +509,7 @@ describe('a proven strategy over 200 % a year is offered on its own', () => {
     const a = new Approvals({ db, teams: () => [], stars: () => stars, deployed: () => deployed.map((d) => d.name), deploy: async (m, auth) => deployed.push({ name: m.name, auth, via: m.via }), swarm: () => ({ running: true, mode: 'paper' }), now: () => t });
     const out = a.check();
     expect(out).toHaveLength(1);
-    expect(out[0].html).toMatch(/over 200 % a year[\s\S]*Order block retest · b[\s\S]*Intraday[\s\S]*\+45% a year[\s\S]*5\.0×\): <b>\+225% a year[\s\S]*31 trades[\s\S]*not significant/);
+    expect(out[0].html).toMatch(/over 200 % a year[\s\S]*Order block retest · b[\s\S]*Intraday[\s\S]*\+45% a year[\s\S]*5\.0×\): <b>\+225% a year[\s\S]*31 trades[\s\S]*neither significant/);
     expect(out[0].keyboard.flat().map((b) => b.text)).toEqual(['✅ Deploy · council decides', '✅ Deploy · trade as tested', '✖ Not now']);
     expect(a.check()).toHaveLength(0);
     const reply = await a.tap(out[0].keyboard[0][0].callback_data);
@@ -519,5 +521,89 @@ describe('a proven strategy over 200 % a year is offered on its own', () => {
     expect(await a.tap(kb[1][0].callback_data)).toMatch(/no longer proven and over 200 %/);
     expect(deployed).toHaveLength(1);
     expect(a.starPool()[0].html).toMatch(/No strategy is over 200 % a year and proven yet/);
+  });
+});
+
+describe('probation and the automatic pause', () => {
+  const setup = (deployed) => {
+    const db = memDb();
+    const lab = {
+      deployedList: deployed,
+      setScale(id, scale) {
+        this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, scale } : d));
+      },
+      toggle(id, on, by = 'you') {
+        this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, on, pausedBy: on ? null : by } : d));
+      },
+      undeploy(id) {
+        this.deployedList = this.deployedList.filter((d) => d.id !== id);
+      },
+    };
+    return { lab, p: new Probation({ db, lab: () => lab, now: () => Date.UTC(2026, 10, 21) }) };
+  };
+  const dep = (id, extra = {}) => ({ id, spec: { name: `Strategy ${id}` }, on: true, scale: 0.25, ...extra });
+  it('graduates after 12 trades on track, goes back to a quarter when it falls behind, and leaves early ones alone', () => {
+    const { lab, p } = setup([dep('a'), dep('b', { scale: 1 }), dep('c')]);
+    const r = p.review([
+      { id: 'a', status: 'ok', trades: 14, words: 'won 57% of 14 trades against 55% in its test' },
+      { id: 'b', status: 'behind', trades: 20, words: 'worse than tested' },
+      { id: 'c', status: 'ok', trades: 9, words: 'on track' },
+    ]);
+    expect(r.handled).toEqual(['a', 'b']);
+    expect(lab.deployedList.map((d) => d.scale)).toEqual([1, 0.25, 0.25]);
+    expect(r.messages.map((m) => m.html.split('\n')[0])).toEqual(['🎓 <b>Off probation: Strategy a</b>', '↘ <b>Back on probation: Strategy b</b>']);
+  });
+  it('a strategy that has stopped working is paused and you choose: resume (on probation) or retire', async () => {
+    const { lab, p } = setup([dep('a', { scale: 1 }), dep('b', { scale: 1 })]);
+    const r = p.review([
+      { id: 'a', status: 'stopped', trades: 15, words: 'won 20% of 15 trades against 55% in its test' },
+      { id: 'b', status: 'stopped', trades: 15, words: 'losing' },
+    ]);
+    expect(lab.deployedList.map((d) => [d.on, d.pausedBy])).toEqual([[false, 'health'], [false, 'health']]);
+    expect(r.messages[0].html).toMatch(/Paused: Strategy a[\s\S]*no new trades[\s\S]*Resume/);
+    expect(r.messages[0].keyboard.flat().map((b) => b.text)).toEqual(['▶ Resume (¼ size)', '🗑 Retire it', '⏸ Keep paused']);
+    expect(await p.tap(r.messages[0].keyboard[0][0].callback_data)).toMatch(/resumed, on probation/);
+    expect(lab.deployedList.find((d) => d.id === 'a')).toMatchObject({ on: true, scale: 0.25 });
+    expect(await p.tap(r.messages[0].keyboard[0][0].callback_data)).toMatch(/Already answered/);
+    expect(await p.tap(r.messages[1].keyboard[1][0].callback_data)).toMatch(/retired/);
+    expect(lab.deployedList.map((d) => d.id)).toEqual(['a']);
+    // a paused strategy is not paused again
+    expect(p.review([{ id: 'a', status: 'ok', trades: 3, words: '' }]).messages).toHaveLength(0);
+  });
+});
+
+describe('the monthly re-tuner', () => {
+  it('checks a strategy a month after it was deployed, only with the Lab idle; offers a change with buttons; Apply puts it on probation', async () => {
+    const DAY = 86_400_000;
+    let t = Date.UTC(2026, 10, 1);
+    let idle = true;
+    const calls = [];
+    const lab = {
+      deployedList: [{ id: 'a', on: true, deployedAt: t, spec: { name: 'Ride the trend', signal: { id: 'tsmom', p: { lookback: 720 } } } }],
+      idle: () => idle,
+      retune: async (d) => (calls.push(d.id), { changed: true, why: 'better', current: { sharpe: 1, ret: 0.1, maxDD: 0.05, trades: 20 }, proposed: { sharpe: 1.6, ret: 0.2, maxDD: 0.05, trades: 25 }, spec: { ...d.spec, signal: { id: 'tsmom', p: { lookback: 72 } } }, changes: ['Time-series momentum: lookback 720 → 72'], tried: 5 }),
+      setSpec(id, spec, note) {
+        this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, spec, note } : d));
+      },
+      setScale(id, scale) {
+        this.deployedList = this.deployedList.map((d) => (d.id === id ? { ...d, scale } : d));
+      },
+    };
+    const r = new Retuner({ db: memDb(), lab: () => lab, now: () => t });
+    // not yet a month
+    expect(await r.check()).toBeNull();
+    t += 31 * DAY;
+    idle = false;
+    expect(await r.check()).toBeNull();
+    expect(calls).toEqual([]);
+    idle = true;
+    const m = await r.check();
+    expect(m.html).toMatch(/Better settings found for Ride the trend[\s\S]*lookback 720 → 72[\s\S]*Sharpe 1\.00 → <b>1\.60<\/b>/);
+    expect(m.keyboard.flat().map((b) => b.text)).toEqual(['✅ Apply the new settings', '✖ Keep the current ones']);
+    // checked: not again for a month
+    expect(await r.check()).toBeNull();
+    expect(await r.tap(m.keyboard[0][0].callback_data)).toMatch(/new settings applied[\s\S]*probation/);
+    expect(lab.deployedList[0]).toMatchObject({ scale: 0.25, spec: { name: 'Ride the trend', signal: { p: { lookback: 72 } } } });
+    expect(await r.tap(m.keyboard[1][0].callback_data)).toMatch(/Already answered/);
   });
 });
