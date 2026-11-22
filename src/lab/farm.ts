@@ -2180,13 +2180,29 @@ export class Farm {
       this.boardDirty ||
       t - this.board.at >= 20_000 ||
       t < this.board.at ||
-      groups.some((p) => {
-        const ids = this.board!.ids[p.id] ?? [];
-        return (
-          ids.some((id) => !byId.has(id) || byId.get(id)!.stage === "faded") ||
-          (ids.length < 5 && liveOf(p.id).length > ids.length)
-        );
-      });
+      groups.some((p) => (this.board!.ids[p.id] ?? []).some((id) => !byId.has(id) || byId.get(id)!.stage === "faded"));
+    // a list still filling takes a newcomer at its end at once; the full re-ranking waits for the 20-second clock
+    // (re-ranking the whole list on every arrival made the strategies already shown swap places)
+    if (!stale && this.board)
+      for (const p of groups) {
+        const ids = this.board.ids[p.id] ?? [];
+        if (ids.length >= 5) continue;
+        const fresh = liveOf(p.id)
+          .filter((s) => !ids.includes(s.id))
+          .sort((a, b) => STAGE_RANK[b.stage] - STAGE_RANK[a.stage] || b.score - a.score)
+          .slice(0, 5 - ids.length)
+          .map((s) => s.id);
+        if (fresh.length) this.board.ids[p.id] = [...ids, ...fresh];
+        const byR = this.boardByRet[p.id] ?? [];
+        if (byR.length < 5) {
+          const more = liveOf(p.id)
+            .filter((s) => !byR.includes(s.id))
+            .sort((a, b) => STAGE_RANK[b.stage] - STAGE_RANK[a.stage] || starRet(b) - starRet(a))
+            .slice(0, 5 - byR.length)
+            .map((s) => s.id);
+          if (more.length) this.boardByRet[p.id] = [...byR, ...more];
+        }
+      }
     if (stale) {
       const ids: Record<string, string[]> = {};
       const byRet: Record<string, string[]> = {};

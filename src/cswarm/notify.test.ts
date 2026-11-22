@@ -45,33 +45,34 @@ const pos = (over: Partial<CSwarmPosition> = {}): CSwarmPosition => ({
 const note = (stage: CSwarmNotify['stage'], p: CSwarmPosition): CSwarmNotify => ({ kind: 'notify', stage, mode: p.mode, position: p, candles: [], timeframe: '1h', va: null, equity: 30.6 });
 
 describe('crypto swarm on Telegram', () => {
-  it('1 — the setup: potential gain, positioning, odds and every vote', () => {
+  it('1 — the setup: a headline, the numbers in a table, why, the odds and every vote', () => {
     const c = captionOf(note('setup', pos()));
-    expect(c.html).toMatch(/^🔵 <b>BTC LONG — Trend \(paper\)<\/b>/);
-    expect(c.html).toContain('Potential: +$0.68 (+2.00R)');
-    expect(c.html).toContain('$0.36 at risk (1.20% of the account)');
-    expect(c.html).toContain('<i>Positioning:</i> trend breakout — closed above the 20-hour high');
-    expect(c.html).toContain('P(win) 46%, expects +0.22R');
+    expect(c.html).toMatch(/^🔵 <b>BTC LONG — taking it<\/b>\nTrend · paper\n\n<pre>/);
+    expect(c.html).toMatch(/At risk +\$0\.36 · 1\.20%\nPotential +\+\$0\.68 · \+2\.00R/);
+    expect(c.html).toContain('<b>📐 Why</b>\ntrend breakout — closed above the 20-hour high');
+    expect(c.html).toContain('<b>46%</b> to win · expects <b>+0.22R</b> after costs');
     expect(c.html).toContain('✓ <i>Tape:</i> aggressive flow with it');
     expect(c.html).toContain('– <i>Crowd:</i> funding neutral');
+    // the photo's caption: the headline and the numbers (Telegram allows 1,024 characters there)
+    expect(c.short.length).toBeLessThan(1024);
+    expect(c.short).toMatch(/taking it[\s\S]*<pre>[\s\S]*Potential/);
   });
 
   it('2 — managing: where it stands and each decision', () => {
     const c = captionOf(note('manage', pos({ price: 100_460, stop: 100_000, be: true, mgmt: [{ t: T, text: 'up 1.1R — stop to break-even (100000): this trade can no longer lose' }] })));
-    expect(c.html).toContain('🟡 <b>BTC LONG — Trend (paper) — managing</b>');
-    expect(c.html).toContain('open +$0.41 (+1.15R)');
-    expect(c.html).toContain('Stop 100,000 (was 99,600)');
+    expect(c.html).toContain('🟡 <b>BTC LONG — managing</b>\nTrend · paper');
+    expect(c.html).toMatch(/Open +\+\$0\.41 · \+1\.15R/);
+    expect(c.html).toMatch(/Stop +100,000 \(was 99,600\)/);
     expect(c.html).toContain('• up 1.1R — stop to break-even');
   });
 
   it('3 — the result: green for a profit, red for a loss, with the breakdown and the verdict', () => {
     const win = captionOf(note('result', pos({ exit: 100_800, pnl: 0.68, r: 1.89, reason: 'target', closedAt: T + 3 * 3_600_000 })));
-    expect(win.html).toMatch(/^🟢 <b>BTC LONG — Trend \(paper\) closed \+\$0\.68 \(\+1\.89R\)<\/b>/);
-    expect(win.html).toContain('held 3.0 h');
-    expect(win.html).toContain('gross +$0.72, fees $0.04, risked $0.36 · account now $30.60');
-    expect(win.html).toContain('the plan worked');
+    expect(win.html).toMatch(/^🟢 <b>BTC LONG — closed \+\$0\.68 \(\+1\.89R\)<\/b>\nTrend · paper · held 3\.0 h/);
+    expect(win.html).toMatch(/Gross +\+\$0\.72\nFees +\$0\.04\nRisked +\$0\.36\nAccount +\$30\.60/);
+    expect(win.html).toContain('<b>✅ Verdict</b>\nThe plan worked');
     const loss = captionOf(note('result', pos({ exit: 99_600, pnl: -0.4, r: -1.1, reason: 'stop', closedAt: T + 600_000 })));
-    expect(loss.html).toMatch(/^🔴 <b>BTC LONG — Trend \(paper\) closed −\$0\.40 \(−1\.10R\)<\/b>/);
+    expect(loss.html).toMatch(/^🔴 <b>BTC LONG — closed −\$0\.40 \(−1\.10R\)<\/b>/);
     expect(loss.html).toContain('the stop did its job');
     expect(loss.title).toBe('BTC LONG lost −$0.40');
   });

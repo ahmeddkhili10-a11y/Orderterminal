@@ -428,7 +428,7 @@ async function afterUnlockCare() {
     if (care?.wanted.swarm && cswarm && !cswarm.running) {
       await cswarm.start();
       log('info', 'crypto swarm resumed after the restart');
-      void care.send(`▶ <b>The crypto swarm has resumed</b> (${cswarm.mode === 'live' ? 'LIVE' : 'paper'}) — it was running when Novus Ordo closed.${cswarm.holding ? ' It is paused for new trades: /resume to trade.' : ''}`, 'resumed');
+      void care.send(`▶️ <b>The crypto swarm has resumed</b>\n${cswarm.mode === 'live' ? '<b>LIVE</b>' : 'paper'} · it was running when Novus Ordo closed${cswarm.holding ? '\n\n<i>Paused for new trades — /resume to trade.</i>' : ''}`, 'resumed');
     }
   } catch (err) {
     log('warn', 'could not resume the crypto swarm', err);

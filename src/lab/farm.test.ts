@@ -300,9 +300,9 @@ describe('the gauntlet', () => {
       expect(s.vault!.trades).toBeGreaterThan(0);
       expect(s.stage).not.toBe('faded');
     }
-    // the same five, as the intraday pace's board
+    // the same five, as the intraday pace's board (a newcomer waits at the end of the board until the 20-second clock re-ranks it)
     const board = st.tops!.find((b) => b.id === 'intraday')!;
-    expect(board.rows.map((r) => r.id)).toEqual(st.top.map((r) => r.id));
+    expect(board.rows.map((r) => r.id).sort()).toEqual(st.top.map((r) => r.id).sort());
     expect(st.tops!.map((b) => b.id)).toEqual(['intraday']);
   }, 120_000);
 });

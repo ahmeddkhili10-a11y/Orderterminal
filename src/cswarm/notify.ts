@@ -6,6 +6,7 @@
 import type { CSwarmNotify, CSwarmPosition } from '../desktop/bridge';
 import { desktop } from '../desktop/bridge';
 import { escapeHtml } from '../shared/telegram';
+import { bullets, card, head, note, section, table } from '../shared/tgcard';
 import { getSettings } from '../store/settings';
 import { alertHere } from '../alerts/here';
 
@@ -29,70 +30,85 @@ export function sideWord(p: Pick<CSwarmPosition, 'side'>) {
   return p.side === 'buy' ? 'LONG' : 'SHORT';
 }
 
-/** The text of each message (HTML for Telegram). */
+/** The text of each message (HTML for Telegram): the headline, the numbers in a table, then the reasoning. */
 export function captionOf(n: CSwarmNotify): { title: string; html: string; short: string } {
   const p = n.position;
-  const tag = n.mode === 'live' ? 'LIVE' : 'paper';
-  const head = `${p.coin} ${sideWord(p)} — ${p.agentName ?? NAME[p.agent]} (${tag})`;
+  const tag = n.mode === 'live' ? '<b>LIVE</b>' : 'paper';
+  const who = `${p.agentName ?? NAME[p.agent] ?? p.agent} · ${tag}`;
   const rr = Math.abs(p.target - p.entry) / Math.max(1e-12, Math.abs(p.entry - p.stop0));
   const e = escapeHtml;
+  const name = `${e(p.coin)} ${sideWord(p)}`;
   if (n.stage === 'setup') {
     const pot = p.potential ?? Math.abs(p.target - p.entry) * p.qty;
-    const votes = p.votes.map((v) => `${MARK[v.stance]} <i>${NAME[v.bot] ?? v.bot}:</i> ${e(v.why)}`).join('\n');
-    const lines = [
-      `🔵 <b>${e(head)}</b>`,
-      `Entry ${px(p.entry)} · Stop ${px(p.stop)} · Target ${px(p.target)}`,
-      `<b>Potential: ${signedUsd(pot)} (${signedR(rr)})</b> for ${usd(p.riskUsd)} at risk (${p.riskPct.toFixed(2)}% of the account) · position ${usd(p.notional)}, ${p.lev.toFixed(1)}× the account`,
-      `<i>Positioning:</i> ${e(p.setup)} — ${e(p.why)}. Stop beyond the level that proves it wrong; target at ${rr.toFixed(1)}× the risk.`,
-      `<i>Odds:</i> P(win) ${Math.round(p.odds.pWin * 100)}%, expects ${signedR(p.odds.expR)} after costs (forest trust ${Math.round(p.odds.trust * 100)}%)`,
-      `<i>Council:</i> ${e(p.summary)}`,
-      votes,
-    ];
-    return { title: `${p.coin} ${sideWord(p)} — taking it`, html: lines.join('\n'), short: `🔵 <b>${e(head)}</b>\nEntry ${px(p.entry)} · Stop ${px(p.stop)} · Target ${px(p.target)}\n<b>Potential ${signedUsd(pot)} (${signedR(rr)})</b> · risk ${usd(p.riskUsd)}` };
+    const top = head('🔵', `${name} — taking it`, who);
+    const nums = table([
+      ['Entry', px(p.entry)],
+      ['Stop', px(p.stop)],
+      ['Target', px(p.target)],
+      ['At risk', `${usd(p.riskUsd)} · ${p.riskPct.toFixed(2)}%`],
+      ['Potential', `${signedUsd(pot)} · ${signedR(rr)}`],
+      ['Position', `${usd(p.notional)} · ${p.lev.toFixed(1)}×`],
+    ]);
+    const html = card([
+      top,
+      nums,
+      section('📐 Why', [`${e(p.setup)} — ${e(p.why)}`, note(`Stop beyond the level that proves it wrong; target at ${rr.toFixed(1)}× the risk.`)]),
+      section('🎲 Odds', [`<b>${Math.round(p.odds.pWin * 100)}%</b> to win · expects <b>${signedR(p.odds.expR)}</b> after costs ${note(`(forest trust ${Math.round(p.odds.trust * 100)}%)`)}`]),
+      section(`🗳 Council — ${e(p.summary)}`, p.votes.map((v) => `${MARK[v.stance]} <i>${NAME[v.bot] ?? v.bot}:</i> ${e(v.why)}`)),
+    ]);
+    return { title: `${p.coin} ${sideWord(p)} — taking it`, html, short: card([top, nums]) };
   }
   if (n.stage === 'manage') {
     const now = p.price ?? p.entry;
     const dir = p.side === 'buy' ? 1 : -1;
     const openUsd = (now - p.entry) * p.qty * dir;
     const openR = ((now - p.entry) * dir) / Math.max(1e-12, Math.abs(p.entry - p.stop0));
-    const lines = [
-      `🟡 <b>${e(head)} — managing</b>`,
-      `Now ${px(now)} · open ${signedUsd(openUsd)} (${signedR(openR)})`,
-      `Stop ${px(p.stop)}${p.stop !== p.stop0 ? ` (was ${px(p.stop0)})` : ''} · Target ${px(p.target)}`,
-      `<i>Decisions so far:</i>`,
-      ...(p.mgmt.length ? p.mgmt.map((m) => `• ${e(m.text)}`) : ['• holding as planned']),
-    ];
-    return { title: `${p.coin} ${sideWord(p)} — managing`, html: lines.join('\n'), short: lines.slice(0, 3).join('\n') };
+    const top = head('🟡', `${name} — managing`, who);
+    const nums = table([
+      ['Now', px(now)],
+      ['Open', `${signedUsd(openUsd)} · ${signedR(openR)}`],
+      ['Stop', `${px(p.stop)}${p.stop !== p.stop0 ? ` (was ${px(p.stop0)})` : ''}`],
+      ['Target', px(p.target)],
+    ]);
+    const html = card([top, nums, section('🧭 Decisions so far', bullets(p.mgmt.length ? p.mgmt.map((m) => e(m.text)) : ['holding as planned']))]);
+    return { title: `${p.coin} ${sideWord(p)} — managing`, html, short: card([top, nums]) };
   }
   const win = (p.pnl ?? 0) >= 0;
   const r = p.r ?? 0;
-  const lines = [
-    `${win ? '🟢' : '🔴'} <b>${e(head)} closed ${signedUsd(p.pnl ?? 0)} (${signedR(r)})</b>`,
-    `Entry ${px(p.entry)} → exit ${px(p.exit)} · held ${held((p.closedAt ?? Date.now()) - p.openedAt)} · ${e(p.reason ?? '')}`,
-    `<i>Breakdown:</i> gross ${signedUsd((p.pnl ?? 0) + p.fees)}, fees ${usd(p.fees)}, risked ${usd(p.riskUsd)}${n.equity !== null ? ` · account now ${usd(n.equity)}` : ''}`,
-    `<i>Why it was taken:</i> ${e(p.setup)} — ${e(p.why)}`,
-    `<i>How it was managed:</i>`,
-    ...(p.mgmt.length ? p.mgmt.map((m) => `• ${e(m.text)}`) : ['• held to the end as planned']),
-    `<i>Verdict:</i> ${reasonWords(p)}`,
-  ];
-  return { title: `${p.coin} ${sideWord(p)} ${win ? 'won' : 'lost'} ${signedUsd(p.pnl ?? 0)}`, html: lines.join('\n'), short: lines.slice(0, 2).join('\n') };
+  const top = head(win ? '🟢' : '🔴', `${name} — closed ${signedUsd(p.pnl ?? 0)} (${signedR(r)})`, `${who} · held ${held((p.closedAt ?? Date.now()) - p.openedAt)}`);
+  const nums = table([
+    ['Entry', px(p.entry)],
+    ['Exit', px(p.exit)],
+    ['Gross', signedUsd((p.pnl ?? 0) + p.fees)],
+    ['Fees', usd(p.fees)],
+    ['Risked', usd(p.riskUsd)],
+    ...(n.equity !== null ? [['Account', usd(n.equity)]] : []),
+  ]);
+  const html = card([
+    top,
+    nums,
+    section(win ? '✅ Verdict' : '📉 Verdict', [reasonWords(p)]),
+    section('📐 Why it was taken', [`${e(p.setup)} — ${e(p.why)}`]),
+    section('🧭 How it was managed', bullets(p.mgmt.length ? p.mgmt.map((m) => e(m.text)) : ['held to the end as planned'])),
+  ]);
+  return { title: `${p.coin} ${sideWord(p)} ${win ? 'won' : 'lost'} ${signedUsd(p.pnl ?? 0)}`, html, short: card([top, nums]) };
 }
 
 function reasonWords(p: CSwarmPosition): string {
   const r = p.r ?? 0;
   switch (p.reason) {
     case 'target':
-      return `the plan worked — it reached its target for ${signedR(r)}.`;
+      return `The plan worked — it reached its target for ${signedR(r)}.`;
     case 'stop':
-      return `the level failed and the stop did its job: a ${signedR(r)} loss, as planned before the trade.`;
+      return `The level failed and the stop did its job: a ${signedR(r)} loss, as planned before the trade.`;
     case 'breakeven':
-      return 'it went in favour, the stop was moved to entry, and it came back: a scratch instead of a loss.';
+      return 'It went in favour, the stop was moved to entry, and it came back: a scratch instead of a loss.';
     case 'trail':
-      return `the trailing stop banked the move: ${signedR(r)}.`;
+      return `The trailing stop banked the move: ${signedR(r)}.`;
     case 'time':
-      return `it ran out of time without reaching stop or target: ${signedR(r)}.`;
+      return `It ran out of time without reaching stop or target: ${signedR(r)}.`;
     case 'exchange stop':
-      return 'the exchange-side stop closed it (the app was not in time, or not running).';
+      return 'The exchange-side stop closed it (the app was not in time, or not running).';
     default:
       return `${p.reason ?? 'closed'}: ${signedR(r)}.`;
   }
@@ -285,7 +301,8 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 export async function tellTrade(n: CSwarmNotify) {
   const s = getSettings();
   const cap = captionOf(n);
-  if (n.stage !== 'manage') alertHere(cap.title, cap.short.replace(/<[^>]+>/g, '').split('\n')[1] ?? '', n.stage === 'setup' ? 'buy' : (n.position.pnl ?? 0) >= 0 ? 'buy' : 'sell');
+  const q = n.position;
+  if (n.stage !== 'manage') alertHere(cap.title, n.stage === 'setup' ? `Entry ${px(q.entry)} · Stop ${px(q.stop)} · Target ${px(q.target)}` : `Entry ${px(q.entry)} → exit ${px(q.exit)} · ${signedR(q.r ?? 0)}`, n.stage === 'setup' ? 'buy' : (q.pnl ?? 0) >= 0 ? 'buy' : 'sell');
   if (!desktop || !s.telegramCrypto || !s.telegramSecretId) return;
   try {
     const png = await cardOf(n);

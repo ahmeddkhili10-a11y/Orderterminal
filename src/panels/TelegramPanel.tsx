@@ -81,7 +81,7 @@ export function TelegramPanel(_: PanelProps<TelegramConfig>) {
             {chatId && <span className="muted mono"> chat {chatId}</span>}
           </li>
           <li>
-            <button className="chip" disabled={!chatId} onClick={() => void run('test sent', () => telegram.send(bot!.id, '✅ <b>Novus Ordo</b> is connected.\n\nThe crypto swarm, the bots and the Luno lane will tell you here when they open and close trades, with the result.'))}>
+            <button className="chip" disabled={!chatId} onClick={() => void run('test sent', () => telegram.send(bot!.id, '✅ <b>Novus Ordo is connected</b>\n\n<b>You will hear here when</b>\n• the crypto swarm, the bots or the Luno lane open or close a trade\n• a strategy is ready to deploy, or needs a decision\n• anything stops or needs a look\n\n<i>Send /help for what you can ask.</i>'))}>
               Send test message
             </button>
           </li>

@@ -11,13 +11,14 @@
 // ten minutes.
 import { randomBytes } from 'node:crypto';
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
+import { bullets, card, head, note, section, signedUsd as signed, table, usd } from '../../src/shared/tgcard.ts';
+
+const STARTING = card([head('⏳', 'Still starting up'), note('The crypto swarm is getting ready — try again in a moment.')]);
 
 const MIN = 60_000;
 const CONFIRM_TTL = 10 * MIN;
 const AGENT = { auction: 'Auctioneer', trend: 'Trend', lab: 'Lab', tape: 'Tape', crowd: 'Crowd', scalper: 'Scalper' };
 
-const usd = (v) => `${v < 0 ? '−' : ''}$${Math.abs(v ?? 0).toFixed(2)}`;
-const signed = (v) => `${v >= 0 ? '+' : '−'}$${Math.abs(v ?? 0).toFixed(2)}`;
 const px = (p) => (Number.isFinite(p) ? p.toLocaleString('en-US', { maximumFractionDigits: Math.abs(p) >= 1000 ? 1 : Math.abs(p) >= 10 ? 2 : 4 }) : '—');
 const ago = (ms) => (ms < 90 * MIN ? `${Math.round(ms / MIN)} min` : ms < 48 * 60 * MIN ? `${(ms / 3_600_000).toFixed(1)} h` : `${(ms / 86_400_000).toFixed(1)} days`);
 
@@ -45,23 +46,35 @@ export class Remote {
 
   positions() {
     const sw = this.swarmFn();
-    if (!sw) return 'The crypto swarm is still starting up — try again in a moment.';
+    if (!sw) return STARTING;
     const st = sw.state();
-    const L = [`📋 <b>Crypto swarm</b> · ${st.running ? (st.holding ? '⏸ paused for new trades' : '▶ running') : '■ stopped'} · ${st.mode === 'live' ? '<b>LIVE</b>' : 'paper'}${Number.isFinite(st.equity) ? ` · account ${usd(st.equity)}` : ''}`];
-    if (!st.open.length) L.push('No open trades.');
-    for (const p of st.open) {
+    const state = st.running ? (st.holding ? '⏸ paused for new trades' : '🟢 running') : '🔴 stopped';
+    const today = (st.closed ?? []).filter((p) => this.now() - (p.closedAt ?? 0) < 86_400_000);
+    const trades = st.open.map((p) => {
       const now = p.price ?? p.entry;
       const r = p.riskUsd > 0 ? p.upnl / p.riskUsd : 0;
-      L.push(`• <b>${e(p.coin)} ${p.side === 'buy' ? 'LONG' : 'SHORT'}</b> — ${e(p.agentName ?? AGENT[p.agent] ?? p.agent)}${p.labId ? '' : ''}\n   ${px(p.entry)} → ${px(now)} · <b>${signed(p.upnl)}</b> (${r >= 0 ? '+' : '−'}${Math.abs(r).toFixed(2)}R) · stop ${px(p.stop)} · target ${px(p.target)} · ${ago(this.now() - p.openedAt)}`);
-    }
-    if (st.closed?.length) {
-      const today = st.closed.filter((p) => this.now() - (p.closedAt ?? 0) < 86_400_000);
-      if (today.length) L.push(`Last 24 hours: ${today.length} closed, ${signed(today.reduce((a, p) => a + (p.pnl ?? 0), 0))}`);
-    }
+      return section(`${p.upnl >= 0 ? '🟢' : '🔴'} ${e(p.coin)} ${p.side === 'buy' ? 'LONG' : 'SHORT'} · ${signed(p.upnl)} (${r >= 0 ? '+' : '−'}${Math.abs(r).toFixed(2)}R)`, [
+        note(`${e(p.agentName ?? AGENT[p.agent] ?? p.agent)} · open ${ago(this.now() - p.openedAt)}`),
+        table([
+          ['Entry', px(p.entry)],
+          ['Now', px(now)],
+          ['Stop', px(p.stop)],
+          ['Target', px(p.target)],
+        ]),
+      ]);
+    });
     const bots = (this.botsFn()?.list() ?? []).filter((b) => b.running);
-    if (bots.length) L.push(`Bots running: ${bots.map((b) => `${e(b.name)} (${b.mode === 'live' ? 'live' : 'paper'})`).join(', ')}`);
-    L.push('<i>/pause · /resume · /stop · /startswarm</i>');
-    return L.join('\n');
+    return card([
+      head('📋', 'Crypto swarm', `${state} · ${st.mode === 'live' ? '<b>LIVE</b>' : 'paper'}`),
+      table([
+        ...(Number.isFinite(st.equity) ? [['Account', usd(st.equity)]] : []),
+        ['Open trades', String(st.open.length)],
+        ...(today.length ? [['Closed today', `${today.length} · ${signed(today.reduce((a, p) => a + (p.pnl ?? 0), 0))}`]] : []),
+      ]),
+      ...trades,
+      bots.length ? section('⚙️ Bots running', bots.map((b) => `• ${e(b.name)} · ${b.mode === 'live' ? 'live' : 'paper'}`)) : null,
+      note('/pause · /resume · /stop · /startswarm'),
+    ]);
   }
 
   /** a command from your chat: the reply (with buttons when it asks to confirm), or null when it is not one of these */
@@ -69,15 +82,16 @@ export class Remote {
     const sw = this.swarmFn();
     if (cmd === '/positions' || cmd === '/pos') return [{ html: this.positions() }];
     if (cmd === '/pause') {
-      if (!sw) return [{ html: 'The crypto swarm is still starting up — try again in a moment.' }];
+      if (!sw) return [{ html: STARTING }];
       sw.hold(true);
-      return [{ html: `⏸ <b>Paused for new trades.</b> ${sw.open().length ? `The ${sw.open().length} open trade${sw.open().length > 1 ? 's are' : ' is'} still managed to ${sw.open().length > 1 ? 'their' : 'its'} stop and target.` : 'Nothing is open.'} Send /resume to trade again, /stop to close everything.` }];
+      const k = sw.open().length;
+      return [{ html: card([head('⏸', 'Paused for new trades'), k ? `The <b>${k}</b> open trade${k > 1 ? 's are' : ' is'} still managed to ${k > 1 ? 'their' : 'its'} stop and target.` : 'Nothing is open.', note('/resume to trade again · /stop to close everything')]) }];
     }
     if (cmd === '/resume') {
-      if (!sw) return [{ html: 'The crypto swarm is still starting up — try again in a moment.' }];
+      if (!sw) return [{ html: STARTING }];
       sw.hold(false);
-      if (!sw.running) return [{ html: '▶ New trades are allowed again — but the swarm itself is <b>stopped</b>.', keyboard: this.startKeys(sw) }];
-      return [{ html: '▶ <b>Resumed</b> — the swarm takes new trades again.' }];
+      if (!sw.running) return [{ html: card([head('▶️', 'New trades allowed again'), 'But the swarm itself is <b>stopped</b> — start it below.']), keyboard: this.startKeys(sw) }];
+      return [{ html: card([head('▶️', 'Resumed'), note('The swarm takes new trades again.')]) }];
     }
     if (cmd === '/stop') {
       const n = sw?.open().length ?? 0;
@@ -85,15 +99,19 @@ export class Remote {
       const token = this.ask('stopall');
       return [
         {
-          html: `⛔ <b>Close everything and stop?</b>\nThis closes ${n ? `the ${n} open swarm trade${n > 1 ? 's' : ''}` : 'any open swarm trade'} at market${sw?.mode === 'live' ? ' (<b>LIVE</b>, real money)' : ''}, stops the crypto swarm${bots ? ` and the ${bots} running bot${bots > 1 ? 's' : ''} (their positions closed too)` : ''}. Deployed strategies stay deployed; start again with /startswarm.`,
+          html: card([
+            head('⛔', 'Close everything and stop?', sw?.mode === 'live' ? '<b>LIVE — real money</b>' : 'paper'),
+            section('This will', bullets([`Close ${n ? `the <b>${n}</b> open swarm trade${n > 1 ? 's' : ''}` : 'any open swarm trade'} at market`, 'Stop the crypto swarm', bots ? `Stop the <b>${bots}</b> running bot${bots > 1 ? 's' : ''} and close their positions` : null])),
+            note('Deployed strategies stay deployed. Start again any time with /startswarm.'),
+          ]),
           keyboard: [[{ text: '⛔ Yes — close everything and stop', callback_data: `rc:${token}:y` }], [{ text: 'Cancel', callback_data: `rc:${token}:n` }]],
         },
       ];
     }
     if (cmd === '/startswarm' || cmd === '/start_swarm') {
-      if (!sw) return [{ html: 'The crypto swarm is still starting up — try again in a moment.' }];
-      if (sw.running) return [{ html: `The swarm is already running (${sw.mode === 'live' ? 'LIVE' : 'paper'})${sw.holding ? ', paused for new trades — /resume to trade again' : ''}.` }];
-      return [{ html: `▶ <b>Start the crypto swarm?</b> It starts in <b>${sw.mode === 'live' ? 'LIVE mode — real money' : 'paper mode'}</b>, with its deployed strategies.`, keyboard: this.startKeys(sw) }];
+      if (!sw) return [{ html: STARTING }];
+      if (sw.running) return [{ html: card([head('🟢', 'Already running', sw.mode === 'live' ? '<b>LIVE</b>' : 'paper'), sw.holding ? note('Paused for new trades — /resume to trade again.') : null]) }];
+      return [{ html: card([head('▶️', 'Start the crypto swarm?', sw.mode === 'live' ? '<b>LIVE mode — real money</b>' : 'paper mode'), note('It starts with its deployed strategies.')]), keyboard: this.startKeys(sw) }];
     }
     return null;
   }
@@ -109,18 +127,18 @@ export class Remote {
     if (!m) return null;
     const all = this.db.get('remote:asks') ?? {};
     const a = all[m[1]];
-    if (!a) return 'That request has lapsed — send the command again.';
+    if (!a) return card([head('⌛', 'That request has lapsed'), note('Send the command again.')]);
     delete all[m[1]];
     this.db.set('remote:asks', all);
-    if (this.now() - a.at > CONFIRM_TTL) return 'That request is more than ten minutes old and has lapsed — send the command again.';
-    if (m[2] === 'n') return 'Cancelled — nothing changed.';
+    if (this.now() - a.at > CONFIRM_TTL) return card([head('⌛', 'That request has lapsed', 'It is more than ten minutes old.'), note('Send the command again.')]);
+    if (m[2] === 'n') return card([head('✖️', 'Cancelled'), note('Nothing changed.')]);
     const sw = this.swarmFn();
     if (a.action === 'start') {
-      if (!sw) return 'The crypto swarm is still starting up — try again in a moment.';
-      if (sw.running) return 'The swarm is already running.';
+      if (!sw) return STARTING;
+      if (sw.running) return card([head('🟢', 'Already running')]);
       await sw.start();
       this.wanted(true);
-      return `▶ <b>The crypto swarm is running</b> (${sw.mode === 'live' ? 'LIVE' : 'paper'})${sw.holding ? ' — but paused for new trades: /resume to trade' : ''}.`;
+      return card([head('🟢', 'The crypto swarm is running', sw.mode === 'live' ? '<b>LIVE</b>' : 'paper'), sw.holding ? note('Paused for new trades — /resume to trade.') : null]);
     }
     if (a.action === 'stopall') {
       const open = sw?.open() ?? [];
@@ -135,7 +153,15 @@ export class Remote {
         await B.stop(b.id, { flatten: true, reason: 'closed and stopped from Telegram' }).catch(() => undefined);
         stoppedBots++;
       }
-      return `⛔ <b>Stopped.</b> ${closed.length ? `Closed ${closed.length} trade${closed.length > 1 ? 's' : ''}: ${signed(closed.reduce((s, p) => s + (p.pnl ?? 0), 0))}.` : 'No swarm trade was open.'}${left ? ` ⚠️ ${left} could not be closed — check the exchange.` : ''}${stoppedBots ? ` ${stoppedBots} bot${stoppedBots > 1 ? 's' : ''} stopped and flattened.` : ''} Send /startswarm to begin again.`;
+      return card([
+        head('⛔', 'Stopped'),
+        table([
+          ['Trades closed', closed.length ? `${closed.length} · ${signed(closed.reduce((s, p) => s + (p.pnl ?? 0), 0))}` : 'none open'],
+          ...(stoppedBots ? [['Bots stopped', String(stoppedBots)]] : []),
+        ]),
+        left ? `⚠️ <b>${left} could not be closed</b> — check the exchange.` : null,
+        note('Send /startswarm to begin again.'),
+      ]);
     }
     return null;
   }

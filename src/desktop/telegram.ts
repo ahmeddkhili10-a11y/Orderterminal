@@ -1,5 +1,6 @@
 import { fmtDuration, fmtPct, fmtPrice, fmtUsd } from '../core/format';
 import { hub } from '../market/hub';
+import { card, section, table } from '../shared/tgcard';
 import { escapeHtml, TelegramCommands, tgDetectChat, tgMe, tgSendLong, tgSendPhoto } from '../shared/telegram';
 import { getSettings, useSettings } from '../store/settings';
 import { desktop } from './bridge';
@@ -48,14 +49,14 @@ export function statusSnapshot() {
   const f = H.primary;
   const p = f.lastPrice();
   const s = f.stats;
-  const head = `<b>${escapeHtml(f.inst.symbol)}</b> · ${escapeHtml(f.adapter.name)}`;
-  const price = `${head}\n${fmtPrice(p)}${s.change24hPct !== undefined ? `  (${fmtPct(s.change24hPct)} 24h)` : ''}`;
-  const lines = [price];
-  if (s.fundingRate !== undefined) lines.push(`Funding ${(s.fundingRate * 100).toFixed(4)}%${s.nextFundingTime ? ` · next in ${fmtDuration(s.nextFundingTime - Date.now())}` : ''}`);
-  if (s.openInterestUsd) lines.push(`Open interest ${fmtUsd(s.openInterestUsd)}`);
-  if (s.markPrice && s.indexPrice) lines.push(`Basis ${(((s.markPrice - s.indexPrice) / s.indexPrice) * 1e4).toFixed(1)} bps`);
-  lines.push('', 'Feeds: ' + H.aggregate.map((x) => `${x.adapter.short} ${x.status.state === 'open' ? '✓' : '✗'}`).join(' · '));
-  return { price, status: lines.join('\n') };
+  const title = `📈 <b>${escapeHtml(f.inst.symbol)}</b> · ${escapeHtml(f.adapter.name)}`;
+  const price = `${title}\n<b>${fmtPrice(p)}</b>${s.change24hPct !== undefined ? `  ${s.change24hPct >= 0 ? '🟢' : '🔴'} ${fmtPct(s.change24hPct)} in 24 h` : ''}`;
+  const rows: [string, string][] = [];
+  if (s.fundingRate !== undefined) rows.push(['Funding', `${(s.fundingRate * 100).toFixed(4)}%${s.nextFundingTime ? ` · in ${fmtDuration(s.nextFundingTime - Date.now())}` : ''}`]);
+  if (s.openInterestUsd) rows.push(['Open interest', fmtUsd(s.openInterestUsd)]);
+  if (s.markPrice && s.indexPrice) rows.push(['Basis', `${(((s.markPrice - s.indexPrice) / s.indexPrice) * 1e4).toFixed(1)} bps`]);
+  const feeds = H.aggregate.map((x) => `${escapeHtml(x.adapter.short)} ${x.status.state === 'open' ? '✅' : '❌'}`).join('   ');
+  return { price, status: card([price, rows.length ? table(rows) : null, section('📡 Feeds', [feeds])]) };
 }
 
 let webPoller: TelegramCommands | null = null;

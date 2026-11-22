@@ -142,18 +142,22 @@ describe('messages', () => {
     const t = dailyText({ now, swarm, problems: [], day: [{ pnl: 5, quote: 'USDC' }, { pnl: -2, quote: 'USDC' }, { pnl: 100, quote: 'ZAR' }], health: [{ status: 'ok' }, { status: 'early' }], farm: { running: true, tried: 41230, survivors: 7, data: { ok: true, lastOkAt: now - 600_000 } }, equityDayAgo: 1030, nextAt: now + DAY });
     expect(t).toMatch(/all running/);
     expect(t).toMatch(/\$1,041\.20/);
-    expect(t).toMatch(/2 trades, 1 won, <b>\+\$3\.00<\/b> · 1 trade, 1 won, <b>\+R100\.00<\/b>/);
-    expect(t).toMatch(/41,230 bots tried/);
-    expect(t).toMatch(/BTC ✓ · ETH ✗/);
+    // laid out as a card: sections, and the numbers lined up in tables
+    expect(t).toMatch(/<pre>Trades +2 · 1 won\nResult +\+\$3\.00\nTrades \(R\) +1 · 1 won\nResult \(R\) +\+R100\.00<\/pre>/);
+    expect(t).toMatch(/Bots tried +41,230/);
+    expect(t).toMatch(/BTC ✅ +ETH ❌/);
+    expect(t).toMatch(/🤖 Crypto swarm — running · paper[\s\S]*📒 Last 24 hours[\s\S]*🧭 Deployed strategies — 2[\s\S]*🔬 Edge finder — running/);
     expect(clearedText(['feed:ETH', 'swarm-stopped'], { now })).toMatch(/Prices for ETH are back[\s\S]*crypto swarm is running again/);
     expect(backText(now - 3 * 3_600_000, now)).toMatch(/3 h/);
     const w = weeklyText({ now, from: now - 7 * DAY, mode: 'paper', equityStart: 1000, equityNow: 1041.2, rows: [{ source: 'swarm', who: 'auction', mode: 'paper', pnl: 5, r: 0.5, fees: 0.2, quote: 'USDC', coin: 'BTC', side: 'buy', detail: JSON.stringify({ odds: { expR: 0.3 } }) }, { source: 'lab', strategy_id: 's', who: 'Trend', mode: 'paper', pnl: -2, r: -1, fees: 0.1, quote: 'USDC', coin: 'ETH', side: 'sell' }], health: [{ id: 's', name: 'Trend', on: true, status: 'early', words: '1 of 8 trades — too early to tell' }], costs: { why: 'no live trades yet — the assumed costs' }, farm: { tried: 100, survivors: 2, tops: [{ id: 'swing', name: 'Swing', rows: [{ name: 'Breakout' }] }] }, farmWeek: 60 });
-    expect(w).toMatch(/your week/);
-    expect(w).toMatch(/Auctioneer: 1 trade, 1 won, \+\$5\.00, \+0\.50R a trade \(expected \+0\.30R\) — as expected or better/);
+    expect(w).toMatch(/Your week/);
+    expect(w).toMatch(/Paper +2 · 1 won · \+\$3\.00/);
+    // each agent: trades, what it got a trade against what it expected (✓ as expected or better)
+    expect(w).toMatch(/Agent +Trades +Got +Expected\nAuctioneer ✓ +1 +\+0\.50R +\+0\.30R/);
     expect(w).toMatch(/\$1,000\.00 → <b>\$1,041\.20<\/b> \(\+4\.1%\)/);
-    expect(w).toMatch(/⚪ Trend: 1 trade, 0 won/);
-    expect(w).toMatch(/60 bots tried this week/);
-    expect(w).toMatch(/Swing: Breakout/);
+    expect(w).toMatch(/⚪ <b>Trend<\/b>\n +1 trade, 0 won/);
+    expect(w).toMatch(/Bots tried +60 this week/);
+    expect(w).toMatch(/<b>Swing:<\/b> Breakout/);
   });
 });
 
@@ -221,11 +225,11 @@ describe('care service', () => {
     s.care.setConfig({ daily: false, weekly: false });
     for (let i = 0; i < 14; i++) s.journal.record(fromSwarm(swarmPos({ id: `x${i}`, labId: 'L', pnl: i % 5 ? -1 : 1, r: i % 5 ? -1 : 1, openedAt: 10 + i, closedAt: 100 + i })));
     await s.care.tick();
-    expect(s.sent.filter((m) => /Trend<\/b> — may have stopped working/.test(m.html))).toHaveLength(1);
+    expect(s.sent.filter((m) => /Trend<\/b>\nmay have stopped working/.test(m.html))).toHaveLength(1);
     s.at(s.t + 3_600_000);
     await s.care.tick();
     expect(s.sent.filter((m) => /may have stopped working/.test(m.html))).toHaveLength(1);
-    expect(s.sent.at(-1).html).toMatch(/your decision/);
+    expect(s.sent.at(-1).html).toMatch(/Nothing has been changed by this message/);
   });
   it('sends the weekly report on its day', async () => {
     const s = setup();
@@ -233,9 +237,9 @@ describe('care service', () => {
     s.at(new Date(2026, 10, 15, 18, 5).getTime());
     expect(new Date(s.t).getDay()).toBe(0);
     await s.care.tick();
-    expect(s.sent.at(-1).html).toMatch(/your week/);
+    expect(s.sent.at(-1).html).toMatch(/Your week/);
     await s.care.tick();
-    expect(s.sent.filter((m) => /your week/.test(m.html))).toHaveLength(1);
+    expect(s.sent.filter((m) => /Your week/.test(m.html))).toHaveLength(1);
   });
   it('sends nothing without a Telegram bot', async () => {
     const s = setup();
@@ -317,22 +321,22 @@ describe('deploying from the phone', () => {
     const s = setup([team('A'), team('B', false)]);
     const out = s.a.check();
     expect(out).toHaveLength(1);
-    expect(out[0].html).toMatch(/ready to deploy[\s\S]*Sharpe <b>2\.10<\/b>[\s\S]*Scalping[\s\S]*Intraday[\s\S]*Swing[\s\S]*running \(paper\)/);
+    expect(out[0].html).toMatch(/ready to deploy[\s\S]*📈 Together[\s\S]*Sharpe +2\.10[\s\S]*⚡ Scalping[\s\S]*🕐 Intraday[\s\S]*🌊 Swing[\s\S]*running \(paper\)/);
     expect(out[0].keyboard.flat().map((b) => b.text)).toEqual(['✅ Deploy · council decides', '✅ Deploy · trade as tested', '✖ Not now']);
     // offered once
     expect(s.a.check()).toHaveLength(0);
     const tap = out[0].keyboard[1][0].callback_data;
     const reply = await s.a.tap(tap);
-    expect(reply).toMatch(/Deployed to the crypto swarm.*trade as tested/);
+    expect(reply).toMatch(/Deployed to the crypto swarm[\s\S]*the strategy, as tested/);
     expect(s.deployed.map((d) => d.auth)).toEqual(['tested', 'tested', 'tested']);
     // a second tap does not deploy twice
-    expect(await s.a.tap(tap)).toMatch(/already answered/);
+    expect(await s.a.tap(tap)).toMatch(/Already answered/);
     expect(s.deployed).toHaveLength(3);
   });
   it('"Not now" deploys nothing; an old offer lapses; strangers\' data is ignored', async () => {
     const s = setup([team('A')]);
     const kb = s.a.check()[0].keyboard;
-    expect(await s.a.tap(kb[2][0].callback_data)).toMatch(/not deployed/);
+    expect(await s.a.tap(kb[2][0].callback_data)).toMatch(/Not deployed/);
     expect(s.deployed).toHaveLength(0);
     const kb2 = s.a.pool()[0].keyboard;
     s.at(s.t + 4 * 86_400_000);
@@ -346,11 +350,11 @@ describe('deploying from the phone', () => {
     const s = setup(teams);
     const pool = s.a.pool();
     // the unproven team is not offered at all
-    expect(pool.map((p) => p.html.split('\n')[0])).toEqual(['🧩 <b>Team 1 of 2</b> · ✓ every member a proven edge', '🧩 <b>Team 2 of 2</b> · ✓ every member a proven edge']);
+    expect(pool.map((p) => p.html.split('\n')[0])).toEqual(['🧩 <b>Team 1 of 2 — every member a proven edge</b>', '🧩 <b>Team 2 of 2 — every member a proven edge</b>']);
     expect(pool.every((p) => p.keyboard)).toBe(true);
     s.deployed.push({ name: 'scalp C' });
     const r = await s.a.tap(pool[1].keyboard[0][0].callback_data);
-    expect(r).toMatch(/scalp C \(already deployed\)/);
+    expect(r).toMatch(/scalp C <i>\(already deployed\)<\/i>/);
     expect(s.deployed.filter((d) => d.name === 'scalp C')).toHaveLength(1);
   });
   it('with no proven team it says what is missing, with no buttons; a team that lost a proven member is refused at the tap', async () => {
@@ -360,7 +364,7 @@ describe('deploying from the phone', () => {
     const msg = none.pool();
     expect(msg).toHaveLength(1);
     expect(msg[0].keyboard).toBeUndefined();
-    expect(msg[0].html).toMatch(/No proven team yet[\s\S]*Scalping<\/b>: none proven yet — closest: Follow a big day \(21 of 25 fresh-data trades\)[\s\S]*Intraday<\/b>: 2 proven edges ✓[\s\S]*Swing<\/b>: none proven yet — nothing standing yet/);
+    expect(msg[0].html).toMatch(/No proven team yet[\s\S]*Where each pace stands[\s\S]*⏳ ⚡ <b>Scalping<\/b> — closest: Follow a big day\n +<i>needs: 21 of 25 fresh-data trades<\/i>[\s\S]*✅ 🕐 <b>Intraday<\/b> — 2 proven edges[\s\S]*⏳ 🌊 <b>Swing<\/b> — nothing standing yet/);
     expect(none.check()).toEqual([]);
     // offered while proven; a member then fades out of the pool before the tap: nothing is deployed
     const pool = [team('A')];
@@ -408,14 +412,15 @@ describe('the swarm from the phone', () => {
   it('/positions shows the account and every open trade', async () => {
     const { r } = setup(mkSwarm());
     const [m] = await r.command('/positions');
-    expect(m.html).toMatch(/running · paper · account \$1040\.00/);
-    expect(m.html).toMatch(/BTC LONG<\/b> — Trend\n   100 → 102 · <b>\+\$2\.00<\/b> \(\+0\.50R\) · stop 98 · target 108/);
+    expect(m.html).toMatch(/Crypto swarm<\/b>\n🟢 running · paper/);
+    expect(m.html).toMatch(/Account +\$1,040\.00/);
+    expect(m.html).toMatch(/🟢 BTC LONG · \+\$2\.00 \(\+0\.50R\)<\/b>\n<i>Trend · open [^<]*<\/i>\n<pre>Entry +100\nNow +102\nStop +98\nTarget +108<\/pre>/);
     expect(await r.command('/hello')).toBeNull();
   });
   it('/pause and /resume: no new trades, then trades again', async () => {
     const sw = mkSwarm();
     const { r } = setup(sw);
-    expect((await r.command('/pause'))[0].html).toMatch(/Paused for new trades[\s\S]*1 open trade is still managed/);
+    expect((await r.command('/pause'))[0].html).toMatch(/Paused for new trades[\s\S]*<b>1<\/b> open trade is still managed/);
     expect(sw.holding).toBe(true);
     expect((await r.command('/resume'))[0].html).toMatch(/Resumed/);
     expect(sw.holding).toBe(false);
@@ -425,11 +430,11 @@ describe('the swarm from the phone', () => {
     const bots = [{ id: 'b1', name: 'Scalper', running: true, mode: 'live' }];
     const { r, wanted } = setup(sw, bots);
     const [ask] = await r.command('/stop');
-    expect(ask.html).toMatch(/Close everything and stop\?[\s\S]*LIVE[\s\S]*1 running bot/);
+    expect(ask.html).toMatch(/Close everything and stop\?[\s\S]*LIVE[\s\S]*<b>1<\/b> running bot/);
     expect(sw.running).toBe(true);
     const yes = ask.keyboard[0][0].callback_data;
     const done = await r.tap(yes);
-    expect(done).toMatch(/Stopped\.<\/b> Closed 1 trade: \+\$1\.50\. 1 bot stopped and flattened/);
+    expect(done).toMatch(/Stopped<\/b>[\s\S]*Trades closed +1 · \+\$1\.50\nBots stopped +1/);
     expect(sw.running).toBe(false);
     expect(bots[0].running).toBe(false);
     expect(wanted).toEqual([false]);
@@ -443,7 +448,7 @@ describe('the swarm from the phone', () => {
     expect(await r.tap(ask.keyboard[1][0].callback_data)).toMatch(/Cancelled/);
     expect(sw.running).toBe(false);
     const [again] = await r.command('/startswarm');
-    expect(await r.tap(again.keyboard[0][0].callback_data)).toMatch(/is running<\/b> \(LIVE\)/);
+    expect(await r.tap(again.keyboard[0][0].callback_data)).toMatch(/is running<\/b>\n<b>LIVE<\/b>/);
     expect(sw.running).toBe(true);
     expect(wanted).toEqual([true]);
   });
@@ -474,7 +479,7 @@ describe('crash reports', () => {
     expect(errs.map((x) => x.msg)).toEqual(['fetch https://api.binance.com/x failed', 'wallet … refused', 'window renderer gone: crashed (exit 1)']);
     expect(crashText({ lastSeen: Date.UTC(2026, 10, 16, 5), errors: errs })).toMatch(/closed unexpectedly[\s\S]*<code>window renderer gone/);
     expect(crashText({ lastSeen: null, errors: [] })).toMatch(/power cut, Windows restarting/);
-    expect(wakeText({ unclean: true, offSince: null })).toMatch(/waiting for your ledger key[\s\S]*did not close properly[\s\S]*Nothing trades until it is unlocked/);
+    expect(wakeText({ unclean: true, offSince: null })).toMatch(/waiting for your ledger key[\s\S]*did not close properly[\s\S]*Until you unlock it[\s\S]*Nothing trades/);
   });
   it('the same failure is told once an hour', async () => {
     let t = Date.UTC(2026, 10, 16, 5);
@@ -509,18 +514,21 @@ describe('a proven strategy over 200 % a year is offered on its own', () => {
     const a = new Approvals({ db, teams: () => [], stars: () => stars, deployed: () => deployed.map((d) => d.name), deploy: async (m, auth) => deployed.push({ name: m.name, auth, via: m.via }), swarm: () => ({ running: true, mode: 'paper' }), now: () => t });
     const out = a.check();
     expect(out).toHaveLength(1);
-    expect(out[0].html).toMatch(/over 200 % a year[\s\S]*Order block retest · b[\s\S]*Intraday[\s\S]*\+45% a year[\s\S]*5\.0×\): <b>\+225% a year[\s\S]*31 trades[\s\S]*neither significant/);
+    // a card: the headline, the numbers in a table, the proof, what deploying means
+    expect(out[0].html).toMatch(/Star strategy — proven, over 200 % a year[\s\S]*<b>Order block retest<\/b>\n🕐 Intraday · BTC · ETH/);
+    expect(out[0].html).toMatch(/📈 On data it never saw<\/b>\n<pre>A year \(1×\) +\+45%\nSized up 5\.0× +\+225%\nSharpe +3\.00\nWorst drop +−3\.0%\nTrades +90<\/pre>/);
+    expect(out[0].html).toMatch(/🔍 Proof[\s\S]*Proven on fresh data<\/b> — 31 trades[\s\S]*Not yet significant<\/b>, nor confirmed on new coins/);
     expect(out[0].keyboard.flat().map((b) => b.text)).toEqual(['✅ Deploy · council decides', '✅ Deploy · trade as tested', '✖ Not now']);
     expect(a.check()).toHaveLength(0);
     const reply = await a.tap(out[0].keyboard[0][0].callback_data);
-    expect(reply).toMatch(/Deployed to the crypto swarm.*council decides/);
+    expect(reply).toMatch(/Deployed to the crypto swarm[\s\S]*the council/);
     expect(deployed).toEqual([{ name: 'Order block retest · b', auth: 'council', via: 'star' }]);
     // offered again from /stars, but by the time of the tap it has slipped: nothing is deployed
     const kb = a.starPool()[0].keyboard;
     stars = [];
-    expect(await a.tap(kb[1][0].callback_data)).toMatch(/no longer proven and over 200 %/);
+    expect(await a.tap(kb[1][0].callback_data)).toMatch(/Not deployed[\s\S]*no longer proven and over 200 %/);
     expect(deployed).toHaveLength(1);
-    expect(a.starPool()[0].html).toMatch(/No strategy is over 200 % a year and proven yet/);
+    expect(a.starPool()[0].html).toMatch(/No star strategy yet[\s\S]*What makes a star/);
   });
 });
 
@@ -551,7 +559,7 @@ describe('probation and the automatic pause', () => {
     ]);
     expect(r.handled).toEqual(['a', 'b']);
     expect(lab.deployedList.map((d) => d.scale)).toEqual([1, 0.25, 0.25]);
-    expect(r.messages.map((m) => m.html.split('\n')[0])).toEqual(['🎓 <b>Off probation: Strategy a</b>', '↘ <b>Back on probation: Strategy b</b>']);
+    expect(r.messages.map((m) => m.html.split('\n').slice(0, 2).join(' | '))).toEqual(['🎓 <b>Off probation — full size</b> | <b>Strategy a</b>', '↘️ <b>Back on probation — ¼ size</b> | <b>Strategy b</b>']);
   });
   it('a strategy that has stopped working is paused and you choose: resume (on probation) or retire', async () => {
     const { lab, p } = setup([dep('a', { scale: 1 }), dep('b', { scale: 1 })]);
@@ -560,12 +568,12 @@ describe('probation and the automatic pause', () => {
       { id: 'b', status: 'stopped', trades: 15, words: 'losing' },
     ]);
     expect(lab.deployedList.map((d) => [d.on, d.pausedBy])).toEqual([[false, 'health'], [false, 'health']]);
-    expect(r.messages[0].html).toMatch(/Paused: Strategy a[\s\S]*no new trades[\s\S]*Resume/);
+    expect(r.messages[0].html).toMatch(/Strategy paused<\/b>\n<b>Strategy a<\/b>[\s\S]*No new trades[\s\S]*<b>Resume<\/b>/);
     expect(r.messages[0].keyboard.flat().map((b) => b.text)).toEqual(['▶ Resume (¼ size)', '🗑 Retire it', '⏸ Keep paused']);
-    expect(await p.tap(r.messages[0].keyboard[0][0].callback_data)).toMatch(/resumed, on probation/);
+    expect(await p.tap(r.messages[0].keyboard[0][0].callback_data)).toMatch(/Resumed[\s\S]*Back on probation at ¼ size/);
     expect(lab.deployedList.find((d) => d.id === 'a')).toMatchObject({ on: true, scale: 0.25 });
     expect(await p.tap(r.messages[0].keyboard[0][0].callback_data)).toMatch(/Already answered/);
-    expect(await p.tap(r.messages[1].keyboard[1][0].callback_data)).toMatch(/retired/);
+    expect(await p.tap(r.messages[1].keyboard[1][0].callback_data)).toMatch(/Retired/);
     expect(lab.deployedList.map((d) => d.id)).toEqual(['a']);
     // a paused strategy is not paused again
     expect(p.review([{ id: 'a', status: 'ok', trades: 3, words: '' }]).messages).toHaveLength(0);
@@ -598,11 +606,11 @@ describe('the monthly re-tuner', () => {
     expect(calls).toEqual([]);
     idle = true;
     const m = await r.check();
-    expect(m.html).toMatch(/Better settings found for Ride the trend[\s\S]*lookback 720 → 72[\s\S]*Sharpe 1\.00 → <b>1\.60<\/b>/);
+    expect(m.html).toMatch(/Better settings found<\/b>\n<b>Ride the trend<\/b>[\s\S]*lookback 720 → 72[\s\S]*<pre> +Now +New\nSharpe +1\.00 +1\.60/);
     expect(m.keyboard.flat().map((b) => b.text)).toEqual(['✅ Apply the new settings', '✖ Keep the current ones']);
     // checked: not again for a month
     expect(await r.check()).toBeNull();
-    expect(await r.tap(m.keyboard[0][0].callback_data)).toMatch(/new settings applied[\s\S]*probation/);
+    expect(await r.tap(m.keyboard[0][0].callback_data)).toMatch(/New settings applied[\s\S]*probation/);
     expect(lab.deployedList[0]).toMatchObject({ scale: 0.25, spec: { name: 'Ride the trend', signal: { p: { lookback: 72 } } } });
     expect(await r.tap(m.keyboard[1][0].callback_data)).toMatch(/Already answered/);
   });

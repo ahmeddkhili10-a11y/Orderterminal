@@ -52,15 +52,34 @@ export async function tgSend(token: string, chatId: string, html: string, fetchI
 }
 
 /** Telegram caps messages at 4096 characters: split on line breaks. */
+/**
+ * A long message in parts Telegram accepts (4,096 characters each), split at line ends — never
+ * inside a tag. A table, quote or bold run that spans the split is closed at the end of one part
+ * and opened again at the start of the next, so every part is valid on its own.
+ */
 export function splitHtml(html: string, max = 3800): string[] {
   const out: string[] = [];
   let cur = '';
-  for (const line of html.split('\n')) {
-    if (cur && cur.length + line.length + 1 > max) {
-      out.push(cur);
-      cur = '';
+  let open: string[] = [];
+  const closeAll = (tags: string[]) => [...tags].reverse().map((t) => `</${t.split(/[\s>]/)[0]}>`).join('');
+  const openAll = (tags: string[]) => tags.map((t) => `<${t}>`).join('');
+  const track = (line: string) => {
+    for (const m of line.matchAll(/<(\/?)([a-z-]+)([^>]*)>/gi)) {
+      const name = m[2].toLowerCase();
+      if (!['b', 'i', 'u', 's', 'code', 'pre', 'blockquote', 'a', 'tg-spoiler'].includes(name)) continue;
+      if (m[1]) {
+        const k = open.map((t) => t.split(/[\s>]/)[0]).lastIndexOf(name);
+        if (k >= 0) open.splice(k, 1);
+      } else open.push(`${name}${m[3]}`);
     }
-    cur = cur ? `${cur}\n${line}` : line.slice(0, max);
+  };
+  for (const line of html.split('\n')) {
+    if (cur && cur.length + line.length + 1 + closeAll(open).length > max) {
+      out.push(cur + closeAll(open));
+      cur = openAll(open);
+    }
+    cur = cur ? `${cur}${cur.endsWith('>') && cur === openAll(open) ? '' : '\n'}${line}` : line.slice(0, max);
+    track(line);
   }
   if (cur.trim()) out.push(cur);
   return out;
@@ -84,7 +103,27 @@ export async function tgSendPhoto(token: string, chatId: string, png: Uint8Array
   if (!j.ok) throw new Error(j.description ?? 'Telegram sendPhoto failed');
 }
 
-export const HELP_TEXT = '<b>Novus Ordo bot</b>\n/positions — the account and every open trade\n/pause — no new trades (open ones still managed)\n/resume — new trades again\n/stop — close everything and stop (asks first)\n/startswarm — start the crypto swarm (asks first)\n/teams — the edge finder\'s proven teams, with Deploy buttons\n/stars — proven strategies over 200 % a year, each with Deploy buttons\n/wallet — the swarm wallet address\n/price — primary instrument price\n/status — price, funding, open interest and feeds\n/help — this message';
+export const HELP_TEXT = [
+  '🧭 <b>Novus Ordo — what you can send</b>',
+  '',
+  '<b>📋 Your trading</b>',
+  '/positions — the account and every open trade',
+  '/pause — no new trades (open ones still managed)',
+  '/resume — take new trades again',
+  '/stop — close everything and stop <i>(asks first)</i>',
+  '/startswarm — start the crypto swarm <i>(asks first)</i>',
+  '',
+  '<b>🔬 The edge finder</b>',
+  '/stars — proven strategies over 200 % a year, to deploy',
+  '/teams — proven teams of three, to deploy',
+  '',
+  '<b>📡 Market</b>',
+  '/price — the main instrument’s price',
+  '/status — price, funding, open interest and feeds',
+  '/wallet — the swarm wallet address',
+  '',
+  '<i>/help — this list</i>',
+].join('\n');
 
 /** a button under a message: its text, and what comes back when it is tapped (at most 64 bytes) */
 export type TgButton = { text: string; callback_data: string };

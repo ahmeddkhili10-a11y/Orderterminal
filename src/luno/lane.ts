@@ -124,6 +124,6 @@ export function startLunoAlerts() {
     if (!a) return;
     alertHere(a.title, a.text, a.tone === 'warn' ? 'info' : a.tone);
     const s = getSettings();
-    if (s.telegramSwarm && s.telegramSecretId) void desktop!.swarm.notify(s.telegramSecretId, `<b>${escapeHtml(a.title)}</b>\n${escapeHtml(a.text)}`).catch(() => undefined);
+    if (s.telegramSwarm && s.telegramSecretId) void desktop!.swarm.notify(s.telegramSecretId, `🇿🇦 <b>${escapeHtml(a.title)}</b>\n<i>Luno lane</i>\n\n${escapeHtml(a.text)}`).catch(() => undefined);
   });
 }

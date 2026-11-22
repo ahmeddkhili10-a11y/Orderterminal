@@ -5,6 +5,7 @@
 // is unlocked, so a problem can be fixed from what really happened.
 import { closeSync, existsSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { bullets, card, head, note, section, table } from '../../src/shared/tgcard.ts';
 
 const FLAG = 'running.json';
 
@@ -89,16 +90,21 @@ const when = (t) => new Date(t).toLocaleString('en-GB', { weekday: 'short', day:
 
 /** before the ledger key: a fixed message, nothing private in it */
 export function wakeText({ unclean, offSince }) {
-  return `🔒 <b>Novus Ordo has started again and is waiting for your ledger key.</b>\n${unclean ? 'The last session did not close properly (a crash, a power cut or Windows restarting)' : 'It was closed'}${offSince ? ` — last seen ${when(offSince)}` : ''}.\nNothing trades until it is unlocked. Once you enter the key, the crypto swarm picks up where it left off by itself.`;
+  return card([
+    head('🔒', 'Novus Ordo is waiting for your ledger key'),
+    table([['Last session', unclean ? 'did not close properly' : 'closed normally'], ...(offSince ? [['Last seen', when(offSince)]] : [])]),
+    unclean ? note('A crash, a power cut, the computer sleeping or Windows restarting.') : null,
+    section('Until you unlock it', bullets(['Nothing trades', 'Once the key is in, the crypto swarm picks up where it left off by itself'])),
+  ]);
 }
 
 /** after the ledger key: what happened, with the last errors from the log */
 export function crashText({ lastSeen, errors }) {
-  const L = [`💥 <b>Novus Ordo closed unexpectedly last time</b>${lastSeen ? ` (last seen ${when(lastSeen)})` : ''}.`];
-  if (errors.length) {
-    L.push('The last errors in its log:');
-    for (const x of errors) L.push(`• <code>${x.msg.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c])}</code>`);
-  } else L.push('Nothing was logged before it stopped — most likely a power cut, Windows restarting or the computer sleeping, not a fault in Novus Ordo.');
-  L.push('<i>Forward this to whoever looks after Novus Ordo if it keeps happening.</i>');
-  return L.join('\n');
+  return card([
+    head('💥', 'Novus Ordo closed unexpectedly', lastSeen ? `Last seen ${when(lastSeen)}` : null),
+    errors.length
+      ? section('Last errors in its log', errors.map((x) => `• <code>${x.msg.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c])}</code>`))
+      : section('What it found', ['Nothing was logged before it stopped — most likely a power cut, Windows restarting or the computer sleeping, not a fault in Novus Ordo.']),
+    note('Forward this to whoever looks after Novus Ordo if it keeps happening.'),
+  ]);
 }

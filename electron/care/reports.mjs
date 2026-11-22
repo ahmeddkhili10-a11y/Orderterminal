@@ -2,6 +2,7 @@
 // message, the warnings when something stops, and the weekly report card.
 // Pure functions of a snapshot, so each message can be tested as written.
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
+import { bullets, card, fine, head, note, section, table } from '../../src/shared/tgcard.ts';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -60,55 +61,98 @@ export function problemsOf(s) {
 
 /** the daily "still alive" message */
 export function dailyText(s) {
-  const lines = [];
   const probs = s.problems ?? [];
-  lines.push(probs.length ? `🟠 <b>Novus Ordo — running, ${probs.length} thing${probs.length > 1 ? 's' : ''} to look at</b> · ${dayName(s.now)}` : `🟢 <b>Novus Ordo — all running</b> · ${dayName(s.now)}, ${clock(s.now)}`);
-  for (const p of probs) lines.push(`• ${p.text}`);
   const sw = s.swarm;
-  if (sw) {
-    const eq = sw.equity;
-    const d = s.equityDayAgo;
-    const change = Number.isFinite(eq) && Number.isFinite(d) && d > 0 ? ` (${eq - d >= 0 ? '+' : '−'}${usd(Math.abs(eq - d)).replace(/^−/, '')} in 24 h)` : '';
-    lines.push('');
-    lines.push(`<b>Crypto swarm:</b> ${sw.running ? 'running' : 'stopped'} · ${sw.mode === 'live' ? 'LIVE' : 'paper'}${Number.isFinite(eq) ? ` · account ${usd(eq)}${change}` : ''}`);
-    if (sw.open?.length) lines.push(`Open: ${sw.open.map((p) => `${e(p.coin)} ${p.side === 'buy' ? 'long' : 'short'} ${signed(p.upnl ?? 0)}`).join(' · ')}`);
-    else lines.push('No open trades.');
-  }
-  lines.push(`<b>Last 24 hours:</b> ${totalsWords(s.day ?? [])}`);
-  if (s.health?.length) {
-    const c = {};
-    for (const h of s.health) c[h.status] = (c[h.status] ?? 0) + 1;
-    const words = { ok: 'on track', early: 'too early to tell', quiet: 'quiet', behind: 'behind', stopped: 'may have stopped working' };
-    lines.push(`<b>Deployed strategies:</b> ${s.health.length} — ${Object.entries(c).map(([k, v]) => `${v} ${words[k]}`).join(', ')}`);
-  }
   const f = s.farm;
-  if (f) lines.push(`<b>Edge finder:</b> ${f.running ? 'running' : f.wanted ? 'starting' : 'stopped'} · ${n(f.tried)} bots tried · ${f.survivors ?? 0} survivors${f.data ? ` · data ${f.data.ok ? 'up to date' : 'out of date'}${f.data.lastOkAt ? ` (${ago(s.now - f.data.lastOkAt)})` : ''}` : ''}`);
+  const eq = sw?.equity;
+  const d = s.equityDayAgo;
+  const change = Number.isFinite(eq) && Number.isFinite(d) && d > 0 ? eq - d : null;
+  const day = s.day ?? [];
+  const byQ = totalsByQuote(day);
+  const health = s.health ?? [];
+  const hc = {};
+  for (const h of health) hc[h.status] = (hc[h.status] ?? 0) + 1;
   const bots = (s.bots ?? []).filter((b) => b.running);
-  if (bots.length) lines.push(`<b>Bots:</b> ${bots.map((b) => `${e(b.name)} (${b.mode === 'live' ? 'live' : 'paper'}${b.feed && b.feed !== 'open' ? `, feed ${e(b.feed)}` : ''})`).join(' · ')}`);
-  if (sw?.coins?.length) lines.push(`<b>Prices:</b> ${sw.coins.map((c) => `${e(c.coin)} ${c.feed === 'open' ? '✓' : '✗'}`).join(' · ')}`);
-  lines.push('');
-  lines.push(`<i>Next check-in ${s.nextAt ? `${dayName(s.nextAt)} at ${clock(s.nextAt)}` : 'tomorrow'}. You will hear sooner if anything stops.</i>`);
-  return lines.join('\n');
+  return card([
+    head(probs.length ? '🟠' : '🟢', probs.length ? `Novus Ordo — ${probs.length} thing${probs.length > 1 ? 's' : ''} to look at` : 'Novus Ordo — all running', `${dayName(s.now)} · ${clock(s.now)}`),
+    probs.length ? section('⚠️ Needs a look', bullets(probs.map((p) => p.text))) : null,
+    sw
+      ? section(`🤖 Crypto swarm — ${sw.running ? (sw.holding ? 'paused for new trades' : 'running') : '<b>stopped</b>'} · ${sw.mode === 'live' ? '<b>LIVE</b>' : 'paper'}`, [
+          table([
+            ...(Number.isFinite(eq) ? [['Account', usd(eq)]] : []),
+            ...(change !== null ? [['Last 24 h', `${change >= 0 ? '+' : '−'}${usd(Math.abs(change)).replace(/^−/, '')}`]] : []),
+            ['Open trades', String(sw.open?.length ?? 0)],
+          ]),
+          ...(sw.open ?? []).map((p) => `• ${e(p.coin)} ${p.side === 'buy' ? 'long' : 'short'} · <b>${signed(p.upnl ?? 0)}</b>`),
+        ])
+      : null,
+    section('📒 Last 24 hours', [
+      day.length
+        ? table(Object.entries(byQ).flatMap(([q, t]) => [[`Trades${q === 'ZAR' ? ' (R)' : ''}`, `${t.n} · ${t.wins} won`], [`Result${q === 'ZAR' ? ' (R)' : ''}`, signed(t.pnl, q)]]))
+        : 'No trades closed.',
+    ]),
+    health.length ? section(`🧭 Deployed strategies — ${health.length}`, Object.entries(hc).map(([k, v]) => `${DOT[k]} ${v} ${HEALTH_WORDS[k]}`)) : null,
+    f
+      ? section(`🔬 Edge finder — ${f.running ? 'running' : f.wanted ? 'starting' : 'stopped'}`, [
+          table([
+            ['Bots tried', n(f.tried)],
+            ['Survivors', String(f.survivors ?? 0)],
+            ...(f.data ? [['Data', f.data.ok ? 'up to date' : `out of date${f.data.lastOkAt ? ` (${ago(s.now - f.data.lastOkAt)})` : ''}`]] : []),
+          ]),
+        ])
+      : null,
+    bots.length ? section('⚙️ Bots', bots.map((b) => `• ${e(b.name)} · ${b.mode === 'live' ? 'live' : 'paper'}${b.feed && b.feed !== 'open' ? ` · feed ${e(b.feed)}` : ''}`)) : null,
+    sw?.coins?.length ? section('📡 Prices', [sw.coins.map((c) => `${e(c.coin)} ${c.feed === 'open' ? '✅' : '❌'}`).join('   ')]) : null,
+    note(`Next check-in ${s.nextAt ? `${dayName(s.nextAt)} at ${clock(s.nextAt)}` : 'tomorrow'}. You will hear sooner if anything stops.`),
+  ]);
 }
+
+const HEALTH_WORDS = { ok: 'on track', early: 'too early to tell', quiet: 'quiet', behind: 'behind their test', stopped: 'may have stopped working' };
 
 /** a warning, or the all-clear after one */
 export function warningText(p, s) {
-  return p.info ? `ℹ️ <b>Novus Ordo</b> · ${clock(s.now)}\n${p.text}` : `⚠️ <b>Novus Ordo needs a look</b> · ${clock(s.now)}\n${p.text}`;
+  return p.info ? card([head('ℹ️', 'For your information', clock(s.now)), p.text]) : card([head('⚠️', 'Novus Ordo needs a look', clock(s.now)), p.text]);
 }
 export function clearedText(keys, s) {
   const what = { 'swarm-stopped': 'the crypto swarm is running again', 'farm-down': 'the edge finder is running again', 'farm-data': "the edge finder's candles are up to date again", screen: 'the window is responding again' };
   const words = keys.map((k) => what[k] ?? (k.startsWith('feed:') ? `prices for ${k.slice(5)} are back` : null)).filter(Boolean);
-  return words.length ? `✅ <b>Back to normal</b> · ${clock(s.now)}\n${words.map((w) => `• ${w[0].toUpperCase()}${w.slice(1)}`).join('\n')}` : '';
+  return words.length ? card([head('✅', 'Back to normal', clock(s.now)), bullets(words.map((w) => `${w[0].toUpperCase()}${w.slice(1)}`)).join('\n')]) : '';
 }
 
 /** the app was closed (or the computer off) and is back */
 export function backText(offFrom, now) {
-  return `▶️ <b>Novus Ordo is running again</b>\nIt was off from ${dayName(offFrom)} ${clock(offFrom)} to ${clock(now)} (${ago(now - offFrom).replace(' ago', '')}). Nothing traded in that time; open live trades kept their exchange stops. Start the swarm again if it does not start by itself.`;
+  return card([
+    head('▶️', 'Novus Ordo is running again'),
+    table([
+      ['Off from', `${dayName(offFrom)} ${clock(offFrom)}`],
+      ['Back at', `${dayName(now)} ${clock(now)}`],
+      ['Off for', ago(now - offFrom).replace(' ago', '')],
+    ]),
+    section('While it was off', bullets(['Nothing new was traded', 'Open live trades kept their exchange stops'])),
+    note('Start the swarm again if it does not start by itself.'),
+  ]);
 }
 
 /** a strategy's health got worse */
 export function healthText(h) {
-  return `${DOT[h.status]} <b>${e(h.name)}</b> — ${h.status === 'stopped' ? 'may have stopped working' : h.status === 'behind' ? 'is behind its test' : 'has gone quiet'}\n${e(h.words)}\n<i>Nothing has been changed: switching it off is your decision (DEPL).</i>`;
+  const title = h.status === 'stopped' ? 'may have stopped working' : h.status === 'behind' ? 'is behind its test' : 'has gone quiet';
+  const pc = (x) => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : '—');
+  const r2 = (x) => (Number.isFinite(x) ? signedR(x) : '—');
+  return card([
+    head(DOT[h.status], `${e(h.name)}`, title),
+    h.trades
+      ? table(
+          [
+            ['Trades', String(h.trades), '—'],
+            ['Win rate', pc(h.winRate), pc(h.tested?.winRate)],
+            ['Avg trade', r2(h.avgR), r2(h.tested?.avgR)],
+          ],
+          { header: ['', 'Live', 'Tested'] },
+        )
+      : null,
+    e(h.words),
+    note('Nothing has been changed by this message — see DEPL in Novus Ordo.'),
+  ]);
 }
 
 /**
@@ -117,15 +161,13 @@ export function healthText(h) {
  */
 export function weeklyText(s) {
   const rows = s.rows ?? [];
-  const L = [];
-  L.push(`📊 <b>Novus Ordo — your week</b> · ${dayName(s.from)} to ${dayName(s.now)}`);
+  const results = [];
   for (const mode of ['live', 'paper']) {
     const m = rows.filter((r) => r.mode === mode);
     if (!m.length) continue;
-    L.push(`<b>${mode === 'live' ? 'Live' : 'Paper'}:</b> ${totalsWords(m)}${totalsByQuote(m).USD ? ` after ${usd(totalsByQuote(m).USD.fees)} fees` : ''}`);
+    for (const [q, t] of Object.entries(totalsByQuote(m))) results.push([`${mode === 'live' ? 'Live' : 'Paper'}${q === 'ZAR' ? ' (R)' : ''}`, `${t.n} · ${t.wins} won · ${signed(t.pnl, q)}`]);
   }
-  if (!rows.length) L.push('No trades closed this week.');
-  if (Number.isFinite(s.equityStart) && Number.isFinite(s.equityNow) && s.equityStart > 0) L.push(`Swarm account (${s.mode === 'live' ? 'live' : 'paper'}): ${usd(s.equityStart)} → <b>${usd(s.equityNow)}</b> (${s.equityNow >= s.equityStart ? '+' : '−'}${Math.abs(((s.equityNow - s.equityStart) / s.equityStart) * 100).toFixed(1)}%)`);
+  const acct = Number.isFinite(s.equityStart) && Number.isFinite(s.equityNow) && s.equityStart > 0;
 
   // the swarm's own agents: what they expected at entry against what they got
   const agents = {};
@@ -146,50 +188,55 @@ export function weeklyText(s) {
       a.expN++;
     }
   }
-  if (Object.keys(agents).length) {
-    L.push('');
-    L.push('<b>Crypto swarm agents</b>');
-    for (const [name, a] of Object.entries(agents).sort((x, y) => y[1].pnl - x[1].pnl)) {
+  const agentRows = Object.entries(agents)
+    .sort((x, y) => y[1].pnl - x[1].pnl)
+    .map(([name, a]) => {
       const got = a.r / a.n;
       const exp = a.expN ? a.exp / a.expN : null;
-      const verdict = exp === null ? '' : got >= exp - 0.15 ? ' — as expected or better' : got >= 0 ? ' — below what it expected' : ' — losing, against an expected gain';
-      L.push(`• ${e(AGENT[name] ?? name)}: ${a.n} trade${a.n === 1 ? '' : 's'}, ${a.wins} won, ${signed(a.pnl)}, ${signedR(got)} a trade${exp !== null ? ` (expected ${signedR(exp)})` : ''}${verdict}`);
-    }
-  }
-  // deployed strategies: this week, and their health over everything since they were deployed
-  if (s.health?.length) {
-    L.push('');
-    L.push('<b>Deployed strategies</b>');
-    for (const h of s.health) {
-      const wk = rows.filter((r) => r.strategy_id === h.id);
-      L.push(`${DOT[h.status]} ${e(h.name)}${h.on ? '' : ' (switched off)'}: ${wk.length ? `${totalsWords(wk)} this week` : 'no trades this week'} — ${e(h.words)}`);
-    }
-  }
-  for (const src of ['bot', 'lane']) {
-    const m = rows.filter((r) => r.source === src);
-    if (!m.length) continue;
-    L.push('');
-    L.push(`<b>${SOURCE[src]}</b>`);
-    const by = {};
-    for (const r of m) (by[r.who ?? '?'] ??= []).push(r);
-    for (const [who, xs] of Object.entries(by)) L.push(`• ${e(who)}: ${totalsWords(xs)}`);
-  }
+      const mark = exp === null ? '' : got >= exp - 0.15 ? ' ✓' : got >= 0 ? ' ↓' : ' ✗';
+      return [`${AGENT[name] ?? name}${mark}`, `${a.n}`, signedR(got), exp === null ? '—' : signedR(exp)];
+    });
+  const f = s.farm;
+  const tops = f ? (f.tops ?? []).map((b) => (b.rows?.[0] ? `<b>${e(b.name ?? b.id)}:</b> ${e(b.rows[0].name.split(' · ')[0])}` : null)).filter(Boolean) : [];
+  let bestWorst = null;
   if (rows.length >= 2) {
     const best = rows.reduce((a, b) => (b.pnl > a.pnl ? b : a));
     const worst = rows.reduce((a, b) => (b.pnl < a.pnl ? b : a));
-    const name = (r) => `${e(r.coin)} ${r.side === 'buy' ? 'long' : 'short'} (${e(AGENT[r.who] ?? r.who ?? '')}${r.mode === 'paper' ? ', paper' : ''})`;
-    L.push('');
-    L.push(`Best: ${name(best)} ${signed(best.pnl, best.quote)} · Worst: ${name(worst)} ${signed(worst.pnl, worst.quote)}`);
+    const name = (r) => `${e(r.coin)} ${r.side === 'buy' ? 'long' : 'short'} <i>(${e(AGENT[r.who] ?? r.who ?? '')}${r.mode === 'paper' ? ', paper' : ''})</i>`;
+    bestWorst = section('🏅 Best and worst', [`🟢 ${name(best)} <b>${signed(best.pnl, best.quote)}</b>`, `🔴 ${name(worst)} <b>${signed(worst.pnl, worst.quote)}</b>`]);
   }
-  if (s.costs) L.push(`<b>Real costs:</b> ${e(s.costs.why)}`);
-  const f = s.farm;
-  if (f) {
-    const tops = (f.tops ?? []).map((b) => (b.rows?.[0] ? `${e(b.name ?? b.id)}: ${e(b.rows[0].name)}` : null)).filter(Boolean);
-    L.push(`<b>Edge finder:</b> ${s.farmWeek !== null && s.farmWeek !== undefined ? `${n(s.farmWeek)} bots tried this week` : `${n(f.tried)} bots tried`} · ${f.survivors ?? 0} survivors${tops.length ? `\nBest of each pace — ${tops.join(' · ')}` : ''}`);
-  }
-  L.push('');
-  L.push('<i>Paper trades are practice on real prices; live trades are real money. Nothing here is a reason to change anything by itself — the decisions stay yours.</i>');
-  return L.join('\n');
+  const extras = ['bot', 'lane']
+    .map((src) => {
+      const m = rows.filter((r) => r.source === src);
+      if (!m.length) return null;
+      const by = {};
+      for (const r of m) (by[r.who ?? '?'] ??= []).push(r);
+      return section(`⚙️ ${SOURCE[src]}`, Object.entries(by).map(([who, xs]) => `• ${e(who)}: ${totalsWords(xs)}`));
+    })
+    .filter(Boolean);
+  return card([
+    head('📊', 'Your week', `${dayName(s.from)} – ${dayName(s.now)}`),
+    section('💰 Results', [
+      results.length ? table(results) : 'No trades closed this week.',
+      acct ? `Swarm account (${s.mode === 'live' ? 'live' : 'paper'}): ${usd(s.equityStart)} → <b>${usd(s.equityNow)}</b> (${s.equityNow >= s.equityStart ? '+' : '−'}${Math.abs(((s.equityNow - s.equityStart) / s.equityStart) * 100).toFixed(1)}%)` : null,
+      totalsByQuote(rows).USD ? note(`after ${usd(totalsByQuote(rows).USD.fees)} in fees`) : null,
+    ]),
+    agentRows.length ? section('🤖 Swarm agents <i>(per trade: got vs expected)</i>', [table(agentRows, { header: ['Agent', 'Trades', 'Got', 'Expected'] })]) : null,
+    s.health?.length
+      ? section(
+          '🧭 Deployed strategies',
+          s.health.map((h) => {
+            const wk = rows.filter((r) => r.strategy_id === h.id);
+            return `${DOT[h.status]} <b>${e(h.name)}</b>${h.on ? '' : ' <i>(switched off)</i>'}\n      ${wk.length ? `${totalsWords(wk)} this week` : 'no trades this week'} · ${e(HEALTH_WORDS[h.status] ?? h.status)}`;
+          }),
+        )
+      : null,
+    ...extras,
+    bestWorst,
+    f ? section('🔬 Edge finder', [table([['Bots tried', s.farmWeek !== null && s.farmWeek !== undefined ? `${n(s.farmWeek)} this week` : n(f.tried)], ['Survivors', String(f.survivors ?? 0)]]), ...(tops.length ? ['Best of each pace:', ...bullets(tops)] : [])]) : null,
+    s.costs ? section('💸 Real trading costs', [e(s.costs.why)]) : null,
+    fine('Paper trades are practice on real prices; live trades are real money. Nothing here is a reason to change anything by itself — the decisions stay yours.'),
+  ]);
 }
 
 export { AGENT };

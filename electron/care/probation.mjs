@@ -6,6 +6,20 @@
 // Reads the strategy health the care service works out every 30 minutes; does nothing heavy.
 import { randomBytes } from 'node:crypto';
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
+import { bullets, card, head, note, section, table } from '../../src/shared/tgcard.ts';
+
+const pc = (x) => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : '—');
+const r2 = (x) => (Number.isFinite(x) ? `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(2)}R` : '—');
+/** its live record against its test, as a small table */
+const record = (h) =>
+  table(
+    [
+      ['Trades', String(h.trades ?? 0), '—'],
+      ['Win rate', pc(h.winRate), pc(h.tested?.winRate)],
+      ['Avg trade', r2(h.avgR), r2(h.tested?.avgR)],
+    ],
+    { header: ['', 'Live', 'Tested'] },
+  );
 
 /** live trades on track before a strategy leaves probation */
 export const GRADUATE_TRADES = 12;
@@ -39,15 +53,35 @@ export class Probation {
       if (d.on && h.status === 'stopped') {
         lab.toggle(d.id, false, 'health');
         handled.push(d.id);
-        messages.push({ html: `⏸ <b>Paused: ${name}</b>\n${e(h.words)}\nIt takes no new trades; any open trade is still managed and keeps its stop.\nResume it (back on probation at ¼ size), or retire it?`, keyboard: this.make(d.id, d.spec?.name ?? h.name) });
+        messages.push({
+          html: card([
+            head('⏸', 'Strategy paused', `<b>${name}</b>`),
+            section('Why', [`Its live trades are clearly worse than its test — more than bad luck explains.`, record(h)]),
+            section('What it means', bullets(['No new trades from it', 'Any open trade is still managed and keeps its stop'])),
+            section('Your call', bullets(['<b>Resume</b> — back on probation at ¼ size', '<b>Retire</b> — remove it from the swarm', '<b>Keep paused</b> — decide later under DEPL'])),
+          ]),
+          keyboard: this.make(d.id, d.spec?.name ?? h.name),
+        });
       } else if (d.on && scale < 1 && h.status === 'ok' && h.trades >= GRADUATE_TRADES) {
         lab.setScale(d.id, 1, '');
         handled.push(d.id);
-        messages.push({ html: `🎓 <b>Off probation: ${name}</b>\n${h.trades} trades since it was deployed, ${e(h.words)}\nIt now trades at full size (the swarm's risk rules still size every trade).` });
+        messages.push({
+          html: card([
+            head('🎓', 'Off probation — full size', `<b>${name}</b>`),
+            section('Its live record', [record(h)]),
+            note('It did what its test said, so it now trades at full size. The swarm’s risk rules still size every trade.'),
+          ]),
+        });
       } else if (d.on && scale >= 1 && h.status === 'behind') {
         lab.setScale(d.id, PROBATION_SCALE, 'fell behind its test');
         handled.push(d.id);
-        messages.push({ html: `↘ <b>Back on probation: ${name}</b>\n${e(h.words)}\nIt trades at ¼ size again until it is back on track; if it gets clearly worse it is paused and you are asked.` });
+        messages.push({
+          html: card([
+            head('↘️', 'Back on probation — ¼ size', `<b>${name}</b>`),
+            section('Its live record', [record(h)]),
+            note('It has fallen behind its test, so it trades at ¼ size until it is back on track. If it gets clearly worse it is paused and you are asked.'),
+          ]),
+        });
       }
     }
     return { messages, handled };
@@ -73,14 +107,14 @@ export class Probation {
     if (!m) return null;
     const all = this.offers();
     const o = all[m[1]];
-    if (!o) return 'That message has lapsed — look under DEPL in Novus Ordo.';
-    if (o.done) return `Already answered (${o.done}).`;
+    if (!o) return card([head('⌛', 'That message has lapsed'), note('Look under DEPL in Novus Ordo.')]);
+    if (o.done) return card([head('ℹ️', 'Already answered', e(o.done))]);
     const lab = this.labFn();
     const d = lab?.deployedList.find((x) => x.id === o.id);
     if (!d) {
       o.done = 'no longer deployed';
       this.db.set('probation:offers', all);
-      return `${e(o.name)} is no longer deployed.`;
+      return card([head('ℹ️', 'No longer deployed', `<b>${e(o.name)}</b>`)]);
     }
     if (m[2] === 'r') {
       lab.setScale(d.id, PROBATION_SCALE, 'resumed after a pause');
@@ -91,6 +125,8 @@ export class Probation {
       o.done = 'retired';
     } else o.done = 'kept paused';
     this.db.set('probation:offers', all);
-    return m[2] === 'r' ? `▶ <b>${e(o.name)}</b> resumed, on probation at ¼ size.` : m[2] === 'x' ? `🗑 <b>${e(o.name)}</b> retired — it is no longer deployed.` : `⏸ <b>${e(o.name)}</b> stays paused. Switch it back on under DEPL whenever you like.`;
+    if (m[2] === 'r') return card([head('▶️', 'Resumed', `<b>${e(o.name)}</b>`), note('Back on probation at ¼ size — full size once 12 live trades are on track.')]);
+    if (m[2] === 'x') return card([head('🗑', 'Retired', `<b>${e(o.name)}</b>`), note('It is no longer deployed. Any open trade it took is still managed to its stop.')]);
+    return card([head('⏸', 'Kept paused', `<b>${e(o.name)}</b>`), note('Switch it back on under DEPL whenever you like.')]);
   }
 }

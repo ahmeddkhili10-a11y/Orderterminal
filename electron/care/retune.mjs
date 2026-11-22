@@ -5,6 +5,7 @@
 // changes until you tap Apply, and the new settings start on probation (¼ size).
 import { randomBytes } from 'node:crypto';
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
+import { bullets, card, drop, head, note, pct as pctS, section, table } from '../../src/shared/tgcard.ts';
 
 const DAY = 86_400_000;
 export const RETUNE_EVERY = 30 * DAY;
@@ -55,13 +56,23 @@ export class Retuner {
   text(d, r) {
     const c = r.current;
     const p = r.proposed;
-    return [
-      `🔧 <b>Better settings found for ${e(d.spec.name)}</b>`,
-      `Change: ${e(r.changes.join('; '))}`,
-      `On the newest candles (neither version was chosen on them): Sharpe ${num(c.sharpe)} → <b>${num(p.sharpe)}</b> · return ${pct(c.ret)} → <b>${pct(p.ret)}</b> · worst drop ${pct(-c.maxDD)} → ${pct(-p.maxDD)} · ${p.trades} trades`,
-      `Chosen as the centre of a stable area of settings (${r.tried} versions tried), not the single best one.`,
-      '<i>Apply: the new settings, back on probation at ¼ size until 12 live trades are on track. Keep: nothing changes.</i>',
-    ].join('\n');
+    return card([
+      head('🔧', 'Better settings found', `<b>${e(d.spec.name)}</b>`),
+      section('What would change', bullets(r.changes.map((x) => e(x)))),
+      section('On the newest candles <i>(neither version was chosen on them)</i>', [
+        table(
+          [
+            ['Sharpe', num(c.sharpe), num(p.sharpe)],
+            ['Return', pctS(c.ret), pctS(p.ret)],
+            ['Worst drop', drop(c.maxDD), drop(p.maxDD)],
+            ['Trades', String(c.trades), String(p.trades)],
+          ],
+          { header: ['', 'Now', 'New'] },
+        ),
+      ]),
+      note(`Chosen as the middle of a stable range of settings (${r.tried} versions tried), not the single best one.`),
+      section('Your call', bullets(['<b>Apply</b> — the new settings, back on probation at ¼ size', '<b>Keep</b> — nothing changes'])),
+    ]);
   }
 
   offers() {
@@ -83,14 +94,14 @@ export class Retuner {
     if (!m) return null;
     const all = this.offers();
     const o = all[m[1]];
-    if (!o) return 'That offer has lapsed.';
-    if (o.done) return `Already answered (${o.done}).`;
+    if (!o) return card([head('⌛', 'That offer has lapsed')]);
+    if (o.done) return card([head('ℹ️', 'Already answered', e(o.done))]);
     const lab = this.labFn();
     const d = lab?.deployedList.find((x) => x.id === o.id);
     if (!d) {
       o.done = 'no longer deployed';
       this.db.set('retune:offers', all);
-      return `${e(o.name)} is no longer deployed.`;
+      return card([head('ℹ️', 'No longer deployed', `<b>${e(o.name)}</b>`)]);
     }
     if (m[2] === 'a') {
       lab.setSpec(d.id, { ...o.spec, name: d.spec.name }, o.note);
@@ -98,6 +109,6 @@ export class Retuner {
       o.done = 'applied';
     } else o.done = 'kept';
     this.db.set('retune:offers', all);
-    return m[2] === 'a' ? `🔧 <b>${e(o.name)}</b>: new settings applied (${e(o.note)}), on probation at ¼ size.` : `OK — <b>${e(o.name)}</b> keeps its settings.`;
+    return m[2] === 'a' ? card([head('🔧', 'New settings applied', `<b>${e(o.name)}</b>`), section('Changed', bullets([e(o.note)])), note('On probation at ¼ size until 12 live trades are on track.')]) : card([head('✖️', 'Settings kept', `<b>${e(o.name)}</b>`), note('Nothing changed. It is checked again next month.')]);
   }
 }
