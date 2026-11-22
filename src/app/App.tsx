@@ -160,6 +160,8 @@ export function App() {
     startLabLink();
     // a model sent from the Quant desk (any window) opens the bot builder, which takes it in
     startLabBridge(() => openFunction('labflow', 'lab'));
+    // a popped-out window asks for the order-book history recorded here: its heat map starts full
+    return desktop?.screens.onHeatAsk?.((id) => desktop?.screens.heatReply?.(id, hub().exportHeat()));
   }, []);
 
   // the command line and the function keys open a panel in its workspace

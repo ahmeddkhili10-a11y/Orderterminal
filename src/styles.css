@@ -6288,6 +6288,95 @@ table.grid.meme-tape td {
   min-height: 0;
   background: var(--glass-strong);
 }
+/* no Windows title bar: the panel's own bar drags, minimises and closes the window */
+.popout-bar .win-btn {
+  min-width: 26px;
+  justify-content: center;
+}
+.popout-bar .win-btn:last-child:hover {
+  background: #c42b1c;
+  border-color: #c42b1c;
+  color: #fff;
+}
+/* tiled or full screen: nothing but the panel — the bar slides in when the mouse reaches the top edge */
+.popout-root.clean .popout-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  transform: translateY(-100%);
+  opacity: 0;
+  transition:
+    transform 0.16s ease,
+    opacity 0.16s ease;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.popout-root.clean .popout-hot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  z-index: 49;
+}
+.popout-root.clean .popout-hot:hover + .popout-bar,
+.popout-root.clean .popout-bar:hover,
+.popout-root.clean .popout-bar:focus-within {
+  transform: none;
+  opacity: 1;
+}
+.popout-root.clean .popout-body {
+  border: 0;
+}
+/* the tile picker: little screens showing where the window goes */
+.tile-menu {
+  position: relative;
+  display: flex;
+  gap: 4px;
+}
+.tile-pop {
+  right: 0;
+  left: auto;
+  width: 268px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.tile-cell {
+  position: relative;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  padding: 0;
+}
+.tile-cell span {
+  position: absolute;
+  background: var(--pro-accent, var(--accent));
+  opacity: 0.55;
+  border-radius: 2px;
+}
+.tile-cell:hover span,
+.tile-cell.active span {
+  opacity: 1;
+}
+.tile-cell.active {
+  border-color: var(--pro-accent, var(--accent));
+}
+.tile-note {
+  font-size: 11px;
+  line-height: 1.4;
+}
 .app.pro .pro-theme-select {
   height: 22px;
   border-radius: 0;

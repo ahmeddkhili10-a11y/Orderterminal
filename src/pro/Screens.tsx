@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useThemeAttr } from '../app/App';
 import { startCryptoSwarmLink } from '../cswarm/store';
-import { desktop, type ScreensState } from '../desktop/bridge';
+import { desktop, type TileCell, type ScreensState } from '../desktop/bridge';
 import { startLabLink } from '../lab/store';
 import { hub } from '../market/hub';
 import { PANELS, PANEL_MAP } from '../panels/registry';
@@ -153,6 +153,75 @@ export function ScreensMenu({ only }: { only?: number | null } = {}) {
 }
 
 /** the page of a popped-out panel window */
+/** a tile's picture: where on the screen it goes */
+const TILES: { cell: TileCell; name: string; box: [number, number, number, number] }[] = [
+  { cell: 'left', name: 'Left half', box: [0, 0, 50, 100] },
+  { cell: 'right', name: 'Right half', box: [50, 0, 50, 100] },
+  { cell: 'top', name: 'Top half', box: [0, 0, 100, 50] },
+  { cell: 'bottom', name: 'Bottom half', box: [0, 50, 100, 50] },
+  { cell: 'tl', name: 'Top left quarter', box: [0, 0, 50, 50] },
+  { cell: 'tr', name: 'Top right quarter', box: [50, 0, 50, 50] },
+  { cell: 'bl', name: 'Bottom left quarter', box: [0, 50, 50, 50] },
+  { cell: 'br', name: 'Bottom right quarter', box: [50, 50, 50, 50] },
+  { cell: 'l3', name: 'Left third', box: [0, 0, 33.3, 100] },
+  { cell: 'm3', name: 'Middle third', box: [33.3, 0, 33.4, 100] },
+  { cell: 'r3', name: 'Right third', box: [66.7, 0, 33.3, 100] },
+];
+
+/** tile this window: a half, a quarter or a third of the whole screen (no banner, over the taskbar), full screen, or all pop-outs at once */
+function TileMenu({ tiled, full }: { tiled: string | null; full: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [open]);
+  const S = desktop?.screens;
+  if (!S?.tile) return null;
+  const go = (cell: TileCell) => {
+    setOpen(false);
+    void S.tile!('self', cell);
+  };
+  return (
+    <div className="scr tile-menu" ref={ref}>
+      <button className={`chip${open || tiled ? ' active' : ''}`} onClick={() => setOpen(!open)} title="Tile this window on its screen — no banner, edge to edge">
+        ▦ <span className="lbl keep">Tile</span>
+      </button>
+      <button className={`chip${full ? ' active' : ''}`} onClick={() => go('full')} title={full ? 'Leave full screen (Esc)' : 'Full screen: the whole screen, no banner, no taskbar (F11)'}>
+        ⛶
+      </button>
+      {open && (
+        <div className="popover tile-pop">
+          <div className="pop-title">Tile this window — the whole screen, edge to edge</div>
+          <div className="tile-grid">
+            {TILES.map((t) => (
+              <button key={t.cell} className={`tile-cell${tiled === t.cell ? ' active' : ''}`} onClick={() => go(t.cell)} title={t.name} aria-label={t.name}>
+                <span style={{ left: `${t.box[0]}%`, top: `${t.box[1]}%`, width: `${t.box[2]}%`, height: `${t.box[3]}%` }} />
+              </button>
+            ))}
+            <button className={`tile-cell${full ? ' active' : ''}`} onClick={() => go('full')} title="Full screen" aria-label="Full screen">
+              <span style={{ left: 0, top: 0, width: '100%', height: '100%' }} />
+            </button>
+          </div>
+          <button
+            className="btn"
+            onClick={() => {
+              setOpen(false);
+              void S.arrange?.('self');
+            }}
+            title="Every popped-out window on this screen: side by side, or in a grid (2×2, 3×2…)"
+          >
+            ▦ Arrange all pop-outs on this screen
+          </button>
+          <div className="muted tile-note">Tiles cover the taskbar while Novus Ordo is in use. Drag a tile by its bar to make it an ordinary window again.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PopoutPage({ panelId, storeKey, title, cfg }: { panelId: string; storeKey: string; title: string; cfg: string | null }) {
   useThemeAttr();
   const def = PANEL_MAP[panelId];
@@ -171,9 +240,25 @@ export function PopoutPage({ panelId, storeKey, title, cfg }: { panelId: string;
     }
   });
   const [self, setSelf] = useState<number | null>(null);
+  const screensNow = useScreens();
+  const me = screensNow?.windows.find((w) => w.id === self) ?? null;
+  // tiled or full screen: the bar tucks away (it shows when the mouse reaches the top edge) — nothing but the panel
+  const clean = !!me && (me.fullScreen || !!me.tiled);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        void desktop?.screens.tile?.('self', 'full');
+      } else if (e.key === 'Escape' && me?.fullScreen) void desktop?.screens.tile?.('self', 'full');
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [me?.fullScreen]);
   useEffect(() => {
     // market data streams to this window directly; the swarm and the Lab come from the desktop process
     hub();
+    // the order-book history the terminal has already recorded: a heat map here starts full, not empty
+    void desktop?.screens.heatHistory?.().then((d) => hub().importHeat(d as never)).catch(() => undefined);
     // the trades are told by the main window only (one message each, however many windows are open)
     startCryptoSwarmLink({ tell: false });
     startLabLink();
@@ -190,15 +275,20 @@ export function PopoutPage({ panelId, storeKey, title, cfg }: { panelId: string;
   if (!def || DOCKED_ONLY.has(panelId)) return <div className="empty">This panel stays in the main window.</div>;
   const C = def.component;
   return (
-    <div className="app pro popout-root">
-      <div className="popout-bar">
+    <div className={`app pro popout-root${clean ? ' clean' : ''}`}>
+      {clean && <div className="popout-hot" aria-hidden />}
+      <div className="popout-bar" onDoubleClick={(e) => (e.target as HTMLElement).closest('button, .scr, .tile-pop') === null && void desktop?.screens.tile?.('self', 'full')} title="Drag to move · double-click: full screen">
         <b>{def.title}</b>
         <span className="grow" />
+        <TileMenu tiled={me?.tiled ?? null} full={!!me?.fullScreen} />
         <ScreensMenu only={self} />
         <button className="chip" onClick={() => void desktop?.screens.dock(panelId, title, config)} title="Back to the terminal: close this window and open the panel where it lives">
           ⇤ Back to the terminal
         </button>
-        <button className="chip" onClick={() => window.close()} title="Close this window">
+        <button className="chip win-btn" onClick={() => void desktop?.screens.minimize?.()} title="Minimise">
+          —
+        </button>
+        <button className="chip win-btn" onClick={() => window.close()} title="Close this window">
           ×
         </button>
       </div>

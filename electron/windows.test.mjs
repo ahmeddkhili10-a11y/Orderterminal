@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { displayLabel, displayOf, placeOn, Screens } from './windows.mjs';
+import { cellRect, displayLabel, displayOf, gridRects, placeOn, Screens } from './windows.mjs';
 
 const laptop = { id: 1, label: '', internal: true, size: { width: 1920, height: 1080 }, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scaleFactor: 1.5 };
 const monitor = { id: 2, label: 'DELL U2723QE', internal: false, size: { width: 2560, height: 1440 }, bounds: { x: 1920, y: 0, width: 2560, height: 1440 }, workArea: { x: 1920, y: 0, width: 2560, height: 1400 }, scaleFactor: 1 };
@@ -63,6 +63,9 @@ function fakeWindows() {
     }
     focus() {}
     restore() {}
+    setAlwaysOnTop(on, level) {
+      this.top = on ? level ?? 'floating' : false;
+    }
     close() {
       this.emit('close');
       this.dead = true;
@@ -121,5 +124,65 @@ describe('windows and screens', () => {
     const s3 = new Screens({ screen, BrowserWindow, file, mainWindow: () => main, newWindow });
     s3.restore();
     expect(s3.state().windows.filter((w) => w.kind === 'panel')).toHaveLength(0);
+  });
+});
+
+describe('tiles: no banner, edge to edge, over the taskbar while in use', () => {
+  it('halves, quarters and thirds cover the whole screen with no gaps; a grid of any count does too', () => {
+    const b = monitor.bounds;
+    expect(cellRect(b, 'left')).toEqual({ x: 1920, y: 0, width: 1280, height: 1440 });
+    expect(cellRect(b, 'br')).toEqual({ x: 3200, y: 720, width: 1280, height: 720 });
+    // the three thirds meet exactly and fill the width
+    const t = ['l3', 'm3', 'r3'].map((c) => cellRect(b, c));
+    expect(t[0].x + t[0].width).toBe(t[1].x);
+    expect(t[1].x + t[1].width).toBe(t[2].x);
+    expect(t[2].x + t[2].width).toBe(b.x + b.width);
+    // the whole screen: the taskbar's strip too (bounds, not the work area)
+    expect(cellRect(laptop.bounds, 'bottom')).toEqual({ x: 0, y: 540, width: 1920, height: 540 });
+    for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+      const rs = gridRects(b, n);
+      expect(rs).toHaveLength(n);
+      expect(rs.reduce((a, r) => a + r.width * r.height, 0)).toBe(b.width * b.height);
+    }
+    expect(gridRects(b, 4).map((r) => [r.x - b.x, r.y, r.width, r.height])).toEqual([[0, 0, 1280, 720], [1280, 0, 1280, 720], [0, 720, 1280, 720], [1280, 720, 1280, 720]]);
+    // five: three on top, two sharing the bottom row
+    expect(gridRects(b, 5).slice(3).map((r) => r.width)).toEqual([1280, 1280]);
+  });
+
+  it('tiles a window, keeps tiles above the taskbar only while the app is in use, arranges every pop-out, and a hand drag untiles', () => {
+    const { W, BrowserWindow } = fakeWindows();
+    const file = join(mkdtempSync(join(tmpdir(), 'scr-')), 'panel-windows.json');
+    const main = new W(laptop.workArea);
+    const screen = { getAllDisplays: () => [laptop, monitor], getPrimaryDisplay: () => laptop };
+    let changed = 0;
+    const s = new Screens({ screen, BrowserWindow, file, mainWindow: () => main, newWindow: (_q, b) => new W(b), changed: () => changed++ });
+    const a = s.popout('heatmap', 'Heatmap', {}, 2);
+    const b = s.popout('dom', 'DOM', {}, 2);
+    const wa = BrowserWindow.getAllWindows().find((w) => w.id === a);
+    s.tile(a, 'left');
+    expect(wa.getBounds()).toEqual(cellRect(monitor.bounds, 'left'));
+    expect(wa.top).toBe('screen-saver');
+    expect(s.state().windows.find((w) => w.id === a).tiled).toBe('left');
+    expect(changed).toBeGreaterThan(0);
+    // another app is in use: tiles step back; back in Novus Ordo: above the taskbar again
+    s.cover(false);
+    expect(wa.top).toBe(false);
+    s.cover(true);
+    expect(wa.top).toBe('screen-saver');
+    // full screen toggles, and leaves the tile
+    s.tile(a, 'full');
+    expect(wa.isFullScreen()).toBe(true);
+    expect(s.tiled.has(a)).toBe(false);
+    s.tile(a, 'full');
+    expect(wa.isFullScreen()).toBe(false);
+    // both pop-outs on the monitor, side by side, edge to edge
+    expect(s.arrange(2)).toBe(2);
+    const wb = BrowserWindow.getAllWindows().find((w) => w.id === b);
+    expect([wa.getBounds(), wb.getBounds()]).toEqual(gridRects(monitor.bounds, 2));
+    // dragged by hand: an ordinary window again (and not above the taskbar)
+    s.placing = false;
+    wb.emit('will-move');
+    expect(s.tiled.has(b)).toBe(false);
+    expect(wb.top).toBe(false);
   });
 });

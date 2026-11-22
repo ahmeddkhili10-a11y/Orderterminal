@@ -26,6 +26,9 @@ const screenListeners = new Set();
 ipcRenderer.on('screens:changed', (_e, msg) => screenListeners.forEach((fn) => fn(msg)));
 const dockListeners = new Set();
 ipcRenderer.on('screens:dock', (_e, msg) => dockListeners.forEach((fn) => fn(msg)));
+// the main window is asked for its recorded order-book history (a popped-out heat map starts with it)
+const heatAskListeners = new Set();
+ipcRenderer.on('screens:heat-ask', (_e, id) => heatAskListeners.forEach((fn) => fn(id)));
 for (const ch of ['state', 'event', 'farm']) ipcRenderer.on(`lab:${ch}`, (_e, msg) => labListeners[ch].forEach((fn) => fn(msg)));
 for (const ch of ['state', 'event']) ipcRenderer.on(`cswarm:${ch}`, (_e, msg) => cswarmListeners[ch].forEach((fn) => fn(msg)));
 ipcRenderer.on('swarm:verified', (_e, msg) => verifiedListeners.forEach((fn) => fn(msg)));
@@ -49,10 +52,19 @@ contextBridge.exposeInMainWorld('novus', {
     state: () => call('screens:state'),
     popout: (panel, title, config, displayId) => call('screens:popout', panel, title, config, displayId),
     move: (id, displayId, mode) => call('screens:move', id, displayId, mode),
+    tile: (id, cell) => call('screens:tile', id, cell),
+    arrange: (displayId) => call('screens:arrange', displayId),
+    minimize: () => call('screens:minimize'),
     focus: (id) => call('screens:focus', id),
     close: (id) => call('screens:close', id),
     self: () => call('screens:self'),
     dock: (panel, title, config) => call('screens:dock', panel, title, config),
+    heatHistory: () => call('screens:heat-history'),
+    onHeatAsk: (fn) => {
+      heatAskListeners.add(fn);
+      return () => heatAskListeners.delete(fn);
+    },
+    heatReply: (id, data) => ipcRenderer.send('screens:heat-reply', id, data),
     onChanged: (fn) => listen(screenListeners, fn),
     onDock: (fn) => listen(dockListeners, fn),
   },

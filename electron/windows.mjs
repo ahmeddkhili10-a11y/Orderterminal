@@ -41,6 +41,64 @@ export function placeOn(d, mode) {
   return { ...a };
 }
 
+/**
+ * A tile of a screen: halves, quarters and thirds of its WHOLE area (the taskbar's too — a tiled
+ * window covers it while Novus Ordo is in use), with no gap between neighbours.
+ */
+export const CELLS = ['left', 'right', 'top', 'bottom', 'tl', 'tr', 'bl', 'br', 'l3', 'm3', 'r3'];
+export function cellRect(b, cell) {
+  const hw = Math.floor(b.width / 2);
+  const hh = Math.floor(b.height / 2);
+  const tw = Math.floor(b.width / 3);
+  const R = (x, y, width, height) => ({ x: b.x + x, y: b.y + y, width, height });
+  switch (cell) {
+    case 'left':
+      return R(0, 0, hw, b.height);
+    case 'right':
+      return R(hw, 0, b.width - hw, b.height);
+    case 'top':
+      return R(0, 0, b.width, hh);
+    case 'bottom':
+      return R(0, hh, b.width, b.height - hh);
+    case 'tl':
+      return R(0, 0, hw, hh);
+    case 'tr':
+      return R(hw, 0, b.width - hw, hh);
+    case 'bl':
+      return R(0, hh, hw, b.height - hh);
+    case 'br':
+      return R(hw, hh, b.width - hw, b.height - hh);
+    case 'l3':
+      return R(0, 0, tw, b.height);
+    case 'm3':
+      return R(tw, 0, tw, b.height);
+    case 'r3':
+      return R(2 * tw, 0, b.width - 2 * tw, b.height);
+    default:
+      return R(0, 0, b.width, b.height);
+  }
+}
+
+/** n windows side by side on a screen: one row up to three, then a grid (2×2, 3×2, 3×3…), edge to edge */
+export function gridRects(b, n) {
+  if (n <= 0) return [];
+  const cols = n <= 3 ? n : Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    // the last row may hold fewer windows: they share its width
+    const inRow = r === rows - 1 ? n - cols * (rows - 1) : cols;
+    const x0 = Math.round((c * b.width) / inRow);
+    const x1 = Math.round(((c + 1) * b.width) / inRow);
+    const y0 = Math.round((r * b.height) / rows);
+    const y1 = Math.round(((r + 1) * b.height) / rows);
+    out.push({ x: b.x + x0, y: b.y + y0, width: x1 - x0, height: y1 - y0 });
+  }
+  return out;
+}
+
 export class Screens {
   /**
    * @param o {{ screen, BrowserWindow, file: string, mainWindow: () => any, newWindow: (query: Record<string,string>, bounds) => any, log?: (level, msg) => void }}
@@ -48,6 +106,9 @@ export class Screens {
   constructor(o) {
     this.o = o;
     this.popouts = new Map(); // window id → { key, panel, title, win }
+    /** tiled windows: window id → { cell or grid rectangle, display } (they cover the taskbar while Novus Ordo is in use) */
+    this.tiled = new Map();
+    this.covering = false;
     this.quitting = false;
     this.restored = false;
   }
@@ -65,7 +126,7 @@ export class Screens {
     const add = (w, kind, title, panel = null) => {
       if (!w || w.isDestroyed()) return;
       const b = w.getBounds();
-      list.push({ id: w.id, kind, title, panel, displayId: displayOf(ds, b).id, bounds: b, maximized: w.isMaximized(), fullScreen: w.isFullScreen(), visible: w.isVisible() });
+      list.push({ id: w.id, kind, title, panel, displayId: displayOf(ds, b).id, bounds: b, maximized: w.isMaximized(), fullScreen: w.isFullScreen(), visible: w.isVisible(), tiled: this.tiled.get(w.id)?.cell ?? null });
     };
     add(main, 'main', 'Terminal');
     for (const p of this.popouts.values()) add(p.win, 'panel', p.title, p.panel);
@@ -87,12 +148,123 @@ export class Screens {
     this.popouts.set(win.id, entry);
     win.on('close', () => {
       if (!this.quitting) this.popouts.delete(win.id);
+      this.tiled.delete(win.id);
       this.save();
     });
-    win.on('closed', () => this.popouts.delete(win.id));
+    win.on('closed', () => {
+      this.popouts.delete(win.id);
+      this.tiled.delete(win.id);
+    });
     for (const ev of ['moved', 'resized']) win.on(ev, () => this.save());
+    // dragged or resized by hand: no longer a tile (it stops covering the taskbar)
+    for (const ev of ['will-move', 'will-resize']) win.on(ev, () => !this.placing && this.untile(win));
+    for (const ev of ['enter-full-screen', 'leave-full-screen']) win.on(ev, () => this.changed());
     this.save();
     return win.id;
+  }
+
+  /** tell every window that the windows changed (a popped-out window hides its bar while tiled or full screen) */
+  changed() {
+    try {
+      this.o.changed?.();
+    } catch {
+      /* nothing listening */
+    }
+  }
+
+  /** a window placed exactly where asked (its own move and resize events are not taken for your hand) */
+  place(w, rect) {
+    this.placing = true;
+    try {
+      if (w.isFullScreen()) w.setFullScreen(false);
+      if (w.isMaximized()) w.unmaximize();
+      w.setBounds(rect);
+    } finally {
+      setTimeout(() => (this.placing = false), 250);
+    }
+  }
+
+  /**
+   * Tile a window on the screen it is on: a half, a quarter or a third of the WHOLE screen, or
+   * 'full' (true full screen: no title bar, no taskbar). A tile has no banner and, while Novus
+   * Ordo is the app in use, sits above the taskbar too, so tiles meet edge to edge.
+   */
+  tile(id, cell) {
+    const w = this.o.BrowserWindow.getAllWindows().find((x) => x.id === id);
+    if (!w) throw new Error('no such window');
+    if (cell === 'full') {
+      this.untile(w);
+      w.setFullScreen(!w.isFullScreen());
+      w.show();
+      w.focus();
+      this.save();
+      this.changed();
+      return true;
+    }
+    const d = displayOf(this.o.screen.getAllDisplays(), w.getBounds());
+    this.place(w, cellRect(d.bounds, cell));
+    this.tiled.set(w.id, { cell, displayId: d.id });
+    w.show();
+    w.focus();
+    this.cover(true);
+    this.save();
+    this.changed();
+    return true;
+  }
+
+  /** every popped-out window on a screen, side by side or in a grid, edge to edge (the order they were opened in) */
+  arrange(displayId) {
+    const d = this.o.screen.getAllDisplays().find((x) => x.id === displayId);
+    if (!d) throw new Error('no such screen');
+    const ws = [...this.popouts.values()].map((p) => p.win).filter((w) => !w.isDestroyed() && displayOf([d, ...this.o.screen.getAllDisplays().filter((x) => x.id !== d.id)], w.getBounds()).id === d.id);
+    const rects = gridRects(d.bounds, ws.length);
+    ws.forEach((w, i) => {
+      this.place(w, rects[i]);
+      this.tiled.set(w.id, { cell: `grid${i}`, rect: rects[i], displayId: d.id });
+      w.showInactive();
+    });
+    this.cover(true);
+    this.save();
+    this.changed();
+    return ws.length;
+  }
+
+  /** a tile goes back to an ordinary window (it no longer covers the taskbar) */
+  untile(w) {
+    if (!this.tiled.has(w.id)) return;
+    this.tiled.delete(w.id);
+    if (!w.isDestroyed()) w.setAlwaysOnTop(false);
+    this.save();
+    this.changed();
+  }
+
+  /**
+   * While Novus Ordo is the app in use its tiles sit above the taskbar (so a tile at the bottom
+   * of the screen is not cut off by it); when you switch to another app they step back.
+   */
+  cover(on) {
+    this.covering = on;
+    for (const [id] of this.tiled) {
+      const w = this.o.BrowserWindow.getAllWindows().find((x) => x.id === id);
+      if (w && !w.isDestroyed()) w.setAlwaysOnTop(on, 'screen-saver');
+    }
+  }
+
+  /** a screen changed size (or was unplugged): tiles are laid out again on it */
+  retile() {
+    const ds = this.o.screen.getAllDisplays();
+    for (const [id, t] of this.tiled) {
+      const w = this.o.BrowserWindow.getAllWindows().find((x) => x.id === id);
+      const d = ds.find((x) => x.id === t.displayId);
+      if (!w || w.isDestroyed()) continue;
+      if (!d) {
+        this.untile(w);
+        continue;
+      }
+      if (!String(t.cell).startsWith('grid')) this.place(w, cellRect(d.bounds, t.cell));
+    }
+    const grids = new Set([...this.tiled.values()].filter((t) => String(t.cell).startsWith('grid')).map((t) => t.displayId));
+    for (const id of grids) if (ds.some((d) => d.id === id)) this.arrange(id);
   }
 
   /** send a window to a screen: fill (maximised), full screen, or float */
@@ -101,6 +273,7 @@ export class Screens {
     const w = all.find((x) => x.id === id);
     const d = this.o.screen.getAllDisplays().find((x) => x.id === displayId);
     if (!w || !d) throw new Error('no such window or screen');
+    this.untile(w);
     if (w.isFullScreen()) w.setFullScreen(false);
     if (w.isMaximized()) w.unmaximize();
     w.setBounds(placeOn(d, mode));
@@ -137,7 +310,7 @@ export class Screens {
   }
 
   save() {
-    const rows = [...this.popouts.values()].filter((p) => !p.win.isDestroyed()).map((p) => ({ key: p.key, panel: p.panel, title: p.title, bounds: p.win.getBounds(), fullScreen: p.win.isFullScreen(), maximized: p.win.isMaximized() }));
+    const rows = [...this.popouts.values()].filter((p) => !p.win.isDestroyed()).map((p) => ({ key: p.key, panel: p.panel, title: p.title, bounds: p.win.getBounds(), fullScreen: p.win.isFullScreen(), maximized: p.win.isMaximized(), tiled: this.tiled.get(p.win.id)?.cell ?? null }));
     try {
       writeFileSync(this.o.file, JSON.stringify(rows));
     } catch {
@@ -163,6 +336,8 @@ export class Screens {
       const w = this.o.BrowserWindow.getAllWindows().find((x) => x.id === id);
       if (w && r.maximized) w.maximize();
       if (w && r.fullScreen) w.setFullScreen(true);
+      // a tile comes back as a tile, where it was
+      if (w && on && r.tiled) this.tiled.set(w.id, { cell: r.tiled, rect: r.bounds, displayId: displayOf(ds, r.bounds).id });
     }
   }
 }

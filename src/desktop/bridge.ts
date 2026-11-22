@@ -758,6 +758,12 @@ export interface NovusApi {
     /** pop a panel out into its own window (on a screen, or beside the terminal); its window id */
     popout(panel: string, title: string, config: Record<string, unknown>, displayId?: number | null): Promise<number>;
     move(id: number, displayId: number, mode?: 'fill' | 'full' | 'float'): Promise<boolean>;
+    /** tile a window ('self': this one) on its screen — a half, quarter or third of the whole screen — or 'full' (toggle full screen) */
+    tile?(id: number | 'self', cell: TileCell): Promise<boolean>;
+    /** every popped-out window on a screen ('self': this window's), side by side or in a grid */
+    arrange?(displayId: number | 'self'): Promise<number>;
+    /** minimise this window */
+    minimize?(): Promise<void>;
     focus(id: number): Promise<boolean>;
     close(id: number): Promise<boolean>;
     /** this window's id */
@@ -767,6 +773,11 @@ export interface NovusApi {
     dock(panel: string, title: string, config: Record<string, unknown>): Promise<boolean>;
     /** the main window: a popped-out panel is coming back */
     onDock?(fn: (d: { panel: string; title: string; config: Record<string, unknown> }) => void): () => void;
+    /** from a popped-out window: the order-book history the terminal has recorded (null when it cannot be had) */
+    heatHistory?(): Promise<unknown>;
+    /** the main window: a popped-out window asks for that history */
+    onHeatAsk?(fn: (id: number) => void): () => void;
+    heatReply?(id: number, data: unknown): void;
   };
   lab: {
     state(): Promise<LabStatus>;
@@ -972,9 +983,12 @@ export interface ScreenRect {
   width: number;
   height: number;
 }
+/** where a tile sits: halves, quarters, thirds of the whole screen, or full screen */
+export type TileCell = 'full' | 'left' | 'right' | 'top' | 'bottom' | 'tl' | 'tr' | 'bl' | 'br' | 'l3' | 'm3' | 'r3';
+
 export interface ScreensState {
   displays: { id: number; label: string; primary: boolean; internal: boolean; bounds: ScreenRect; workArea: ScreenRect; scale: number }[];
-  windows: { id: number; kind: 'main' | 'panel'; title: string; panel: string | null; displayId: number; bounds: ScreenRect; maximized: boolean; fullScreen: boolean; visible: boolean }[];
+  windows: { id: number; kind: 'main' | 'panel'; title: string; panel: string | null; displayId: number; bounds: ScreenRect; maximized: boolean; fullScreen: boolean; visible: boolean; tiled?: string | null }[];
 }
 
 export const desktop: NovusApi | undefined = typeof window !== 'undefined' ? (window as unknown as { novus?: NovusApi }).novus : undefined;

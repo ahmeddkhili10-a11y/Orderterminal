@@ -50,9 +50,14 @@ export function LiquidityHeatmap({ config: c, setConfig }: PanelProps<HeatmapCon
     const bookW = c.showBook ? BOOK_W : 0;
     const plotW = w - AXIS_W - bookW;
     const plotH = h - TIME_H;
-    const span = SPANS[c.span] ?? 600e3;
+    const full = SPANS[c.span] ?? 600e3;
     const tTo = now - v.offsetMs;
-    const tFrom = tTo - span;
+    // while less order-book history has been recorded than the span (a window just opened, an instrument just
+    // changed), the picture starts where the recording starts: the heat map fills the width, never a black gap
+    const first = rec.snapshots[0].time;
+    const fit = v.offsetMs === 0 && first > tTo - full + 1000;
+    const tFrom = fit ? Math.min(first, tTo - 5000) : tTo - full;
+    const span = tTo - tFrom;
     if (!isFinite(v.center)) v.center = ref;
     const pRange = ref * v.pctRange;
     if (v.auto && Math.abs(ref - v.center) > pRange * 0.3) v.center = ref;
@@ -105,7 +110,7 @@ export function LiquidityHeatmap({ config: c, setConfig }: PanelProps<HeatmapCon
         const s = f.store;
         s.forEach(s.indexAtTime(tFrom), s.end, (p, q, buy, t) => {
           const n = p * q;
-          if (n < c.tradeMin || t > tTo) return;
+          if (n < c.tradeMin || t > tTo || t < tFrom) return;
           bubbles.push({ t, p, n, buy });
           if (n > maxN) maxN = n;
         });
@@ -164,6 +169,14 @@ export function LiquidityHeatmap({ config: c, setConfig }: PanelProps<HeatmapCon
     if (isFinite(lp)) label(ctx, fmtPrice(lp), ax + 1, y(lp), pal.accent, '#fff');
     line(ctx, 0, plotH + 0.5, w, plotH + 0.5, pal.border);
     drawTimeAxis(ctx, tFrom, tTo, 0, plotW, plotH + TIME_H / 2, pal);
+    if (fit) {
+      const got = Math.max(1, Math.round(span / 60_000));
+      ctx.font = font(10);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = pal.muted;
+      ctx.fillText(`building history · ${got} of ${Math.round(full / 60_000)} min`, 8, 6);
+    }
 
     const pt = pointer.current;
     if (pt?.inside && pt.x < plotW && pt.y < plotH) {

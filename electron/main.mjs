@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { BotManager } from './amt/bots.mjs';
 import { CryptoSwarm } from './cswarm/cswarm.mjs';
 import { LabService } from './lab/lab.mjs';
-import { Screens } from './windows.mjs';
+import { CELLS, displayOf, Screens } from './windows.mjs';
 import { Db, isLocked, openWithRetry } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
@@ -332,6 +332,10 @@ function panelWindow(query, bounds) {
     backgroundColor: '#000000',
     icon: join(root, 'build', 'icon.png'),
     autoHideMenuBar: true,
+    // no Windows title bar: the panel's own slim bar (it hides itself while the window is tiled or full screen)
+    // drags, minimises and closes it; Windows' own snapping still works
+    frame: false,
+    thickFrame: true,
     webPreferences: {
       preload: join(root, 'electron', 'preload.cjs'),
       contextIsolation: true,
@@ -633,6 +637,9 @@ function registerIpc() {
   handle('screens:popout', (_e, panel, title, config, displayId) => screens.popout(String(panel), String(title ?? panel), config ?? {}, displayId ?? null));
   handle('screens:move', (_e, id, displayId, mode) => screens.move(Number(id), Number(displayId), mode === 'full' || mode === 'float' ? mode : 'fill'));
   handle('screens:focus', (_e, id) => screens.focus(Number(id)));
+  handle('screens:tile', (e, id, cell) => screens.tile(id === 'self' ? BrowserWindow.fromWebContents(e.sender)?.id : Number(id), ['full', ...CELLS].includes(cell) ? cell : 'full'));
+  handle('screens:arrange', (e, displayId) => screens.arrange(displayId === 'self' ? displayOf(screen.getAllDisplays(), BrowserWindow.fromWebContents(e.sender).getBounds()).id : Number(displayId)));
+  handle('screens:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
   handle('screens:close', (_e, id) => screens.close(Number(id)));
   // a popped-out panel goes back to the terminal: its window closes and the main window opens the panel where it lives
   handle('screens:dock', (e, panel, title, config) => {
@@ -646,6 +653,32 @@ function registerIpc() {
     return true;
   });
   handle('screens:self', (e) => BrowserWindow.fromWebContents(e.sender)?.id ?? null);
+  // a popped-out window asks for the order-book history the terminal has recorded (relayed from the main window)
+  const heatAsks = new Map();
+  let heatSeq = 0;
+  handle(
+    'screens:heat-history',
+    (e) =>
+      new Promise((resolve) => {
+        const w = win;
+        if (!w || w.isDestroyed() || e.sender === w.webContents) return resolve(null);
+        const id = ++heatSeq;
+        const t = setTimeout(() => {
+          heatAsks.delete(id);
+          resolve(null);
+        }, 4000);
+        heatAsks.set(id, (d) => {
+          clearTimeout(t);
+          resolve(d);
+        });
+        w.webContents.send('screens:heat-ask', id);
+      }),
+  );
+  ipcMain.on('screens:heat-reply', (e, id, d) => {
+    if (win && e.sender !== win.webContents) return;
+    heatAsks.get(id)?.(d);
+    heatAsks.delete(id);
+  });
   // the Strategy Lab: research runs, results, backtests and deployment
   handle('lab:state', () => lab.status());
   handle('lab:result', () => lab.result());
@@ -1469,11 +1502,18 @@ app.whenReady().then(async () => {
   registerIpc();
   // the window first, everything heavy after it
   createWindow();
-  screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow });
+  screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow, changed: () => screensChanged() });
   const screensChanged = () => {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('screens:changed', screens.state());
   };
-  for (const ev of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(ev, screensChanged);
+  for (const ev of ['display-added', 'display-removed', 'display-metrics-changed'])
+    screen.on(ev, () => {
+      screens.retile();
+      screensChanged();
+    });
+  // tiles sit above the taskbar while Novus Ordo is the app in use, and step back when you switch away
+  app.on('browser-window-focus', () => screens.cover(true));
+  app.on('browser-window-blur', () => setTimeout(() => !BrowserWindow.getFocusedWindow() && screens.cover(false), 80));
   app.on('before-quit', () => {
     if (screens) screens.quitting = true;
   });

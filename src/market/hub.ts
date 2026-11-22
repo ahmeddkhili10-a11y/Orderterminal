@@ -1,4 +1,4 @@
-import { HeatmapRecorder } from '../core/heatmap';
+import { HeatmapRecorder, type HeatmapSnapshot } from '../core/heatmap';
 import { OrderBook } from '../core/orderbook';
 import { TradeStore } from '../core/tradeStore';
 import type { Instrument, Kline, Liquidation, MarketStats, Trade, VenueId, VenueStatus } from '../core/types';
@@ -312,6 +312,42 @@ export class MarketHub {
   bump() {
     this.version++;
     for (const fn of this.changeListeners) fn();
+  }
+
+  /**
+   * The order-book history recorded so far (the last 15 minutes, a snapshot a second), for a
+   * window that has just opened: a popped-out heat map starts with what the terminal already
+   * recorded instead of an empty picture.
+   */
+  exportHeat(maxMs = 15 * 60_000, stepMs = 1000) {
+    const pick = (rec: HeatmapRecorder) => {
+      const t0 = Date.now() - maxMs;
+      const out: HeatmapSnapshot[] = [];
+      let last = -Infinity;
+      for (const s of rec.snapshots)
+        if (s.time >= t0 && s.time - last >= stepMs) {
+          out.push(s);
+          last = s.time;
+        }
+      return out;
+    };
+    return { key: this.primary?.key ?? '', agg: this.aggregate.map((f) => f.key).join(','), heatmap: pick(this.heatmap), composite: pick(this.compositeHeatmap) };
+  }
+
+  /** take in another window's order-book history (only for the same instrument and venues): the older part, before this window's own recording */
+  importHeat(d: ReturnType<MarketHub['exportHeat']> | null | undefined): boolean {
+    if (!d || !this.primary || d.key !== this.primary.key) return false;
+    const merge = (rec: HeatmapRecorder, list: HeatmapSnapshot[]) => {
+      const own0 = rec.snapshots[0]?.time ?? Infinity;
+      const older = (list ?? []).filter((s) => s.time < own0 && s.bids instanceof Float32Array && s.asks instanceof Float32Array);
+      if (!older.length) return;
+      rec.snapshots = [...older, ...rec.snapshots].slice(-rec.maxSnapshots);
+      rec.version++;
+    };
+    merge(this.heatmap, d.heatmap);
+    if (d.agg === this.aggregate.map((f) => f.key).join(',')) merge(this.compositeHeatmap, d.composite);
+    this.bump();
+    return true;
   }
 
   visible(hidden: VenueId[] | undefined): Feed[] {
