@@ -5,12 +5,13 @@
 //   HMAP  Heat map — the market as tiles, sized by volume, coloured by change
 //   CORR  Correlation matrix — how the coins move together (hourly or daily)
 //   HVOL  Volatility monitor — realised volatility over a day, a week, a month
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtPct, fmtPrice } from '../core/format';
 import type { Ticker, VenueId } from '../core/types';
 import { ADAPTERS } from '../exchanges';
 import { useSettings } from '../store/settings';
 import { Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
+import { squarify, tileText } from './treemap';
 import { alignedReturns, BOARD_VENUES, compact, correlation, realisedVol, useBoardVenue, useKlines, useTickers } from './data';
 
 const venueOpts = () => [{ value: 'auto' as const, label: 'Primary venue' }, ...BOARD_VENUES.map((v) => ({ value: v, label: ADAPTERS[v].name }))];
@@ -119,6 +120,26 @@ export function HeatGrid({ config: c, setConfig }: PanelProps<HeatConfig>) {
   const top = [...t.rows].sort((a, b) => b.volume24hUsd - a.volume24hUsd).slice(0, c.tiles);
   const maxV = top[0]?.volume24hUsd ?? 1;
   const up = top.filter((x) => x.change24hPct > 0).length;
+  // the tiles fill the panel exactly, re-laid out whenever its shape changes
+  const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const read = () => setSize((s) => (s.w === el.clientWidth && s.h === el.clientHeight ? s : { w: el.clientWidth, h: el.clientHeight }));
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // area follows volume, softened (square root) and floored so the smallest coins stay readable
+  const rects = useMemo(() => {
+    const floor = Math.sqrt(maxV) * 0.07;
+    return squarify(
+      top.map((x) => Math.max(Math.sqrt(Math.max(0, x.volume24hUsd)), floor)),
+      { x: 0, y: 0, w: size.w, h: size.h },
+    );
+  }, [top.map((x) => `${x.symbol}:${Math.round(Math.log10(x.volume24hUsd + 1) * 50)}`).join(), size.w, size.h, maxV]);
   return (
     <div className="pro-panel">
       <Toolbar>
@@ -130,16 +151,32 @@ export function HeatGrid({ config: c, setConfig }: PanelProps<HeatConfig>) {
         <Spacer />
         <Status venue={venue} {...t} />
       </Toolbar>
-      <div className="pro-heat">
-        {top.map((x) => {
-          // the size class follows volume; the colour follows the day's change (±8 % is full strength)
-          const span = x.volume24hUsd > maxV * 0.25 ? 3 : x.volume24hUsd > maxV * 0.06 ? 2 : 1;
+      <div className="pro-heat" ref={box}>
+        {top.map((x, i) => {
+          const r = rects[i];
+          if (!r || r.w < 1 || r.h < 1) return null;
+          // whole pixels, so neighbours meet without hairline gaps
+          const left = Math.round(r.x);
+          const topPx = Math.round(r.y);
+          const w = Math.round(r.x + r.w) - left;
+          const h = Math.round(r.y + r.h) - topPx;
+          // the colour follows the day's change (±8 % is full strength); the text follows the tile's size
           const k = Math.min(1, Math.abs(x.change24hPct) / 8);
+          const { fs: name, lines } = tileText(x.base, w, h);
+          const showName = lines >= 1;
+          const showPct = lines >= 2;
+          const showVol = lines >= 3;
           return (
-            <button key={x.symbol} className={`pro-tile s${span} ${x.change24hPct >= 0 ? 'up' : 'down'}`} style={{ ['--k' as string]: (0.18 + 0.82 * k).toFixed(2) }} onClick={() => setPrimary(x.base, venue)} title={`${x.base}: ${fmtPrice(x.last)} · ${fmtPct(x.change24hPct)} · volume $${compact(x.volume24hUsd)}`}>
-              <b>{x.base}</b>
-              <span className="mono">{fmtPct(x.change24hPct)}</span>
-              {span > 1 && <small className="mono">${compact(x.volume24hUsd)}</small>}
+            <button
+              key={x.symbol}
+              className={`pro-tile ${x.change24hPct >= 0 ? 'up' : 'down'}`}
+              style={{ left, top: topPx, width: w, height: h, ['--k' as string]: (0.18 + 0.82 * k).toFixed(2), ['--fs' as string]: `${name.toFixed(1)}px` }}
+              onClick={() => setPrimary(x.base, venue)}
+              title={`${x.base}: ${fmtPrice(x.last)} · ${fmtPct(x.change24hPct)} · volume $${compact(x.volume24hUsd)}`}
+            >
+              {showName && <b>{x.base}</b>}
+              {showPct && <span className="mono">{fmtPct(x.change24hPct)}</span>}
+              {showVol && <small className="mono">${compact(x.volume24hUsd)}</small>}
             </button>
           );
         })}

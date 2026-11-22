@@ -5671,29 +5671,31 @@ table.grid.meme-tape td {
 
 /* heat map tiles */
 .pro-heat {
+  position: relative;
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-  grid-auto-rows: 46px;
-  grid-auto-flow: dense;
-  gap: 1px;
-  padding: 1px;
+  overflow: hidden;
   background: var(--border);
 }
+/* each tile is placed by the layout (left/top/width/height); its text scales with it (--fs) */
 .pro-tile {
+  position: absolute;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 1px;
-  padding: 3px 6px;
+  gap: 0.12em;
+  padding: 0 0.45em;
   border: 0;
   cursor: pointer;
   color: #fff;
   text-align: left;
   overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--fs, 12px);
+  line-height: 1.05;
+  box-shadow: inset -1px -1px 0 var(--border);
 }
 .pro-tile.up {
   background: color-mix(in srgb, var(--buy) calc(var(--k) * 100%), #0b0b0b);
@@ -5702,31 +5704,15 @@ table.grid.meme-tape td {
   background: color-mix(in srgb, var(--sell) calc(var(--k) * 100%), #0b0b0b);
 }
 .pro-tile b {
-  font-size: 12px;
+  font-size: 1em;
+  font-weight: 700;
 }
 .pro-tile span {
-  font-size: 11px;
+  font-size: 0.72em;
 }
 .pro-tile small {
-  font-size: 10px;
+  font-size: 0.55em;
   opacity: 0.75;
-}
-.pro-tile.s2 {
-  grid-column: span 2;
-  grid-row: span 2;
-}
-.pro-tile.s2 b {
-  font-size: 15px;
-}
-.pro-tile.s3 {
-  grid-column: span 3;
-  grid-row: span 3;
-}
-.pro-tile.s3 b {
-  font-size: 22px;
-}
-.pro-tile.s3 span {
-  font-size: 15px;
 }
 .pro-tile:hover {
   outline: 1px solid var(--pro-head, #fff);
@@ -6901,4 +6887,8 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
   display: inline-flex;
   gap: 4px;
   margin-right: 10px;
+}
+.pro-heat > .pro-empty {
+  position: absolute;
+  inset: 0;
 }
