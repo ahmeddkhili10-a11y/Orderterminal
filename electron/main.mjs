@@ -23,6 +23,7 @@ import { Probation } from './care/probation.mjs';
 import { Retuner } from './care/retune.mjs';
 import { Remote } from './care/remote.mjs';
 import { crashText, lastErrors, markRunning, markRestart, markStopped, wakeText } from './care/crash.mjs';
+import { endStuck, onScreen, runningPid, waitForAck, writeAck } from './handover.mjs';
 import { buildSpec } from '../src/lab/flow.ts';
 import { testedStats } from '../src/lab/live.ts';
 import { costsForTests, measureCosts } from './care/costs.mjs';
@@ -168,10 +169,12 @@ function leaveSafeMode() {
 
 /** the last session did not close properly (its marker was still there): told once the terminal is unlocked */
 let unclean = null;
+// when this copy asked (before the lock: the open copy may answer at once)
+const askedAt = Date.now();
 const primary = app.requestSingleInstanceLock();
 if (!primary) {
-  log('info', 'another instance is already running — handing over to it');
-  app.quit();
+  log('info', 'another copy is already running — asking it to show its window');
+  void handOver();
 } else {
   unclean = markRunning(userDataDir);
   // it restarted itself on purpose (safe mode, a restore): not a crash to report
@@ -183,6 +186,8 @@ if (!primary) {
 }
 
 let win = null;
+/** a second copy asked for the window before it was on screen: answered once it is */
+let pendingAck = false;
 let db;
 let vault;
 let ccxtSvc;
@@ -257,6 +262,10 @@ function createWindow() {
       if (placed.fullScreen) w.setFullScreen(true);
       w.show();
       log('info', 'window shown');
+    }
+    if (!w.isDestroyed() && pendingAck && w.isVisible()) {
+      pendingAck = false;
+      writeAck(userDataDir);
     }
   };
   w.once('ready-to-show', reveal);
@@ -1378,6 +1387,7 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
 }
 
 app.whenReady().then(async () => {
+  if (!primary) return;
   log('info', 'electron ready');
   try {
     // a previous session still closing (or a backup / antivirus scan) can hold the file for a moment: wait it out
@@ -1517,6 +1527,11 @@ app.whenReady().then(async () => {
   app.on('browser-window-blur', () => setTimeout(() => !BrowserWindow.getFocusedWindow() && screens.cover(false), 80));
   app.on('before-quit', () => {
     if (screens) screens.quitting = true;
+    // closing never hangs: a copy stuck half-closed would hold on to the database and block the next start
+    setTimeout(() => {
+      log('warn', 'closing took over 10 s — forcing it');
+      app.exit(0);
+    }, 10_000);
   });
   log('info', 'window created');
   // the heavy part (the exchange library, the Lab, the swarm, the bots) starts once the window has drawn
@@ -1651,15 +1666,91 @@ app.on('child-process-gone', (_e, d) => {
 });
 
 app.on('second-instance', () => {
-  log('info', 'second launch — focusing the open window');
+  log('info', 'second launch — bringing the open window to the front');
+  // the answer (handover.mjs) is written once the window is really on screen
+  pendingAck = true;
   if (!app.isReady()) return;
-  if (!win || win.isDestroyed()) createWindow();
-  else {
+  if (!win || win.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  try {
     if (win.isMinimized()) win.restore();
+    // a window left on a screen that is no longer plugged in: back onto the main one
+    const back = onScreen(win.getBounds(), [screen.getPrimaryDisplay(), ...screen.getAllDisplays()].map((d) => d.workArea));
+    if (back) {
+      const full = win.isFullScreen();
+      const max = win.isMaximized();
+      if (full) win.setFullScreen(false);
+      if (max) win.unmaximize();
+      win.setBounds(back);
+      if (max || full) win.maximize();
+      log('info', 'the window was off every screen: moved back onto the main one');
+    }
+    win.moveTop();
     if (!win.isVisible()) win.show();
+    // Windows only lets the app in front take focus: on top for a moment, so it comes to the front
+    win.setAlwaysOnTop(true);
     win.focus();
+    win.setAlwaysOnTop(false);
+  } catch (e) {
+    log('warn', 'could not bring the window forward', e);
+  }
+  if (win.isVisible()) {
+    pendingAck = false;
+    writeAck(userDataDir);
   }
 });
+
+/**
+ * This is a second copy: the open one is asked to show its window (above) and answers once it
+ * has. No answer: the open copy is stuck — running in Task Manager with no window — and every
+ * click would hand over to it for nothing. You are offered to close it and start again.
+ */
+async function handOver() {
+  if (await waitForAck(userDataDir, askedAt, 8000)) {
+    log('info', 'the open copy is showing its window');
+    app.exit(0);
+    return;
+  }
+  log('warn', 'the open copy did not show its window within 8 s — it looks stuck');
+  await app.whenReady();
+  const auto = process.env.NOVUS_HANDOVER;
+  const pick =
+    auto === 'restart'
+      ? 0
+      : auto === 'leave'
+        ? 2
+        : dialog.showMessageBoxSync({
+            type: 'warning',
+            title: 'Novus Ordo is stuck',
+            message: 'Novus Ordo is already running, but its window is not showing.',
+            detail: 'It may have got stuck while starting or closing. Your keys, strategies and trades are safe on disk, and open trades on the exchange are not touched — the swarm picks up where it left off.\n\nClose the stuck copy and start again?',
+            buttons: ['Close it and start again', 'Open the log folder', 'Leave it'],
+            defaultId: 0,
+            cancelId: 2,
+            noLink: true,
+          });
+  if (pick === 1) {
+    await shell.openPath(join(userDataDir, 'logs'));
+    app.exit(0);
+    return;
+  }
+  if (pick !== 0) {
+    app.exit(0);
+    return;
+  }
+  const pid = runningPid(userDataDir);
+  if (pid) {
+    log('warn', `closing the stuck copy (process ${pid})`);
+    const gone = await endStuck(pid);
+    log(gone ? 'info' : 'warn', gone ? 'the stuck copy is closed' : 'the stuck copy is still there');
+  } else log('warn', 'the stuck copy left no process number — starting again anyway');
+  markRestart(userDataDir, 'a stuck copy was closed');
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+  app.relaunch(portable ? { execPath: portable, args: [] } : { args: process.argv.slice(1) });
+  app.exit(0);
+}
 
 app.on('window-all-closed', () => {
   // bots need the app open; stop them before their streams go away
