@@ -2,8 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { fmtNum, fmtPrice, fmtTime } from '../core/format';
 import { AMT_STATE_LABEL, onAmtEvent, useAmtBots, useAmtLive } from '../desktop/amt';
 import { desktop, DesktopOnlyError, type AmtBacktest, type AmtBot, type AmtBotInput, type AmtEvent, type AmtBrain, type AmtOrderFlow, type AmtParams, type AmtSnapshot, type AmtTrainResult, type AmtTrainRow, type AmtTrendBacktest, type AmtTrainSegment, type CcxtExchangeInfo } from '../desktop/bridge';
-import { fetchJson } from '../exchanges/ws';
-import { yahooChart } from '../shared/yahoo';
+import { useZarRate } from '../ui/zarRate';
 import { pickSymbol, unifiedCandidates } from '../desktop/trading';
 import { useVaultKeys } from '../desktop/vault';
 import { hub } from '../market/hub';
@@ -957,22 +956,6 @@ function ProfileView({ snap }: { snap: AmtSnapshot }) {
 }
 
 /** Rand per US dollar, for showing balances the way the owner thinks about them. */
-let zarCache: { rate: number; at: number } | null = null;
-function useZarRate() {
-  const [rate, setRate] = useState(zarCache?.rate ?? NaN);
-  useEffect(() => {
-    if (zarCache && Date.now() - zarCache.at < 30 * 60_000) return;
-    yahooChart(fetchJson, 'ZAR=X', '1d')
-      .then((c) => {
-        if (!(c.quote.price > 0)) return;
-        zarCache = { rate: c.quote.price, at: Date.now() };
-        setRate(c.quote.price);
-      })
-      .catch(() => undefined);
-  }, []);
-  return rate;
-}
-
 const zar = (usd: number, rate: number) => (isFinite(rate) && isFinite(usd) ? `R${fmtNum(usd * rate, usd * rate >= 1000 ? 0 : 2)}` : '');
 
 function BalanceInput({ value, onChange, locked, live }: { value: number; onChange: (v: number) => void; locked: boolean; live: boolean }) {

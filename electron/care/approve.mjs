@@ -11,6 +11,7 @@
 // three days (the pool moves on). At the moment of the tap the team is checked
 // again: if any member is no longer a proven edge, nothing is deployed. Teams
 // that are not ready are never offered with buttons.
+import { accountWords, needWords } from '../../src/lab/accountFit.ts';
 import { randomBytes } from 'node:crypto';
 import { escapeHtml as e } from '../../src/shared/telegram.ts';
 import { paceIdOf, sizedUp } from '../../src/lab/farm.ts';
@@ -43,14 +44,24 @@ function deployRows(c) {
     ...(Number.isFinite(c.perWeek) ? [['Trades a week', c.perWeek >= 1 ? `≈ ${c.perWeek.toFixed(1)}` : `1 per ${Math.max(1, Math.round(7 / Math.max(c.perWeek, 0.01)))} days`]] : []),
     ...(Number.isFinite(c.dd95) ? [['Bad run (1 in 20)', drop(c.dd95, 0)]] : []),
     ...(Number.isFinite(c.recoverDays) ? [['Longest dip', `${c.recoverDays} day${c.recoverDays === 1 ? '' : 's'}`]] : []),
+    ...fitRows(c.fit),
     ['Starting size', '¼ (probation)'],
   ]);
+}
+
+/** how it fits your account (Hyperliquid's $10 smallest order), as table rows */
+function fitRows(f) {
+  if (!f) return [];
+  return [
+    [`Fits ${accountWords(f.usd, f.zar)}`, f.fits ? `✓ ${Math.round(f.share * 100)}% of trades` : `✗ ${Math.round(f.share * 100)}% of trades`],
+    ...(f.fits ? [['Usual trade risks', `${(f.risk * 100).toFixed(1)}%`]] : [['Needs about', needWords(f)]]),
+  ];
 }
 
 /** the swarm's state, one line */
 const swarmLine = (swarm) => (swarm ? (swarm.running ? `🟢 Crypto swarm running (${swarm.mode === 'live' ? '<b>LIVE</b>' : 'paper'}) — it trades what you deploy from the next signal.` : '🔴 Crypto swarm <b>stopped</b> — start it in Novus Ordo to trade what you deploy.') : null);
 
-const AUTHORITY_FINE = '<b>Bad run:</b> the worst drop in 95 of 100 shuffled orders of its trades, at 1 % risk a trade. <b>Longest dip:</b> the longest it spent below its previous best on data it never saw. <b>Council decides:</b> the swarm’s council can block a signal it disagrees with. <b>Trade as tested:</b> only Guardian and Risk can stop a trade. Every deployment starts on probation at ¼ size and moves to full size once 12 live trades are on track. Sized up is the same edge scaled until its worst drop would be 15 % (at most 5×) — the swarm sizes each trade by its own risk rules, not at that multiple. Past results do not promise future ones.';
+const AUTHORITY_FINE = '<b>Bad run:</b> the worst drop in 95 of 100 shuffled orders of its trades, at 1 % risk a trade. <b>Longest dip:</b> the longest it spent below its previous best on data it never saw. <b>Council decides:</b> the swarm’s council can block a signal it disagrees with. <b>Trade as tested:</b> only Guardian and Risk can stop a trade. Every deployment starts on probation at ¼ size and moves to full size once 12 live trades are on track. <b>Fits your account:</b> the share of its tested trades Hyperliquid would take on your account — it takes no order under $10, so a small trade is rounded up to $10 while its loss at the stop stays within 2 % of the account, and skipped otherwise; a strategy is offered only when nine in ten of its trades fit. Sized up is the same edge scaled until its worst drop would be 15 % (at most 5×) — the swarm sizes each trade by its own risk rules, not at that multiple. Past results do not promise future ones.';
 
 /** a team, for the phone */
 export function teamText(t, { title, swarm } = {}) {
@@ -69,6 +80,7 @@ export function teamText(t, { title, swarm } = {}) {
         ['Share of risk', `${Math.round(m.weight * 100)}%`],
         ...(c && Number.isFinite(c.perWeek) ? [['Trades a week', `≈ ${c.perWeek.toFixed(1)}`]] : []),
         ...(c && Number.isFinite(c.dd95) ? [['Bad run (1 in 20)', drop(c.dd95, 0)]] : []),
+        ...fitRows(c?.fit),
       ]),
     ]);
   });

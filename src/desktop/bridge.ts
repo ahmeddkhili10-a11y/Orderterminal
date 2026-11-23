@@ -804,6 +804,8 @@ export interface NovusApi {
       stop(): Promise<FarmView>;
       /** keep a strategy for good (never pruned or hidden), or let it go */
       pin(id: string, on: boolean): Promise<FarmView>;
+      /** the account the strategies are judged for, in dollars (and the rand it was given in) */
+      account?(usd: number, zar: number | null): Promise<FarmView>;
       onState(fn: (s: FarmView) => void): () => void;
     };
   };

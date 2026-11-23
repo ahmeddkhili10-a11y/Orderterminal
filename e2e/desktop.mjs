@@ -308,6 +308,19 @@ try {
   expect(/100 random bots/.test(det) && /Settings nudged/.test(det) && /1,000 shuffles/.test(det) && /Significant/.test(det) && /Enters/.test(det), 'a survivor shows its rules in words, its curve and every check it passed');
   expect(/Steady/.test(det) && /of 3 thirds/.test(det) && /Double costs/.test(det) && /odds it is a fluke/.test(det), 'the new checks are shown with their numbers: steady, double costs, and the fluke odds after every kind tried');
   expect(/The vault/.test(det) && /most recent days of the history, which nothing was bred or checked on/.test(det), 'a survivor has a fresh-data result the moment it is found: its trades in the vault');
+  // your account: typed in rand, the strategies judged for it (Hyperliquid's $10 smallest order)
+  await page.click('[data-farm] button:has-text("💰")');
+  await page.waitForSelector('[data-account]', { timeout: 5000 });
+  await page.click('[data-account] .chip:has-text("Dollars")');
+  await page.fill('[data-account] input', '55');
+  await page.click('[data-account] button:has-text("Judge strategies for this account")');
+  await page.waitForFunction(() => window.novus.lab.farm.state().then((s) => s.cfg.accountUsd === 55), null, { timeout: 10_000 });
+  await page.keyboard.press('Escape');
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-farm] [data-fit]')].some((x) => x.getAttribute('data-fit') !== 'unknown'), null, { timeout: 60_000 });
+  const fits = await page.evaluate(() => [...document.querySelectorAll('[data-farm] [data-fit]')].map((x) => `${x.getAttribute('data-fit')}:${x.textContent}`));
+  const fitDet = await page.locator('[data-farm] [data-detail]').innerText();
+  expect(fits.length > 0 && fits.every((x) => /^(yes:✓ \d+%|no:✗ needs \$[\d,]+|unknown:…)$/.test(x)) && /account: \d+ % of its trades can be placed on Hyperliquid|too wide for your \$55 account/.test(fitDet), `each strategy says how much of it fits a $55 account (${[...new Set(fits)].slice(0, 4).join(', ')})`);
   // a top five for each pace, each survivor on the ladder at once, the data's health in the strip
   const boards0 = await page.evaluate(() => window.novus.lab.farm.state().then((s) => ({ tops: s.tops.map((b) => ({ id: b.id, rows: b.rows.map((r) => ({ id: r.id, stage: r.stage, style: r.style, vault: r.vault })) })), data: s.data, styles: s.cfg.styles, dupes: s.dupes, kinds: s.kinds })));
   expect(boards0.styles.includes('scalp') && boards0.styles.includes('intraday') && boards0.tops.map((b) => b.id).join() === 'scalp,intraday' && (await page.locator('[data-farm] [data-board]').count()) === 2, `scalping is bred beside intraday, and each pace has its own top five (${boards0.tops.map((b) => `${b.id}: ${b.rows.length}`).join(', ')})`);

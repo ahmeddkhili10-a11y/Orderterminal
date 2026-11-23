@@ -330,6 +330,37 @@ describe('fresh data: forward tests, the ladder and the fleet', () => {
     expect(['incubating', 'proving', 'proven', 'faded']).toContain(s.stage);
   });
 
+  it('keeps each survivor’s stop distances, fills them in for older ones, and judges them for your account', () => {
+    const farm = new Farm({ coins: ['BTC', 'ETH'], styles: ['intraday'] }, { seed: 2 });
+    farm.setMarkets(trending());
+    const f = flow({ strategies: ['tsmom'], tunes: { 'strategy:tsmom': { lookback: 72 } }, takeProfit: 'trail' });
+    const g = farm.gauntlet(f, farm.train(f).is!);
+    expect(g.ok).toBe(true);
+    if (!g.ok) return;
+    const stops = g.s.stops!;
+    expect(stops).toHaveLength(21);
+    expect(stops[0]).toBeGreaterThan(0);
+    expect(stops[20]).toBeGreaterThanOrEqual(stops[10]);
+    // one found by an older version, without them: worked out again, the same
+    farm.survivors.push({ ...g.s, id: 'old', stops: undefined });
+    expect(farm.stopsPending()).toBe(1);
+    farm.stopsSome();
+    expect(farm.stopsPending()).toBe(0);
+    expect(farm.survivors[0].stops).toEqual(stops);
+    // judged for the account in the settings (about R1,000 until you say): fits a big one, not a tiny one
+    farm.cfg.accountUsd = 100_000;
+    expect(farm.fitsAccount(farm.survivors[0])).toBe(true);
+    farm.cfg.accountUsd = 4;
+    expect(farm.fitOf(farm.survivors[0])!.share).toBe(0);
+    expect(farm.fitsAccount(farm.survivors[0])).toBe(false);
+    // the screen's view carries it, in rand when given in rand
+    farm.cfg.accountUsd = 100_000;
+    farm.cfg.accountZar = 1_800_000;
+    const st = farm.state(true, '', '');
+    const row = [...st.top, ...(st.tops ?? []).flatMap((b) => b.rows)].find((x) => x.id === 'old');
+    if (row) expect(row.card!.fit!.zar).toBe(1_800_000);
+  }, 120_000);
+
   it('the ladder: new, incubating, proving, proven — or faded', () => {
     const oos = { maxDD: 0.08 } as Survivor['oos'];
     const fw = (trades: number, ret: number, maxDD = 0.02, sharpe = ret > 0 ? 1 : -1) => ({ forward: { bars: 100, trades, ret, sharpe, maxDD, days: 30 }, oos });

@@ -691,6 +691,7 @@ function registerIpc() {
   handle('lab:farm-start', (_e, patch) => lab.farmStart(patch ?? {}));
   handle('lab:farm-stop', () => lab.farmStop(true));
   handle('lab:farm-pin', (_e, id, on) => lab.farmPin(String(id), Boolean(on)));
+  handle('lab:farm-account', (_e, usd, zar) => lab.farmAccount(usd, zar));
   // candles from the Lab's own history cache (a year of hourly bars for the Quant desk's seasonality map)
   handle('lab:bars', async (_e, coin, tf, years) => {
     const c = String(coin ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);

@@ -95,6 +95,8 @@ import {
   type Perf,
 } from "./stats";
 
+import { accountFit, DEFAULT_ACCOUNT_USD, fitWords, stopQuantiles, type AccountFit } from "./accountFit";
+
 export interface FarmCfg {
   coins: string[];
   /** the trading styles bred (each needs its candles: 15 m, 1 h, 4 h, 1 d) */
@@ -108,6 +110,13 @@ export interface FarmCfg {
   v?: number;
   /** test on Hyperliquid's own recent prices and funding (the market the swarm trades), joined onto the long history (default on) */
   hl?: boolean;
+  /**
+   * the account the strategies will trade, in dollars (and in rand, as you typed it): the
+   * returns are percentages and do not depend on it, but Hyperliquid's $10 smallest order does —
+   * a strategy whose stops are too wide for this account has trades that can never be placed
+   */
+  accountUsd?: number;
+  accountZar?: number | null;
 }
 
 /** the share of the history held back as the vault: the most recent candles, which no bot is bred or checked on */
@@ -129,6 +138,7 @@ export const FARM_DEFAULTS: FarmCfg = {
   sides: "both",
   pace: "gentle",
   maxDD: 0.2,
+  accountUsd: DEFAULT_ACCOUNT_USD,
 };
 
 export type Stage =
@@ -282,6 +292,8 @@ export interface Survivor {
   confirmed?: boolean;
   /** what deploying it means in plain numbers (worked out for the screen and the phone) */
   card?: DeployCard;
+  /** its stop distance (a share of the entry price) at every 5 % of its unseen-data trades, smallest first: how much of it fits a small account (null: could not be worked out) */
+  stops?: number[] | null;
   summary: string[];
   /** significant on the unseen data after allowing for every bot that reached it (false-discovery rate 10 %): the top five is drawn from these, and from those proven on fresh data */
   sig: boolean;
@@ -1658,6 +1670,7 @@ export class Farm {
         cost2: cost2.sharpe,
       },
       daily: dailyOf(run.rets, run.times),
+      stops: stopQuantiles(run.trades) ?? null,
       summary: built.summary,
       curve,
       split: Math.min(
@@ -1772,6 +1785,38 @@ export class Farm {
     }
     // every proven strategy is re-tested on the new candles
     this.confQueue = this.survivors.filter((x) => x.stage === "proven").map((x) => x.id);
+  }
+
+  /** strategies found before their stop distances were kept: worked out again, a few at a time */
+  stopsPending(): number {
+    return this.survivors.filter((x) => x.stops === undefined).length;
+  }
+
+  stopsSome(ms = 150): number {
+    const t0 = Date.now();
+    let n = 0;
+    for (const s of this.survivors) {
+      if (s.stops !== undefined) continue;
+      if (n > 0 && Date.now() - t0 >= ms) break;
+      const x = this.ctxFor(s.flow);
+      try {
+        s.stops = x ? (stopQuantiles(runAll(x.ctxs, x.spec, "oos", this.costs).trades) ?? null) : null;
+      } catch {
+        s.stops = null;
+      }
+      n++;
+    }
+    return n;
+  }
+
+  /** how a strategy fits the account set in the settings */
+  fitOf(s: Pick<Survivor, "stops">): AccountFit | null {
+    return accountFit(s.stops, this.cfg.accountUsd ?? DEFAULT_ACCOUNT_USD, this.cfg.accountZar ?? null);
+  }
+
+  /** a strategy may be offered for the account: its trades can be placed (or its stops are not known yet) */
+  fitsAccount(s: Pick<Survivor, "stops">): boolean {
+    return this.fitOf(s)?.fits ?? true;
   }
 
   confirmPending(): number {
@@ -2286,7 +2331,7 @@ export class Farm {
       this.starIds = {
         at,
         ids: this.survivors
-          .filter(isStar)
+          .filter((x) => isStar(x) && this.fitsAccount(x))
           .sort((a, b) => starRet(b) - starRet(a))
           .slice(0, 10)
           .map((x) => x.id),
@@ -2295,6 +2340,11 @@ export class Farm {
     return this.starIds.ids.map((id) => byId.get(id)).filter((x): x is Survivor => !!x && x.stage !== "faded");
   }
   private starIds: { at: number; ids: string[] } | null = null;
+
+  /** the account changed: the stars are picked again for it */
+  reboard() {
+    this.starIds = null;
+  }
 
   /** keep a strategy for good (or let it go again): a kept one is never pruned or hidden */
   pin(id: string, on: boolean) {
@@ -2409,7 +2459,7 @@ export class Farm {
       const top = each.reduce((p, e, i) => (e.sharpe > each[p].sharpe ? i : p), 0);
       return {
         key: ms.map((m) => m.id).join("+"),
-        ready: ms.every(provenEdge) && sharpe >= 1,
+        ready: ms.every(provenEdge) && sharpe >= 1 && ms.every((m) => this.fitsAccount(m)),
         members: ms.map((m, i) => ({
           id: m.id,
           name: m.name,
@@ -2424,7 +2474,7 @@ export class Farm {
           sig: m.sig,
           oos: { sharpe: m.oos.sharpe, t: m.oos.t, trades: m.oos.trades, winRate: m.oos.winRate, avgR: m.oos.avgR, bars: m.oos.bars, maxDD: m.oos.maxDD },
           dsr: m.dsr,
-          card: deployCard(m),
+          card: deployCard(m, this.fitOf(m)),
           confirmed: m.confirmed,
         })),
         sharpe,
@@ -2495,7 +2545,7 @@ export class Farm {
       ),
       funnel: { ...this.funnel },
       ladder,
-      top: this.top().map(lite),
+      top: this.top().map((x) => lite(x, this.fitOf(x))),
       watch: this.watch(),
       survivors: this.survivors.length,
       recent: this.recent,
@@ -2507,15 +2557,15 @@ export class Farm {
       entrants: this.funnel.trained,
       kinds: Math.max(this.entered.size, this.kindsFloor),
       dupes: this.dupes,
-      tops: this.tops().map((b) => ({ ...b, rows: b.rows.map(lite) })),
+      tops: this.tops().map((b) => ({ ...b, rows: b.rows.map((x) => lite(x, this.fitOf(x))) })),
       pbo: this.overfit(),
       niches: this.archive.size,
       blocks: this.blocks(),
       team: this.team(),
       teams: this.teams(),
       teamWait: this.teamWait(),
-      kept: this.survivors.filter((x) => this.pinned.has(x.id)).map(lite),
-      stars: this.stars().map(lite),
+      kept: this.survivors.filter((x) => this.pinned.has(x.id)).map((x) => lite(x, this.fitOf(x))),
+      stars: this.stars().map((x) => lite(x, this.fitOf(x))),
     };
   }
 
@@ -2722,9 +2772,9 @@ export const resultKey = (s: Pick<Survivor, "id" | "tfH" | "oos">) =>
     : `id:${s.id}`;
 
 /** a survivor without the long series (for the screen: they are not drawn, only used here) */
-const lite = (s: Survivor): Survivor => ({
+const lite = (s: Survivor, fit: AccountFit | null): Survivor => ({
   ...s,
-  card: deployCard(s),
+  card: deployCard(s, fit),
   daily: undefined,
   forward: s.forward ? { ...s.forward, daily: undefined } : null,
 });
@@ -2740,9 +2790,11 @@ export interface DeployCard {
   /** its worst drop as tested, and the yearly return at 1× */
   maxDD: number;
   ret: number;
+  /** how it fits the account in the settings (Hyperliquid's $10 smallest order); null when its stops are not known yet */
+  fit?: AccountFit | null;
 }
 
-export function deployCard(s: Pick<Survivor, "oos" | "tfH" | "mc" | "daily">): DeployCard {
+export function deployCard(s: Pick<Survivor, "oos" | "tfH" | "mc" | "daily">, fit: AccountFit | null = null): DeployCard {
   const years = s.oos?.bars ? s.oos.bars / barsPerYear(s.tfH) : 0;
   let recoverDays: number | null = null;
   const r = s.daily?.r;
@@ -2766,13 +2818,15 @@ export function deployCard(s: Pick<Survivor, "oos" | "tfH" | "mc" | "daily">): D
     recoverDays,
     maxDD: s.oos?.maxDD ?? 0,
     ret: s.oos?.cagr ?? 0,
+    fit,
   };
 }
 
-/** the deploy card in words (the phone and the screen say the same) */
 export function cardWords(c: DeployCard | undefined): string[] {
   if (!c) return [];
   const out: string[] = [];
+  const fw = fitWords(c.fit);
+  if (fw) out.push(fw);
   if (c.perWeek !== null) out.push(c.perWeek >= 1 ? `about ${c.perWeek.toFixed(c.perWeek < 10 ? 1 : 0)} trades a week` : `about one trade every ${Math.max(1, Math.round(7 / Math.max(c.perWeek, 0.01)))} days`);
   if (c.dd95 !== null) out.push(`a bad run: −${Math.round(c.dd95 * 100)} % (worst drop in 95 of 100 shuffled orders, at 1 % risk a trade)`);
   if (c.recoverDays !== null) out.push(`longest stretch below its best: ${c.recoverDays} day${c.recoverDays === 1 ? "" : "s"}`);

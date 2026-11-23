@@ -6900,3 +6900,16 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
   visibility: hidden;
   z-index: -1;
 }
+/* the edge finder's account box: rand or dollars, and what it means */
+.farm-account {
+  max-width: 360px;
+}
+.farm-account-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.farm-account p {
+  margin: 6px 0;
+  line-height: 1.45;
+}

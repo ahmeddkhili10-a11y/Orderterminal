@@ -25,6 +25,8 @@ import { buildSpec, STYLE_MAP, STYLES, type StyleId } from "../lab/flow";
 import { startLabLink, useLab, type Authority } from "../lab/store";
 import { testedStats } from "../lab/live";
 import { Popover, type PanelProps } from "../ui/controls";
+import { useZarRate } from "../ui/zarRate";
+import { accountWords, DEFAULT_ACCOUNT_USD, needWords, MIN_ORDER_USD } from "../lab/accountFit";
 import { Bars, LineChart } from "./charts";
 
 const pct = (x: number, d = 1) =>
@@ -161,6 +163,14 @@ export function FarmPanel({ config: c, setConfig }: PanelProps<FarmConfig>) {
           </span>
         </div>
         <span className="grow" />
+        <AccountBox
+          farm={farm}
+          busy={busy}
+          onSet={(usd, zar) => {
+            if (!F.account) return;
+            act(F.account(usd, zar), "Strategies are now judged for this account: the lists and the phone show what fits it.");
+          }}
+        />
         <Settings
           farm={farm}
           busy={busy || starting}
@@ -506,6 +516,9 @@ function TableView({
             <th title="The chance it is a fluke, allowing for every kind of bot that reached the unseen data (its q-value): under 10 % counts as significant">
               FLUKE ODDS
             </th>
+            <th title={`The share of its trades Hyperliquid would take on your account: it takes no order under $${MIN_ORDER_USD}, so a small trade is rounded up to $${MIN_ORDER_USD} while its loss at the stop stays within 2 % of the account, and skipped otherwise. Fits when nine in ten of its trades can be placed; only those are offered on the phone.`}>
+              FITS ACCOUNT
+            </th>
             <th className="l">LADDER</th>
           </tr>
         </thead>
@@ -549,6 +562,13 @@ function TableView({
                     : s.q < 0.001
                       ? "<0.1%"
                       : pct(s.q, s.q < 0.1 ? 1 : 0)}
+                </td>
+                <td className={`mono ${s.card?.fit ? (s.card.fit.fits ? "up" : "down") : "muted"}`} data-fit={s.card?.fit ? (s.card.fit.fits ? "yes" : "no") : "unknown"}>
+                  {s.card?.fit
+                    ? s.card.fit.fits
+                      ? `✓ ${pct(s.card.fit.share, 0)}`
+                      : `✗ needs ${needWords(s.card.fit)}`
+                    : "…"}
                 </td>
                 <td className={`l ${STAGE_TONE[s.stage] ?? ""}`}>
                   {LADDER.find((l) => l.id === s.stage)?.name ?? s.stage}
@@ -1316,6 +1336,55 @@ function FleetView({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * The account the strategies will trade: typed in rand (or dollars). The returns do not depend
+ * on it (they are percentages); Hyperliquid's $10 smallest order does — a strategy whose stops
+ * are too wide for the account has trades that can never be placed.
+ */
+function AccountBox({ farm, busy, onSet }: { farm: FarmView; busy: boolean; onSet: (usd: number, zar: number | null) => void }) {
+  const rate = useZarRate();
+  const usd0 = farm.cfg.accountUsd ?? DEFAULT_ACCOUNT_USD;
+  const zar0 = farm.cfg.accountZar ?? null;
+  const [cur, setCur] = useState<"zar" | "usd">(zar0 || !farm.cfg.accountUsd ? "zar" : "usd");
+  const [text, setText] = useState(String(zar0 ?? (Number.isFinite(rate) ? Math.round(usd0 * rate) : 1000)));
+  useEffect(() => {
+    setText(String(cur === "zar" ? (zar0 ?? (Number.isFinite(rate) ? Math.round(usd0 * rate) : 1000)) : usd0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usd0, zar0, cur]);
+  const v = Number(text.replace(/[^0-9.]/g, ""));
+  const usd = cur === "zar" ? (Number.isFinite(rate) ? v / rate : NaN) : v;
+  const ok = Number.isFinite(usd) && usd >= 1;
+  return (
+    <Popover label={`💰 ${accountWords(usd0, zar0)}`} title="The account the strategies will trade (Hyperliquid's $10 smallest order decides which fit)" align="right">
+      <div className="farm-settings farm-account" data-account>
+        <label>
+          <span>Your account on Hyperliquid</span>
+          <span className="farm-account-row">
+            <button className={`chip${cur === "zar" ? " active" : ""}`} onClick={() => setCur("zar")}>Rand</button>
+            <button className={`chip${cur === "usd" ? " active" : ""}`} onClick={() => setCur("usd")}>Dollars</button>
+            <input className="ctl mono" inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ok && onSet(usd, cur === "zar" ? v : null)} style={{ width: 110 }} />
+          </span>
+        </label>
+        <div className="muted">
+          {cur === "zar"
+            ? Number.isFinite(rate)
+              ? `≈ $${usd.toFixed(2)} at R${rate.toFixed(2)} a dollar`
+              : "Waiting for the rand rate…"
+            : Number.isFinite(rate) && ok
+              ? `≈ R${Math.round(usd * rate).toLocaleString("en-US")}`
+              : ""}
+        </div>
+        <p className="muted">
+          The returns shown are percentages: the same on R500 as on R5 million. What your account changes is which strategies can trade it. Hyperliquid takes no order under ${MIN_ORDER_USD}, so a small trade is rounded up to ${MIN_ORDER_USD} — but only while its loss at the stop stays within 2 % of the account. A strategy with wide stops (swing, position) on a small account has trades that can never be placed. Each strategy shows the share of its trades that fit; the phone only offers the ones where nine in ten do.
+        </p>
+        <button className="btn" disabled={busy || !ok} onClick={() => onSet(usd, cur === "zar" ? v : null)}>
+          Judge strategies for this account
+        </button>
+      </div>
+    </Popover>
   );
 }
 

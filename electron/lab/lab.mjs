@@ -473,6 +473,19 @@ export class LabService {
   }
 
   /** keep a strategy for good, or let it go: the running farm is told; a stopped one has it written into its save */
+  /** the account the edge finder judges strategies for (Hyperliquid's $10 smallest order), in dollars and the rand it was given in */
+  farmAccount(usd0, zar0) {
+    const usd = Math.round(Number(usd0) * 100) / 100;
+    if (!(usd >= 1 && usd <= 1e9)) throw new Error('the account must be at least $1');
+    const zar = Number(zar0) > 0 ? Math.round(Number(zar0)) : null;
+    this.farmCfg = { ...this.farmCfg, accountUsd: usd, accountZar: zar };
+    if (this.farmW) this.farmW.postMessage({ type: 'account', usd, zar });
+    if (this.farmSnap) this.farmSnap = { ...this.farmSnap, cfg: this.farmCfg };
+    this.farmPersist();
+    this.farmPush(null);
+    return this.farmState();
+  }
+
   farmPin(id, on) {
     if (this.farmW) this.farmW.postMessage({ type: 'pin', id, on });
     else if (this.farmSavedObj()) {

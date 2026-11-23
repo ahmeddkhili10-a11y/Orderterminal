@@ -83,6 +83,9 @@ export function createFarmRunner(post, o = {}) {
         } else if (farm.confirmPending()) {
           // proven strategies re-tested on coins they never saw, a slice at a time
           farm.confirmSome(200);
+        } else if (farm.stopsPending()) {
+          // strategies found before their stop distances were kept: read again, a few at a time (how they fit your account)
+          farm.stopsSome(150);
         }
         farm.step();
       } catch (err) {
@@ -129,6 +132,13 @@ export function createFarmRunner(post, o = {}) {
         farm.setMarkets(toMarkets(msg.markets), { defer: true });
         if (msg.confirm) farm.setConfirm(toMarkets(msg.confirm));
         farm.checkFleet(deployed);
+        send();
+        save();
+      } else if (msg.type === "account" && farm) {
+        // the account the strategies are judged for: the lists and offers follow at once (nothing is re-tested)
+        farm.cfg.accountUsd = msg.usd;
+        farm.cfg.accountZar = msg.zar ?? null;
+        farm.reboard();
         send();
         save();
       } else if (msg.type === "pin" && farm) {
