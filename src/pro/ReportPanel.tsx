@@ -7,7 +7,7 @@
 // flow of the last hour, liquidations, the news, and the Lab's strategies
 // that trade it. The analysis is src/market/report.ts; this screen gathers
 // the data and lays it out.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { fmtAgo, fmtPrice, fmtUsd } from '../core/format';
 import type { Kline } from '../core/types';
 import { ADAPTERS } from '../exchanges';
@@ -22,6 +22,7 @@ import { useSettings } from '../store/settings';
 import { Chip, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { LineChart } from './charts';
 import { useBoardVenue, useKlines, useTickers } from './data';
+import { usePanelVisible } from '../ui/visible';
 import { openFunction } from './ProBar';
 
 export interface ReportConfig {
@@ -212,11 +213,21 @@ export function ReportPanel({ config: c, setConfig }: PanelProps<ReportConfig>) 
     retainNews();
     return releaseNews;
   }, []);
-  // the live numbers (funding, flow, liquidations) are read again every 20 seconds
+  // the live numbers (funding, flow, liquidations) are read again every 20 seconds while the report is on show
+  const visible = usePanelVisible();
+  const shown = useRef(visible);
+  shown.current = visible;
+  const missed = useRef(false);
   useEffect(() => {
-    const t = setInterval(() => setTick((x) => x + 1), 20_000);
+    const t = setInterval(() => (shown.current ? setTick((x) => x + 1) : (missed.current = true)), 20_000);
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    if (visible && missed.current) {
+      missed.current = false;
+      setTick((x) => x + 1);
+    }
+  }, [visible]);
   const D = useMemo(() => barsOf(daily.data[base]), [daily.data, base]);
   const Hh = useMemo(() => barsOf(hourly.data[base]), [hourly.data, base]);
   const B = useMemo(() => barsOf(btc.data.BTC), [btc.data]);

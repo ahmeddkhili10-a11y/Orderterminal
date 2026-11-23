@@ -7,68 +7,24 @@
 //   FCST  Candle forecast — the next candle as a ghost (its odds of closing up,
 //         its expected high and low), how good the models have been out of
 //         sample, and which inputs matter
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fmtPrice } from '../core/format';
 import type { Kline, VenueId } from '../core/types';
 import { ADAPTERS } from '../exchanges';
 import { candleForecast, type CandleReport } from '../lab/candles';
-import { fitModel, forecastPath, garchVar, horizonVol, hourProfile, newsImpact, valueAtRisk, type GarchFit } from '../lab/garch';
+import { newsImpact } from '../lab/garch';
 import { useSettings } from '../store/settings';
 import { Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
 import { AreaChart, Bars, LineChart, useChartWidth } from './charts';
 import { USES } from './botUses';
 import { UseInBot } from './UseInBot';
 import { BOARD_VENUES, useBoardVenue, useKlines } from './data';
+import { useCompute } from './compute';
+import { dataKey, type CoinVol } from './heavy';
 
 const venueOpts = () => [{ value: 'auto' as const, label: 'Primary venue' }, ...BOARD_VENUES.map((v) => ({ value: v, label: ADAPTERS[v].name }))];
+const NONE_GV: CoinVol[] = [];
 const pct = (x: number, d = 0) => (Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : '—');
-
-interface CoinVol {
-  coin: string;
-  fit: GarchFit;
-  /** annualised conditional volatility of each bar */
-  sigAnn: number[];
-  /** annualised forecast for each of the next hours, with the hour-of-day pattern */
-  hours: { t: number; ann: number; ratio: number }[];
-  nowAnn: number;
-  longAnn: number;
-  dayAnn: number;
-  weekAnn: number;
-  var99: number;
-}
-
-function analyse(coin: string, k: Kline[], ahead: number, model: GarchConfig['model'] = 'best'): CoinVol | null {
-  if (k.length < 300) return null;
-  const lr = k.slice(1).map((x, i) => Math.log(x.close / k[i].close));
-  const fit = fitModel(lr, model === 'best' ? undefined : model);
-  if (!fit) return null;
-  const bpy = 24 * 365;
-  const h = garchVar(fit, lr);
-  const last = lr[lr.length - 1] - fit.mu;
-  const h1 = fit.omega + (fit.alpha + (last < 0 ? fit.gamma : 0)) * last * last + fit.beta * h[h.length - 1];
-  const prof = hourProfile(
-    k.slice(1).map((x) => x.time),
-    lr,
-  );
-  const path = forecastPath(fit, h1, ahead);
-  const t0 = k[k.length - 1].time + 3_600_000;
-  const longAnn = Math.sqrt(fit.longRun * bpy);
-  return {
-    coin,
-    fit,
-    sigAnn: Array.from(h, (v) => Math.sqrt(v * bpy)),
-    hours: path.map((v, i) => {
-      const t = t0 + i * 3_600_000;
-      const ann = Math.sqrt(v * (prof[new Date(t).getUTCHours()] || 1) * bpy);
-      return { t, ann, ratio: ann / longAnn };
-    }),
-    nowAnn: Math.sqrt(h1 * bpy),
-    longAnn,
-    dayAnn: (horizonVol(fit, h1, 24) * Math.sqrt(bpy)) / Math.sqrt(24),
-    weekAnn: (horizonVol(fit, h1, 168) * Math.sqrt(bpy)) / Math.sqrt(168),
-    var99: valueAtRisk(fit, h1, 24, 0.99),
-  };
-}
 
 /** blue calm, orange and red hot, yellow extreme — relative to the coin's own long-run volatility */
 const heat = (r: number) => (!Number.isFinite(r) ? 'h-none' : r < 0.75 ? 'h-0' : r < 0.95 ? 'h-1' : r < 1.15 ? 'h-2' : r < 1.4 ? 'h-3' : r < 1.8 ? 'h-4' : 'h-5');
@@ -89,7 +45,8 @@ export function GarchPanel({ config: c, setConfig }: PanelProps<GarchConfig>) {
   const k = useKlines(venue, coins, '1h', 1000);
   const [text, setText] = useState(c.coins);
   const [sel, setSel] = useState<string | null>(null);
-  const rows = useMemo(() => coins.map((b) => (k.data[b] ? analyse(b, k.data[b], c.ahead, c.model ?? 'best') : null)).filter(Boolean) as CoinVol[], [k.data, c.ahead, c.model, coins.join()]);
+  const rowsJob = useCompute('garchRows', { coins, data: k.data, ahead: c.ahead, model: c.model ?? 'best' }, `${dataKey(k.data, coins)}:${c.ahead}:${c.model}`, coins.join());
+  const rows = rowsJob.value ?? NONE_GV;
   const pick = rows.find((r) => r.coin === sel) ?? rows[0];
   const hours = rows[0]?.hours ?? [];
   return (
@@ -109,11 +66,11 @@ export function GarchPanel({ config: c, setConfig }: PanelProps<GarchConfig>) {
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
         <UseInBot from="GV" options={USES.garch()} />
         <Spacer />
-        <span className="pro-status">{k.loading ? 'fitting…' : `${(c.model ?? 'best') === 'best' ? 'GARCH / GJR-GARCH · normal or t · best by BIC' : (c.model === 'gjr' ? 'GJR-GARCH' : 'GARCH') + ' · normal or t by BIC'} · 1000 hourly bars`}</span>
+        <span className="pro-status">{k.loading || rowsJob.busy ? 'fitting…' : `${(c.model ?? 'best') === 'best' ? 'GARCH / GJR-GARCH · normal or t · best by BIC' : (c.model === 'gjr' ? 'GJR-GARCH' : 'GARCH') + ' · normal or t by BIC'} · 1000 hourly bars`}</span>
       </Toolbar>
       <div className="pro-scroll">
         {!rows.length ? (
-          <div className="pro-empty">{k.loading ? 'Loading candles and fitting the models…' : 'Not enough candles for these coins on this venue (300+ needed).'}</div>
+          <div className="pro-empty">{k.loading || rowsJob.busy ? 'Loading candles and fitting the models…' : 'Not enough candles for these coins on this venue (300+ needed).'}</div>
         ) : (
           <>
             <div className="pro-section">FORECAST VOLATILITY — NEXT {c.ahead} HOURS (UTC), AGAINST EACH COIN'S LONG RUN</div>

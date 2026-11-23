@@ -6892,3 +6892,11 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
   position: absolute;
   inset: 0;
 }
+/* the marker that tells a panel whether its tab is on show (see ui/visible.tsx) */
+.panel-probe {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: -1;
+}

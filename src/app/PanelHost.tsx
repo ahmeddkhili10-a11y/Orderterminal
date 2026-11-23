@@ -1,5 +1,6 @@
 import { Component, useCallback, useRef, useState, type ReactNode } from 'react';
 import { Actions, type Model, type TabNode } from 'flexlayout-react';
+import { VisibleBoundary } from '../ui/visible';
 import { PANEL_MAP } from '../panels/registry';
 
 class PanelErrorBoundary extends Component<{ children: ReactNode; name: string }, { error: Error | null }> {
@@ -45,7 +46,9 @@ export function PanelHost({ node, model }: { node: TabNode; model: Model }) {
   const C = def.component;
   return (
     <PanelErrorBoundary name={def.title}>
-      <C config={config} setConfig={setConfig} nodeId={node.getId()} />
+      <VisibleBoundary>
+        <C config={config} setConfig={setConfig} nodeId={node.getId()} />
+      </VisibleBoundary>
     </PanelErrorBoundary>
   );
 }

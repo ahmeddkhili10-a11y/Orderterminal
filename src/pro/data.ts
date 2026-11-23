@@ -1,10 +1,11 @@
 // Shared market data for the professional terminal's panels: one ticker poll
 // per venue (every 15 s) and cached candles per coin, so a dozen panels on
 // screen do not each ask the exchange.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Kline, Ticker, VenueId } from '../core/types';
 import { ADAPTERS } from '../exchanges';
 import { useSettings } from '../store/settings';
+import { usePanelVisible } from '../ui/visible';
 
 type Listener = () => void;
 
@@ -42,13 +43,24 @@ function pollTickers(v: VenueId, f: TickerFeed) {
 
 export function useTickers(venue: VenueId) {
   const [, bump] = useState(0);
+  // a hidden panel is not redrawn on every poll; it catches up when shown
+  const visible = usePanelVisible();
+  const shown = useRef(visible);
+  shown.current = visible;
+  const stale = useRef(false);
+  useEffect(() => {
+    if (visible && stale.current) {
+      stale.current = false;
+      bump((x) => x + 1);
+    }
+  }, [visible]);
   useEffect(() => {
     let f = tickerFeeds.get(venue);
     if (!f) {
       f = { rows: [], at: 0, error: '', listeners: new Set(), timer: null };
       tickerFeeds.set(venue, f);
     }
-    const fn = () => bump((x) => x + 1);
+    const fn = () => (shown.current ? bump((x) => x + 1) : (stale.current = true));
     f.listeners.add(fn);
     if (!f.timer) {
       pollTickers(venue, f);
@@ -87,13 +99,23 @@ export function klines(venue: VenueId, base: string, interval: string, limit: nu
   return p;
 }
 
-/** candles for several coins at once; reloads every five minutes */
+/**
+ * candles for several coins at once; reloads every five minutes while the panel is on show.
+ * A hidden panel (another workspace, a tab behind another) does not reload or recompute; it
+ * catches up the moment it is shown, if its candles are older than five minutes by then.
+ */
 export function useKlines(venue: VenueId, bases: string[], interval: string, limit: number) {
   const [state, setState] = useState<{ data: Record<string, Kline[]>; errors: Record<string, string>; loading: boolean }>({ data: {}, errors: {}, loading: true });
   const key = bases.join(',');
+  const visible = usePanelVisible();
+  const shown = useRef(visible);
+  shown.current = visible;
+  const loadRef = useRef<() => void>(() => undefined);
+  const loadedAt = useRef(0);
   useEffect(() => {
     let alive = true;
     const load = async () => {
+      loadedAt.current = Date.now();
       const data: Record<string, Kline[]> = {};
       const errors: Record<string, string> = {};
       await Promise.all(
@@ -105,14 +127,19 @@ export function useKlines(venue: VenueId, bases: string[], interval: string, lim
       );
       if (alive) setState({ data, errors, loading: false });
     };
+    loadRef.current = () => void load();
     void load();
-    const t = setInterval(load, 5 * 60_000);
+    const t = setInterval(() => shown.current && void load(), 5 * 60_000);
     return () => {
       alive = false;
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [venue, key, interval, limit]);
+  // back on show after a while: fresh candles now
+  useEffect(() => {
+    if (visible && loadedAt.current && Date.now() - loadedAt.current > 5 * 60_000) loadRef.current();
+  }, [visible]);
   return state;
 }
 

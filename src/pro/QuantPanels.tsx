@@ -20,32 +20,18 @@ import { useMemo, useState } from 'react';
 import { fmtPrice } from '../core/format';
 import type { Kline, VenueId } from '../core/types';
 import { ADAPTERS } from '../exchanges';
-import { fitModel, garchVar, horizonVol, valueAtRisk, type GarchFit } from '../lab/garch';
+import { horizonVol } from '../lab/garch';
 import {
   blackScholes,
   deltaHedge,
-  fitHmm2,
-  hmmDuration,
-  hmmFilter,
-  hurstRS,
   kalmanTrend,
   kellyBet,
   moments4,
-  ouRolling,
   trendT,
   VAR_METHODS,
-  varBacktest,
   varCornishFisher,
-  varForecasts,
-  varGarch,
   varHistorical,
-  varianceRatio,
-  varNormal,
-  volEstimate,
-  VOL_KINDS,
   type OptType,
-  type VarMethod,
-  type VarResult,
 } from '../lab/quant';
 import { useSettings } from '../store/settings';
 import { NumberInput, Select, Spacer, Toolbar, type PanelProps } from '../ui/controls';
@@ -53,13 +39,17 @@ import { AreaChart, Bars, LineChart } from './charts';
 import { USES } from './botUses';
 import { UseInBot } from './UseInBot';
 import { alignedReturns, BOARD_VENUES, useBoardVenue, useKlines } from './data';
+import { useCompute } from './compute';
+import { dataKey, type CoinVar, type RegRow, type TaskResult } from './heavy';
 
 const venueOpts = () => [{ value: 'auto' as const, label: 'Primary venue' }, ...BOARD_VENUES.map((v) => ({ value: v, label: ADAPTERS[v].name }))];
+const NONE_VAR: CoinVar[] = [];
+const NONE_BT: TaskResult<'varBacktest'> = [];
+const NONE_REG: RegRow[] = [];
 const pct = (x: number, d = 1) => (Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : '—');
 const num = (x: number, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : '—');
 const usd = (x: number) => (Number.isFinite(x) ? `${x < 0 ? '−' : ''}$${Math.abs(Math.round(x)).toLocaleString('en-US')}` : '—');
 const coinsOf = (s: string) => s.toUpperCase().split(/[\s,]+/).filter(Boolean).slice(0, 12);
-const logR = (k: Kline[]) => k.slice(1).map((x, i) => Math.log(x.close / k[i].close));
 const HOURS_A_YEAR = 24 * 365;
 const DEFAULT_COINS = 'BTC ETH SOL BNB XRP DOGE AVAX LINK';
 
@@ -99,48 +89,14 @@ export interface VarConfig {
 }
 export const VAR_DEFAULTS: VarConfig = { venue: 'auto', coins: DEFAULT_COINS, conf: 0.99, horizon: 24, position: 10000 };
 
-interface CoinVar {
-  coin: string;
-  r: number[];
-  fit: GarchFit | null;
-  by: Record<VarMethod, VarResult>;
-}
-
-function coinVar(coin: string, k: Kline[], conf: number, h: number): CoinVar | null {
-  if (k.length < 300) return null;
-  const r = logR(k);
-  const fit = fitModel(r);
-  const a = agg(r, h);
-  const m1 = moments4(r);
-  const ma = moments4(a);
-  let ew = NaN;
-  for (const x of r) ew = Number.isFinite(ew) ? 0.94 * ew + 0.06 * x * x : x * x;
-  const z = varNormal(0, 1, conf);
-  const by = {
-    historical: varHistorical(a, conf),
-    normal: varNormal(m1.m * h, m1.s * Math.sqrt(h), conf),
-    cornishFisher: varCornishFisher(ma.m, ma.s, ma.skew, ma.kurt, conf),
-    ewma: { var: z.var * Math.sqrt(ew * h), es: z.es * Math.sqrt(ew * h) },
-    garch: { var: NaN, es: NaN },
-  } as Record<VarMethod, VarResult>;
-  if (fit) {
-    const hv = garchVar(fit, r);
-    const last = r[r.length - 1] - fit.mu;
-    const h1 = fit.omega + (fit.alpha + (last < 0 ? fit.gamma : 0)) * last * last + fit.beta * hv[hv.length - 1];
-    const one = varGarch(fit, h1, conf);
-    const v = valueAtRisk(fit, h1, h, conf);
-    by.garch = { var: v, es: one.var > 0 ? (v * one.es) / one.var : v };
-  }
-  return { coin, r, fit, by };
-}
-
 export function VarPanel({ config: c, setConfig }: PanelProps<VarConfig>) {
   const venue = useVenue(c.venue);
   const base = useSettings((s) => s.base);
   const coins = coinsOf(c.coins);
   const k = useKlines(venue, coins, '1h', 1000);
   const [sel, setSel] = useState<string | null>(null);
-  const rows = useMemo(() => coins.map((b) => (k.data[b] ? coinVar(b, k.data[b], c.conf, c.horizon) : null)).filter((x): x is CoinVar => !!x), [k.data, c.conf, c.horizon, coins.join()]);
+  const rowsJob = useCompute('varRows', { coins, data: k.data, conf: c.conf, horizon: c.horizon }, `${dataKey(k.data, coins)}:${c.conf}:${c.horizon}`, coins.join());
+  const rows = rowsJob.value ?? NONE_VAR;
   const pick = rows.find((r) => r.coin === sel) ?? rows.find((r) => r.coin === base) ?? rows[0];
   // the equal-weight portfolio of the coins
   const port = useMemo(() => {
@@ -152,15 +108,7 @@ export function VarPanel({ config: c, setConfig }: PanelProps<VarConfig>) {
     return { hist: varHistorical(a, c.conf), cf: varCornishFisher(mm.m, mm.s, mm.skew, mm.kurt, c.conf), n: al.bases.length };
   }, [rows, c.horizon, c.conf]);
   // each method's one-hour forecasts over the last 500 hours, against what happened
-  const bt = useMemo(() => {
-    if (!pick) return [];
-    const n = pick.r.length;
-    const from = Math.max(300, n - 500);
-    return VAR_METHODS.map((m) => {
-      const f = varForecasts(pick.r, from, c.conf, m.id, 300, pick.fit);
-      return { m, f, t: varBacktest(pick.r.slice(from), Array.from(f.slice(from)), c.conf) };
-    });
-  }, [pick, c.conf]);
+  const bt = useCompute('varBacktest', pick ? { r: pick.r, fit: pick.fit, conf: c.conf } : null, `${pick?.coin}:${pick?.r.length}:${pick?.r[pick.r.length - 1]}:${c.conf}`, `${pick?.coin}:${c.conf}`).value ?? NONE_BT;
   const best = bt.filter((x) => x.t).sort((a, b) => b.t!.ccP - a.t!.ccP)[0];
   const hz = c.horizon === 1 ? '1 hour' : c.horizon === 24 ? '1 day' : '1 week';
   const sumStand = port ? rows.reduce((s, r) => s + r.by.historical.var, 0) / rows.length : NaN;
@@ -174,11 +122,11 @@ export function VarPanel({ config: c, setConfig }: PanelProps<VarConfig>) {
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
         <UseInBot from="VAR" options={USES.var()} />
         <Spacer />
-        <span className="pro-status">{k.loading ? 'loading…' : `1000 hourly bars · loss over ${hz} not exceeded ${(c.conf * 100).toFixed(1).replace('.0', '')} % of the time`}</span>
+        <span className="pro-status">{k.loading || rowsJob.busy ? 'loading…' : `1000 hourly bars · loss over ${hz} not exceeded ${(c.conf * 100).toFixed(1).replace('.0', '')} % of the time`}</span>
       </Toolbar>
       <div className="pro-scroll">
         {!rows.length ? (
-          <div className="pro-empty">{k.loading ? 'Loading candles…' : 'Not enough candles for these coins (300+ needed).'}</div>
+          <div className="pro-empty">{k.loading || rowsJob.busy ? 'Loading candles…' : 'Not enough candles for these coins (300+ needed).'}</div>
         ) : (
           <>
             <div className="pro-section">
@@ -305,12 +253,8 @@ export function DeltaHedgePanel({ config: c, setConfig }: PanelProps<DeltaConfig
   const base = useSettings((s) => s.base);
   const k = useKlines(venue, [base], '1h', 1000);
   const bars = k.data[base] ?? [];
-  const model = useMemo(() => {
-    if (bars.length < 400) return null;
-    const r = logR(bars);
-    const fit = fitModel(r);
-    return { r, fit, h: fit ? garchVar(fit, r) : null };
-  }, [bars.length, bars[bars.length - 1]?.time]);
+  const modelJob = useCompute('garchModel', bars.length >= 400 ? { bars } : null, `${base}:${bars.length}:${bars[bars.length - 1]?.time}`, base);
+  const model = modelJob.value ?? null;
   const L = Math.max(24, Math.round(c.days * 24));
   const legs: OptType[] = c.kind === 'straddle' ? ['call', 'put'] : [c.kind];
   const volAt = (t: number): number => {
@@ -372,7 +316,7 @@ export function DeltaHedgePanel({ config: c, setConfig }: PanelProps<DeltaConfig
       </Toolbar>
       <div className="pro-scroll">
         {!model || !Number.isFinite(S) ? (
-          <div className="pro-empty">{k.loading ? 'Loading candles…' : 'Not enough candles (400+ needed).'}</div>
+          <div className="pro-empty">{k.loading || modelJob.busy ? 'Loading candles…' : 'Not enough candles (400+ needed).'}</div>
         ) : (
           <>
             <div className="pro-section">
@@ -498,53 +442,8 @@ export function VolTargetPanel({ config: c, setConfig }: PanelProps<VolTargetCon
   const k = useKlines(venue, [base], '1h', 1000);
   const bars = k.data[base] ?? [];
   const tgt = c.target / 100;
-  const res = useMemo(() => {
-    if (bars.length < 400) return null;
-    const r = logR(bars);
-    const fit = fitModel(r);
-    const h = fit ? garchVar(fit, r) : null;
-    const ann = (x: number) => x * Math.sqrt(HOURS_A_YEAR);
-    const est = VOL_KINDS.map((v) => ({ id: v.id, name: v.name, cite: v.cite, day: ann(volEstimate(bars, 24, v.id)[bars.length - 1]), week: ann(volEstimate(bars, 168, v.id)[bars.length - 1]) }));
-    let ew = NaN;
-    for (const x of r) ew = Number.isFinite(ew) ? 0.94 * ew + 0.06 * x * x : x * x;
-    let gNow = NaN;
-    let gDay = NaN;
-    if (fit && h) {
-      const last = r[r.length - 1] - fit.mu;
-      const h1 = fit.omega + (fit.alpha + (last < 0 ? fit.gamma : 0)) * last * last + fit.beta * h[h.length - 1];
-      gNow = ann(Math.sqrt(h1));
-      gDay = (horizonVol(fit, h1, 24) / Math.sqrt(24)) * Math.sqrt(HOURS_A_YEAR);
-    }
-    // buy-and-hold against the same position volatility-targeted on the GARCH forecast (rebalanced when the weight drifts 25 %)
-    const bh = [1];
-    const vt = [1];
-    const wts: number[] = [];
-    let w = NaN;
-    for (let t = 1; t < r.length; t++) {
-      const sig = h ? Math.sqrt(h[t]) : NaN;
-      const want = sig > 0 ? Math.min(c.cap, tgt / Math.sqrt(HOURS_A_YEAR) / sig) : 1;
-      let cost = 0;
-      if (!Number.isFinite(w) || Math.abs(want - w) > 0.25 * w) {
-        cost = Math.abs(want - (Number.isFinite(w) ? w : 0)) * 0.0005;
-        w = want;
-      }
-      wts.push(w);
-      bh.push(bh[bh.length - 1] * Math.exp(r[t]));
-      vt.push(vt[vt.length - 1] * (1 + w * (Math.exp(r[t]) - 1) - cost));
-    }
-    const stats = (eq: number[]) => {
-      const rr = eq.slice(1).map((x, i) => Math.log(x / eq[i]));
-      const m = moments4(rr);
-      let peak = eq[0];
-      let dd = 0;
-      for (const x of eq) {
-        peak = Math.max(peak, x);
-        dd = Math.max(dd, 1 - x / peak);
-      }
-      return { ret: Math.exp(m.m * HOURS_A_YEAR) - 1, vol: m.s * Math.sqrt(HOURS_A_YEAR), sharpe: m.s > 0 ? (m.m / m.s) * Math.sqrt(HOURS_A_YEAR) : NaN, dd };
-    };
-    return { est, ewma: ann(Math.sqrt(ew)), gNow, gDay, fit, bh, vt, sBh: stats(bh), sVt: stats(vt), avgW: wts.reduce((a, b) => a + b, 0) / Math.max(1, wts.length) };
-  }, [bars.length, bars[bars.length - 1]?.time, c.target, c.cap]);
+  const resJob = useCompute('volTarget', bars.length >= 400 ? { bars, tgt, cap: c.cap } : null, `${base}:${bars.length}:${bars[bars.length - 1]?.time}:${tgt}:${c.cap}`, base);
+  const res = resJob.value ?? null;
   const size = (vol: number) => {
     const lev = vol > 0 ? Math.min(c.cap, tgt / vol) : NaN;
     return { lev, notional: lev * c.account };
@@ -562,7 +461,7 @@ export function VolTargetPanel({ config: c, setConfig }: PanelProps<VolTargetCon
       </Toolbar>
       <div className="pro-scroll">
         {!res ? (
-          <div className="pro-empty">{k.loading ? 'Loading candles…' : 'Not enough candles (400+ needed).'}</div>
+          <div className="pro-empty">{k.loading || resJob.busy ? 'Loading candles…' : 'Not enough candles (400+ needed).'}</div>
         ) : (
           <>
             <div className="pro-section">VOLATILITY, ANNUALISED — AND THE POSITION THAT RUNS AT {c.target}% A YEAR ON {usd(c.account)}</div>
@@ -818,46 +717,6 @@ export interface RegimeConfig {
 }
 export const REGM_DEFAULTS: RegimeConfig = { venue: 'auto', coins: DEFAULT_COINS };
 
-interface RegRow {
-  coin: string;
-  hurst: number;
-  vr: number;
-  vz: number;
-  hl: number;
-  s: number;
-  pTurb: number;
-  calm: number;
-  turb: number;
-  stay: [number, number];
-  probs: number[];
-}
-
-function regRow(coin: string, k: Kline[]): RegRow | null {
-  if (k.length < 400) return null;
-  const r = logR(k);
-  const n = r.length;
-  const v = varianceRatio(r, 24, n - 30);
-  const o = ouRolling(
-    k.map((x) => Math.log(x.close)),
-    168,
-  );
-  const m = fitHmm2(r);
-  const p = m ? Array.from(hmmFilter(m, r)) : [];
-  return {
-    coin,
-    hurst: hurstRS(r),
-    vr: v.vr[n - 1],
-    vz: v.z[n - 1],
-    hl: o.halfLife[k.length - 1],
-    s: o.s[k.length - 1],
-    pTurb: p[p.length - 1] ?? NaN,
-    calm: m ? m.sd[0] * Math.sqrt(HOURS_A_YEAR) : NaN,
-    turb: m ? m.sd[1] * Math.sqrt(HOURS_A_YEAR) : NaN,
-    stay: m ? hmmDuration(m) : [NaN, NaN],
-    probs: p,
-  };
-}
-
 const character = (r: RegRow) => (r.vr > 1.1 && r.vz > 1.5 ? 'trending' : r.vr < 0.9 && r.vz < -1.5 ? 'mean-reverting' : 'random walk');
 
 export function RegimePanel({ config: c, setConfig }: PanelProps<RegimeConfig>) {
@@ -866,7 +725,8 @@ export function RegimePanel({ config: c, setConfig }: PanelProps<RegimeConfig>) 
   const coins = coinsOf(c.coins);
   const k = useKlines(venue, coins, '1h', 1000);
   const [sel, setSel] = useState<string | null>(null);
-  const rows = useMemo(() => coins.map((b) => (k.data[b] ? regRow(b, k.data[b]) : null)).filter((x): x is RegRow => !!x), [k.data, coins.join()]);
+  const rowsJob = useCompute('regimeRows', { coins, data: k.data }, dataKey(k.data, coins), coins.join());
+  const rows = rowsJob.value ?? NONE_REG;
   const pick = rows.find((r) => r.coin === sel) ?? rows.find((r) => r.coin === base) ?? rows[0];
   return (
     <div className="pro-panel">
@@ -875,11 +735,11 @@ export function RegimePanel({ config: c, setConfig }: PanelProps<RegimeConfig>) 
         <Select value={c.venue} options={venueOpts()} onChange={(venue) => setConfig({ venue })} />
         <UseInBot from="REGM" options={USES.regimes()} />
         <Spacer />
-        <span className="pro-status">{k.loading ? 'fitting…' : '1000 hourly bars · Lo & MacKinlay (1988); Hurst (1951); Hamilton (1989)'}</span>
+        <span className="pro-status">{k.loading || rowsJob.busy ? 'fitting…' : '1000 hourly bars · Lo & MacKinlay (1988); Hurst (1951); Hamilton (1989)'}</span>
       </Toolbar>
       <div className="pro-scroll">
         {!rows.length ? (
-          <div className="pro-empty">{k.loading ? 'Loading candles and fitting the models…' : 'Not enough candles (400+ needed).'}</div>
+          <div className="pro-empty">{k.loading || rowsJob.busy ? 'Loading candles and fitting the models…' : 'Not enough candles (400+ needed).'}</div>
         ) : (
           <>
             <div className="pro-section">WHAT KIND OF MARKET — PERSISTENCE, MEAN REVERSION AND THE HIDDEN REGIME</div>
