@@ -1,5 +1,5 @@
 // Novus Ordo desktop shell (Electron main process).
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, safeStorage, screen, shell } from 'electron';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
@@ -147,6 +147,46 @@ const safeMode = process.argv.includes('--safe-mode') || process.env.NOVUS_SAFE_
 if (safeMode) {
   app.disableHardwareAcceleration();
   log('warn', 'safe mode: hardware acceleration disabled');
+}
+
+/**
+ * The graphics card keeps failing: you are asked (once a session) whether to restart without
+ * it. Nothing is closed until you say so — an automatic restart closed every window, on every
+ * screen, in the middle of whatever you were doing.
+ */
+let askedSafe = false;
+function askSafeRestart(why) {
+  if (safeMode || askedSafe) return;
+  askedSafe = true;
+  log('warn', `graphics trouble: ${why} — asking about a restart without the graphics card`);
+  void dialog
+    .showMessageBox({
+      type: 'warning',
+      title: 'Novus Ordo — graphics trouble',
+      message: 'The graphics card keeps failing to draw Novus Ordo’s windows.',
+      detail: 'Restart now without the graphics card (safe mode)? Everything is saved, the swarm and the bots carry on where they were, and open trades are not touched. Safe mode can be left again from the Help menu.\n\nNot now: Novus Ordo keeps going as it is, and starts in safe mode next time.',
+      buttons: ['Restart now in safe mode', 'Not now'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    })
+    .then((r) => r.response === 0 && relaunchSafe(why))
+    .catch(() => undefined);
+}
+
+/** after the graphics process came back: every window is drawn again, and one still blank is checked */
+function repaintAll() {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue;
+    try {
+      w.webContents.invalidate();
+    } catch {
+      /* gone */
+    }
+  }
+  setTimeout(() => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.isVisible() && !w.isMinimized()) void checkBlank(w);
+  }, 6000);
 }
 
 /** Restart once in safe mode (portable builds relaunch the portable exe itself). */
@@ -411,6 +451,23 @@ function panelWindow(query, bounds) {
   });
   if (process.env.VITE_DEV_SERVER_URL) void w.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${new URLSearchParams(query)}`);
   else void w.loadFile(join(root, 'dist', 'index.html'), { query }).catch((e) => log('error', 'panel window failed to load', e));
+  // hung for 10 seconds (a graphics hiccup, a stuck page): its page is loaded again by itself
+  let hung = null;
+  w.webContents.on('unresponsive', () => {
+    clearTimeout(hung);
+    hung = setTimeout(() => {
+      if (w.isDestroyed()) return;
+      log('warn', `a popped-out window (${query.title}) hung for 10 s: reloading it`);
+      try {
+        w.webContents.forcefullyCrashRenderer();
+      } catch {
+        /* already gone */
+      }
+      w.webContents.reload();
+    }, 10_000);
+  });
+  w.webContents.on('responsive', () => clearTimeout(hung));
+  w.on('closed', () => clearTimeout(hung));
   return w;
 }
 
@@ -438,8 +495,14 @@ async function checkBlank(w, strikes = 0) {
     for (let i = 0; i < small.length; i += 4) seen.add((small[i] << 16) | (small[i + 1] << 8) | small[i + 2]);
     log('info', `render check: ${seen.size} colours`);
     if (seen.size > 2) return;
-    if (strikes > 0) relaunchSafe('window stayed blank');
-    else setTimeout(() => void checkBlank(w, 1), 5000);
+    if (strikes === 0) return void setTimeout(() => void checkBlank(w, 1), 5000);
+    // still blank: its page is loaded again (never the whole app: that closed every window under you);
+    // blank even after that: you are asked whether to restart without the graphics card
+    if (strikes === 1 && !w.isDestroyed()) {
+      log('warn', 'a window stayed blank: reloading its page');
+      w.webContents.reload();
+      setTimeout(() => void checkBlank(w, 2), 8000);
+    } else askSafeRestart('a window stayed blank after reloading');
   } catch (e) {
     log('warn', 'render check failed', e);
   }
@@ -1581,9 +1644,19 @@ app.whenReady().then(async () => {
       screens.retile();
       screensChanged();
     });
-  // tiles sit above the taskbar while Novus Ordo is the app in use, and step back when you switch away
-  app.on('browser-window-focus', () => screens.cover(true));
-  app.on('browser-window-blur', () => setTimeout(() => !BrowserWindow.getFocusedWindow() && screens.cover(false), 80));
+  // a way out that always works while Novus Ordo is alive, whatever its windows look like (blank, on every screen):
+  // Ctrl + Alt + Shift + Q closes it at once (open trades stay on the exchange with their stops)
+  try {
+    globalShortcut.register('CommandOrControl+Alt+Shift+Q', () => {
+      log('warn', 'closed at once with Ctrl + Alt + Shift + Q');
+      markStopped(userDataDir);
+      app.exit(0);
+    });
+  } catch (e) {
+    log('warn', 'could not set up Ctrl + Alt + Shift + Q', e);
+  }
+  // tiles are never "always on top" (see Screens.cover): any left so by an earlier version are put back
+  setTimeout(() => screens?.cover(true), 3000);
   app.on('before-quit', () => {
     if (screens) screens.quitting = true;
     // closing never hangs: a copy stuck half-closed would hold on to the database and block the next start
@@ -1716,11 +1789,9 @@ app.on('child-process-gone', (_e, d) => {
     } catch (e) {
       log('error', 'could not write safe-mode flag', e);
     }
-    if (gpuCrashes >= 2) relaunchSafe(`GPU process ${d.reason} again`);
-    else
-      setTimeout(() => {
-        if (win && !win.isDestroyed()) void checkBlank(win);
-      }, 6000);
+    // the graphics process restarts by itself: every window is drawn again; the app is not restarted under you
+    setTimeout(repaintAll, 1500);
+    if (gpuCrashes >= 2) askSafeRestart(`GPU process ${d.reason} ${gpuCrashes} times`);
   }
 });
 

@@ -63,7 +63,10 @@ try {
   const st = await page.evaluate(() => window.novus.screens.state());
   const tiles = st.windows.filter((w) => w.kind === 'panel');
   const area = tiles.reduce((a, w) => a + w.bounds.width * w.bounds.height, 0);
-  expect(n === 2 && tiles.every((w) => w.tiled) && area === d.bounds.width * d.bounds.height, `two pop-outs arranged side by side, covering the whole screen (${tiles.map((w) => `${w.bounds.width}×${w.bounds.height}`).join(' + ')} on ${d.bounds.width}×${d.bounds.height})`);
+  const wa = d.workArea;
+  expect(n === 2 && tiles.every((w) => w.tiled) && area === wa.width * wa.height, `two pop-outs arranged side by side, filling the screen above the taskbar (${tiles.map((w) => `${w.bounds.width}×${w.bounds.height}`).join(' + ')} on ${wa.width}×${wa.height})`);
+  const onTop = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.isAlwaysOnTop()).length);
+  expect(onTop === 0, 'no window is ever "always on top" (a frozen one must never cover Task Manager)');
   // tiled: the bar tucks away — nothing but the panel
   const barHidden = await hm.w.evaluate(() => {
     const r = document.querySelector('.popout-root');
@@ -91,7 +94,7 @@ try {
   await hm.w.evaluate(() => window.novus.screens.tile('self', 'tl'));
   await hm.w.waitForTimeout(1200);
   const q = (await page.evaluate(() => window.novus.screens.state())).windows.find((w) => w.id === hm.id);
-  expect(q.tiled === 'tl' && q.bounds.width === Math.floor(d.bounds.width / 2) && q.bounds.height === Math.floor(d.bounds.height / 2), `tiled to the top-left quarter (${q.bounds.width}×${q.bounds.height})`);
+  expect(q.tiled === 'tl' && q.bounds.width === Math.floor(wa.width / 2) && q.bounds.height === Math.floor(wa.height / 2), `tiled to the top-left quarter (${q.bounds.width}×${q.bounds.height})`);
   await hm.w.screenshot({ path: `${OUT}tiles-heatmap-quarter.png` });
   await dom.w.evaluate(() => window.novus.screens.tile('self', 'full'));
   await dom.w.waitForTimeout(1500);
@@ -103,6 +106,37 @@ try {
   const barBack = await hm.w.evaluate(() => document.querySelector('.popout-bar').getBoundingClientRect().top >= 0 && getComputedStyle(document.querySelector('.popout-bar')).opacity === '1');
   expect(barBack, 'the mouse at the top edge brings the bar back (tile, full screen, minimise, close)');
   await hm.w.screenshot({ path: `${OUT}tiles-heatmap-bar.png` });
+  // the graphics process crashes with the windows open (what blanked every screen): the app carries on
+  console.error('• the graphics process crashes with every window open');
+  const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  const pidBefore = app.process().pid;
+  await app.evaluate(({ BrowserWindow }) => {
+    const g = new BrowserWindow({ show: false });
+    void g.loadURL('chrome://gpucrash').catch(() => undefined);
+    setTimeout(() => !g.isDestroyed() && g.destroy(), 3000);
+  });
+  await hm.w.waitForTimeout(12_000);
+  const after = await app.evaluate(({ BrowserWindow, globalShortcut }) => ({ n: BrowserWindow.getAllWindows().length, visible: BrowserWindow.getAllWindows().filter((w) => w.isVisible()).length, top: BrowserWindow.getAllWindows().filter((w) => w.isAlwaysOnTop()).length, escape: globalShortcut.isRegistered('CommandOrControl+Alt+Shift+Q') }));
+  const alive = (() => {
+    try {
+      process.kill(pidBefore, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  expect(alive && after.n === before && after.visible >= 3 && after.top === 0, `the app was not closed or restarted: ${after.n} windows before and after, ${after.visible} showing, none on top`);
+  // and they draw again: the heat map still fills its window
+  const lit = await hm.w.evaluate(() => {
+    const c = [...document.querySelectorAll('.popout-body canvas')].sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    const px = c.getContext('2d').getImageData(Math.floor(c.width * 0.3), Math.floor(c.height * 0.2), 1, Math.floor(c.height * 0.6)).data;
+    let n = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > 60) n++;
+    return n;
+  });
+  expect(lit > 5, `the windows are drawn again after it (lit pixels down a column of the heat map: ${lit})`);
+  expect(after.escape, 'Ctrl + Alt + Shift + Q is ready to close Novus Ordo at once, whatever its windows look like');
+  await hm.w.screenshot({ path: `${OUT}tiles-after-gpu-crash.png` });
 } finally {
   await app.close().catch(() => undefined);
 }

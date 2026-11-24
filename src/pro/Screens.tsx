@@ -168,7 +168,7 @@ const TILES: { cell: TileCell; name: string; box: [number, number, number, numbe
   { cell: 'r3', name: 'Right third', box: [66.7, 0, 33.3, 100] },
 ];
 
-/** tile this window: a half, a quarter or a third of the whole screen (no banner, over the taskbar), full screen, or all pop-outs at once */
+/** tile this window: a half, a quarter or a third of the screen above the taskbar (no banner), full screen, or all pop-outs at once */
 function TileMenu({ tiled, full }: { tiled: string | null; full: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -215,7 +215,7 @@ function TileMenu({ tiled, full }: { tiled: string | null; full: boolean }) {
           >
             ▦ Arrange all pop-outs on this screen
           </button>
-          <div className="muted tile-note">Tiles cover the taskbar while Novus Ordo is in use. Drag a tile by its bar to make it an ordinary window again.</div>
+          <div className="muted tile-note">Tiles fill the screen above the taskbar. For tiles edge to edge with no taskbar, turn on Windows’ “Automatically hide the taskbar” (right-click the taskbar → Taskbar settings): tiles then use the whole screen. Drag a tile by its bar to make it an ordinary window again. If the windows ever go blank or stop answering, Ctrl + Alt + Shift + Q closes Novus Ordo at once.</div>
         </div>
       )}
     </div>

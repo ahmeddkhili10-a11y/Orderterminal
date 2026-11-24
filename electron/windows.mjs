@@ -45,6 +45,9 @@ export function placeOn(d, mode) {
  * A tile of a screen: halves, quarters and thirds of its WHOLE area (the taskbar's too — a tiled
  * window covers it while Novus Ordo is in use), with no gap between neighbours.
  */
+/** where tiles go on a screen: its usable area, above the taskbar (all of it when the taskbar hides itself) */
+export const areaOf = (d) => d.workArea ?? d.bounds;
+
 export const CELLS = ['left', 'right', 'top', 'bottom', 'tl', 'tr', 'bl', 'br', 'l3', 'm3', 'r3'];
 export function cellRect(b, cell) {
   const hw = Math.floor(b.width / 2);
@@ -202,7 +205,7 @@ export class Screens {
       return true;
     }
     const d = displayOf(this.o.screen.getAllDisplays(), w.getBounds());
-    this.place(w, cellRect(d.bounds, cell));
+    this.place(w, cellRect(areaOf(d), cell));
     this.tiled.set(w.id, { cell, displayId: d.id });
     w.show();
     w.focus();
@@ -217,7 +220,7 @@ export class Screens {
     const d = this.o.screen.getAllDisplays().find((x) => x.id === displayId);
     if (!d) throw new Error('no such screen');
     const ws = [...this.popouts.values()].map((p) => p.win).filter((w) => !w.isDestroyed() && displayOf([d, ...this.o.screen.getAllDisplays().filter((x) => x.id !== d.id)], w.getBounds()).id === d.id);
-    const rects = gridRects(d.bounds, ws.length);
+    const rects = gridRects(areaOf(d), ws.length);
     ws.forEach((w, i) => {
       this.place(w, rects[i]);
       this.tiled.set(w.id, { cell: `grid${i}`, rect: rects[i], displayId: d.id });
@@ -243,12 +246,16 @@ export class Screens {
    * of the screen is not cut off by it); when you switch to another app they step back.
    */
   cover(on) {
-    this.covering = on;
-    for (const [id] of this.tiled) {
-      const w = this.o.BrowserWindow.getAllWindows().find((x) => x.id === id);
-      if (w && !w.isDestroyed()) w.setAlwaysOnTop(on, 'screen-saver');
-    }
+    // Tiles used to be put "always on top" (above the taskbar) while Novus Ordo was in use. If the
+    // app then froze — a graphics crash with windows on several screens — frozen, blank windows
+    // stayed above everything, Task Manager included, and the only way out was to switch the
+    // computer off. Tiles now fill the screen above the taskbar and are never on top; with
+    // Windows' "Automatically hide the taskbar" on, that is the whole screen.
+    this.covering = false;
+    if (on === false) return;
+    for (const w of this.o.BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.isAlwaysOnTop?.()) w.setAlwaysOnTop(false);
   }
+
 
   /** a screen changed size (or was unplugged): tiles are laid out again on it */
   retile() {
@@ -261,7 +268,7 @@ export class Screens {
         this.untile(w);
         continue;
       }
-      if (!String(t.cell).startsWith('grid')) this.place(w, cellRect(d.bounds, t.cell));
+      if (!String(t.cell).startsWith('grid')) this.place(w, cellRect(areaOf(d), t.cell));
     }
     const grids = new Set([...this.tiled.values()].filter((t) => String(t.cell).startsWith('grid')).map((t) => t.displayId));
     for (const id of grids) if (ds.some((d) => d.id === id)) this.arrange(id);

@@ -221,7 +221,7 @@ function AwaySection({ chatReady, onNote }: { chatReady: boolean; onNote: (ok: b
       </div>
       {!c.secretId && (
         <div className="tg-delivery down" data-delivery="no-bot">
-          ⚠ <b>No Telegram bot for these messages yet</b> — choose your bot at the top of this panel (and press Detect chat once). Until then nothing is sent while you are away.
+          ⚠ <b>No Telegram bot for these messages yet</b> — choose your bot at the top of this panel and link its chat (step 2). Until then nothing is sent while you are away.
         </div>
       )}
       <DeliveryLine d={st.delivery} />

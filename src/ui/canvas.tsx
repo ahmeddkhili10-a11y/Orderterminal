@@ -24,6 +24,9 @@ export interface PointerState {
 export const canvasStats: { mounted: number; firstFrameAt: number[]; frames: number; drawMs: number } = { mounted: 0, firstFrameAt: [], frames: 0, drawMs: 0 };
 if (typeof window !== 'undefined') (window as unknown as { __canvasStats: typeof canvasStats }).__canvasStats = canvasStats;
 
+/** the most pixels one canvas may hold (see resize) */
+export const CANVAS_PIXELS = 8_300_000;
+
 /**
  * Highest backing-store scale. Safe mode (software rendering) draws at 1x:
  * a 2x canvas has four times the pixels to fill on the CPU.
@@ -86,9 +89,11 @@ export function useCanvas(draw: (d: DrawContext) => void, fps = 30) {
     };
     const resize = () => {
       const rect = canvas.parentElement!.getBoundingClientRect();
-      const nd = Math.min(maxDpr, window.devicePixelRatio || 1);
       const nw = Math.max(1, Math.floor(rect.width));
       const nh = Math.max(1, Math.floor(rect.height));
+      // at most about 8 million pixels a canvas: a full-screen chart on a big monitor at 2× was ~33 million
+      // (130 MB of graphics memory each), and a few tiled windows could exhaust a laptop's graphics card
+      const nd = Math.max(1, Math.min(maxDpr, window.devicePixelRatio || 1, Math.sqrt(CANVAS_PIXELS / (nw * nh))));
       if (nw === w && nh === h && nd === dpr) return;
       dpr = nd;
       w = nw;
