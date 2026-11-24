@@ -31,6 +31,7 @@ import { Retuner } from './care/retune.mjs';
 import { Remote } from './care/remote.mjs';
 import { crashText, lastErrors, markRunning, markRestart, markStopped, wakeText } from './care/crash.mjs';
 import { endStuck, onScreen, runningPid, waitForAck, writeAck } from './handover.mjs';
+import { handleOf, startTopmostWatch } from './topmostWatch.mjs';
 import { buildSpec } from '../src/lab/flow.ts';
 import { testedStats } from '../src/lab/live.ts';
 import { costsForTests, measureCosts } from './care/costs.mjs';
@@ -349,6 +350,7 @@ function createWindow() {
   wc.on('unresponsive', () => {
     log('warn', 'window unresponsive');
     screenState = 'frozen';
+    screens?.safety(30_000);
   });
   wc.on('responsive', () => {
     log('info', 'window responsive again');
@@ -454,6 +456,7 @@ function panelWindow(query, bounds) {
   // hung for 10 seconds (a graphics hiccup, a stuck page): its page is loaded again by itself
   let hung = null;
   w.webContents.on('unresponsive', () => {
+    screens?.safety(30_000);
     clearTimeout(hung);
     hung = setTimeout(() => {
       if (w.isDestroyed()) return;
@@ -1635,7 +1638,9 @@ app.whenReady().then(async () => {
   registerIpc();
   // the window first, everything heavy after it
   createWindow();
-  screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow, changed: () => screensChanged() });
+  // tiles above the taskbar are watched from outside: if Novus Ordo ever stops answering, they are taken down for it
+  const topWatch = startTopmostWatch(log);
+  screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow, changed: () => screensChanged(), onTopmost: (ws) => topWatch.setHandles(ws.map(handleOf).filter(Boolean)) });
   const screensChanged = () => {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('screens:changed', screens.state());
   };
@@ -1655,8 +1660,9 @@ app.whenReady().then(async () => {
   } catch (e) {
     log('warn', 'could not set up Ctrl + Alt + Shift + Q', e);
   }
-  // tiles are never "always on top" (see Screens.cover): any left so by an earlier version are put back
-  setTimeout(() => screens?.cover(true), 3000);
+  // tiles sit above the taskbar while Novus Ordo is the app in use, and step back when you switch away
+  app.on('browser-window-focus', () => screens?.cover(true));
+  app.on('browser-window-blur', () => setTimeout(() => !BrowserWindow.getFocusedWindow() && screens?.cover(false), 80));
   app.on('before-quit', () => {
     if (screens) screens.quitting = true;
     // closing never hangs: a copy stuck half-closed would hold on to the database and block the next start
@@ -1778,6 +1784,8 @@ app.whenReady().then(async () => {
 let gpuCrashes = 0;
 app.on('child-process-gone', (_e, d) => {
   log('error', `${d.type} process gone: ${d.reason} (exit ${d.exitCode})`);
+  // the windows may go blank for a moment: none of them stays above the taskbar meanwhile
+  if (d.type === 'GPU' && d.reason !== 'clean-exit') screens?.safety(60_000);
   if (d.reason !== 'clean-exit' && d.reason !== 'killed') care?.error(`proc:${d.type}`, `A part of Novus Ordo stopped (${d.type}: ${d.reason}). ${d.type === 'GPU' ? 'It carried on; from the next start it draws without the graphics card (safe mode — Help menu to change).' : 'It carries on.'}`);
   if (d.type === 'GPU' && d.reason !== 'clean-exit' && d.reason !== 'killed' && !safeMode) {
     // the graphics process restarts by itself and the window usually carries on: no restart of the whole app

@@ -45,8 +45,8 @@ export function placeOn(d, mode) {
  * A tile of a screen: halves, quarters and thirds of its WHOLE area (the taskbar's too — a tiled
  * window covers it while Novus Ordo is in use), with no gap between neighbours.
  */
-/** where tiles go on a screen: its usable area, above the taskbar (all of it when the taskbar hides itself) */
-export const areaOf = (d) => d.workArea ?? d.bounds;
+/** where tiles go on a screen: all of it, the taskbar's strip too (tiles sit above the taskbar while Novus Ordo is in use) */
+export const areaOf = (d) => d.bounds;
 
 export const CELLS = ['left', 'right', 'top', 'bottom', 'tl', 'tr', 'bl', 'br', 'l3', 'm3', 'r3'];
 export function cellRect(b, cell) {
@@ -55,6 +55,8 @@ export function cellRect(b, cell) {
   const tw = Math.floor(b.width / 3);
   const R = (x, y, width, height) => ({ x: b.x + x, y: b.y + y, width, height });
   switch (cell) {
+    case 'all':
+      return R(0, 0, b.width, b.height);
     case 'left':
       return R(0, 0, hw, b.height);
     case 'right':
@@ -107,6 +109,7 @@ export class Screens {
    * @param o {{ screen, BrowserWindow, file: string, mainWindow: () => any, newWindow: (query: Record<string,string>, bounds) => any, log?: (level, msg) => void }}
    */
   constructor(o) {
+    o.now ??= Date.now;
     this.o = o;
     this.popouts = new Map(); // window id → { key, panel, title, win }
     /** tiled windows: window id → { cell or grid rectangle, display } (they cover the taskbar while Novus Ordo is in use) */
@@ -161,6 +164,11 @@ export class Screens {
     for (const ev of ['moved', 'resized']) win.on(ev, () => this.save());
     // dragged or resized by hand: no longer a tile (it stops covering the taskbar)
     for (const ev of ['will-move', 'will-resize']) win.on(ev, () => !this.placing && this.untile(win));
+    // Maximise is the whole screen, taskbar too: Windows' own maximise stops at the taskbar
+    win.on('maximize', () => {
+      if (this.placing || win.isDestroyed()) return;
+      setTimeout(() => !win.isDestroyed() && this.tile(win.id, 'all'), 0);
+    });
     for (const ev of ['enter-full-screen', 'leave-full-screen']) win.on(ev, () => this.changed());
     this.save();
     return win.id;
@@ -246,15 +254,25 @@ export class Screens {
    * of the screen is not cut off by it); when you switch to another app they step back.
    */
   cover(on) {
-    // Tiles used to be put "always on top" (above the taskbar) while Novus Ordo was in use. If the
-    // app then froze — a graphics crash with windows on several screens — frozen, blank windows
-    // stayed above everything, Task Manager included, and the only way out was to switch the
-    // computer off. Tiles now fill the screen above the taskbar and are never on top; with
-    // Windows' "Automatically hide the taskbar" on, that is the whole screen.
-    this.covering = false;
-    if (on === false) return;
-    for (const w of this.o.BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.isAlwaysOnTop?.()) w.setAlwaysOnTop(false);
+    // above the taskbar only while Novus Ordo is the app in use (and never while it is in trouble:
+    // after a graphics crash or a hang it waits — see safety() — so frozen windows cannot cover the screen)
+    const want = !!on && this.o.now() >= (this.suspendedUntil ?? 0);
+    const all = this.o.BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+    for (const w of all) {
+      const top = want && this.tiled.has(w.id);
+      // only a change is sent to Windows: clicking between Novus Ordo windows no longer restacks them every time
+      if (!!w.isAlwaysOnTop?.() !== top) w.setAlwaysOnTop(top, top ? 'screen-saver' : undefined);
+    }
+    this.covering = want;
+    this.o.onTopmost?.(all.filter((w) => w.isAlwaysOnTop?.()));
   }
+
+  /** something is wrong (a window hung, the graphics crashed): nothing stays above the taskbar for `ms` */
+  safety(ms = 60_000) {
+    this.suspendedUntil = this.o.now() + ms;
+    this.cover(false);
+  }
+
 
 
   /** a screen changed size (or was unplugged): tiles are laid out again on it */

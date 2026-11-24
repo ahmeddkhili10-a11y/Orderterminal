@@ -63,10 +63,10 @@ try {
   const st = await page.evaluate(() => window.novus.screens.state());
   const tiles = st.windows.filter((w) => w.kind === 'panel');
   const area = tiles.reduce((a, w) => a + w.bounds.width * w.bounds.height, 0);
-  const wa = d.workArea;
-  expect(n === 2 && tiles.every((w) => w.tiled) && area === wa.width * wa.height, `two pop-outs arranged side by side, filling the screen above the taskbar (${tiles.map((w) => `${w.bounds.width}×${w.bounds.height}`).join(' + ')} on ${wa.width}×${wa.height})`);
+  const wa = d.bounds;
+  expect(n === 2 && tiles.every((w) => w.tiled) && area === wa.width * wa.height, `two pop-outs arranged side by side, covering the whole screen, taskbar too (${tiles.map((w) => `${w.bounds.width}×${w.bounds.height}`).join(' + ')} on ${wa.width}×${wa.height})`);
   const onTop = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.isAlwaysOnTop()).length);
-  expect(onTop === 0, 'no window is ever "always on top" (a frozen one must never cover Task Manager)');
+  expect(onTop === 2, `the two tiles sit above the taskbar while Novus Ordo is in use (${onTop} on top)`);
   // tiled: the bar tucks away — nothing but the panel
   const barHidden = await hm.w.evaluate(() => {
     const r = document.querySelector('.popout-root');
@@ -106,6 +106,12 @@ try {
   const barBack = await hm.w.evaluate(() => document.querySelector('.popout-bar').getBoundingClientRect().top >= 0 && getComputedStyle(document.querySelector('.popout-bar')).opacity === '1');
   expect(barBack, 'the mouse at the top edge brings the bar back (tile, full screen, minimise, close)');
   await hm.w.screenshot({ path: `${OUT}tiles-heatmap-bar.png` });
+  // Maximise on a popped-out window: the whole screen, over the taskbar (Windows' own maximise stops at the taskbar)
+  // (the test screen has no window manager to maximise with: the signal Windows sends is sent directly)
+  await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.getAllWindows().find((w) => w.id === id).emit('maximize'), hm.id);
+  await hm.w.waitForTimeout(1200);
+  const mx = (await page.evaluate(() => window.novus.screens.state())).windows.find((w) => w.id === hm.id);
+  expect(mx.tiled === 'all' && Math.abs(mx.bounds.width - d.bounds.width) <= 2 && Math.abs(mx.bounds.height - d.bounds.height) <= 2, `Maximise fills the whole screen, taskbar too (${mx.bounds.width}×${mx.bounds.height}, ${mx.tiled})`);
   // the graphics process crashes with the windows open (what blanked every screen): the app carries on
   console.error('• the graphics process crashes with every window open');
   const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
@@ -125,7 +131,7 @@ try {
       return false;
     }
   })();
-  expect(alive && after.n === before && after.visible >= 3 && after.top === 0, `the app was not closed or restarted: ${after.n} windows before and after, ${after.visible} showing, none on top`);
+  expect(alive && after.n === before && after.visible >= 3 && after.top === 0, `the app was not closed or restarted: ${after.n} windows before and after, ${after.visible} showing, none on top (a crash takes every tile off the top)`);
   // and they draw again: the heat map still fills its window
   const lit = await hm.w.evaluate(() => {
     const c = [...document.querySelectorAll('.popout-body canvas')].sort((a, b) => b.width * b.height - a.width * a.height)[0];
