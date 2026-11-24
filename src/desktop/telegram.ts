@@ -73,6 +73,9 @@ export function startTelegramService() {
     webPoller = null;
     try {
       if (desktop) {
+        // the bot chosen here is the one the background engine sends with (check-ins, warnings, offers),
+        // whether or not the bot answers /price — before, it only learnt of it with that box ticked
+        await desktop.care?.bot?.(s.telegramSecretId || null).catch(() => undefined);
         await desktop.telegram.commands(on ? s.telegramSecretId : null);
         if (on) statusTimer = setInterval(() => void desktop!.telegram.setStatus(statusSnapshot()), 5000);
       } else if (on) {

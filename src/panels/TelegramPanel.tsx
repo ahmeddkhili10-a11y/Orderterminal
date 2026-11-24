@@ -219,6 +219,11 @@ function AwaySection({ chatReady, onNote }: { chatReady: boolean; onNote: (ok: b
         {!chatReady ? 'Link a Telegram chat above first.' : `Next check-in ${new Date(st.nextDaily).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}${st.sentAt ? ` · last message ${new Date(st.sentAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
         {st.problems.length > 0 && <div className="down">Needs a look now: {st.problems.map((p) => p.text).join(' · ')}</div>}
       </div>
+      {!c.secretId && (
+        <div className="tg-delivery down" data-delivery="no-bot">
+          ⚠ <b>No Telegram bot for these messages yet</b> — choose your bot at the top of this panel (and press Detect chat once). Until then nothing is sent while you are away.
+        </div>
+      )}
       <DeliveryLine d={st.delivery} />
     </div>
   );

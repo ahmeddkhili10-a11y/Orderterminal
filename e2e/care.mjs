@@ -138,6 +138,15 @@ try {
   expect(st0.cfg.dailyHour === 7 && st0.cfg.weekday === 5 && st0.running, 'the settings are kept by the background engine, which is running since the unlock');
   const noBot = await page.evaluate(() => window.novus.care.sendNow('daily').then(() => 'sent', (e) => e.message));
   expect(/Telegram bot/.test(noBot), `with no Telegram bot nothing is sent, and it says why (${noBot})`);
+  // a Telegram bot with its chat, "Answer /price" left off (the default): the background engine still sends with it
+  const botId = await page.evaluate(() => window.novus.vault.save({ label: 'My bot', kind: 'telegram', exchange: null, fields: { token: '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ', chatId: '42' } }));
+  const picked = await page.evaluate(() => window.novus.care.bot(null));
+  expect(!!botId && picked.cfg.secretId === botId, 'a Telegram bot with a chat is used for the background messages without ticking "Answer /price"');
+  // this computer cannot reach Telegram: the failure is recorded with its reason, for the panel and the status line
+  for (let i = 0; i < 2; i++) await page.evaluate(() => window.novus.care.sendNow('daily').catch(() => null));
+  const st1 = await page.evaluate(() => window.novus.care.status());
+  expect(st1.delivery?.failing === true && st1.delivery.lastWhy.length > 10 && st1.delivery.lastFailWhat.length > 3, `failed messages are recorded with the reason (“${st1.delivery?.lastFailWhat}”: ${st1.delivery?.lastWhy})`);
+  await page.waitForSelector('[data-delivery="failing"]', { timeout: 40_000 });
   await page.locator('[data-care]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${OUT}desktop-telegram-away.png` });
   const wanted = await page.evaluate(async () => {

@@ -205,6 +205,7 @@ contextBridge.exposeInMainWorld('novus', {
   care: {
     status: () => call('care:status'),
     config: (patch) => call('care:config', patch),
+    bot: (id) => call('care:bot', id),
     sendNow: (kind) => call('care:sendNow', kind),
     health: () => call('care:health'),
     costs: () => call('care:costs'),

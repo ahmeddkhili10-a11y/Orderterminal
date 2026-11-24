@@ -338,6 +338,45 @@ function createWindow() {
   });
 }
 
+/**
+ * The Telegram bot the background engine sends with (check-ins, warnings, health, offers): the
+ * one you chose on the Telegram panel — and if that one is gone or has no chat, a Telegram key
+ * that has one. It used to be set only when "Answer /price, /status, /help" was ticked, so with
+ * that box off (the default) the background engine had no bot and sent nothing at all.
+ */
+function careBot(preferred) {
+  const ok = (id) => {
+    if (!id) return false;
+    try {
+      const s = vault.reveal(id);
+      return s.kind === 'telegram' && !!s.fields.token && !!s.fields.chatId;
+    } catch {
+      return false;
+    }
+  };
+  if (ok(preferred)) return preferred;
+  if (ok(care?.cfg.secretId)) return care.cfg.secretId;
+  const any = vault.list().find((r) => r.kind === 'telegram' && ok(r.id));
+  return any?.id ?? preferred ?? care?.cfg.secretId ?? '';
+}
+
+/** point the background engine at the right bot (said in the log when it changes) */
+function syncCareBot(preferred) {
+  if (!care || !vault) return;
+  const id = careBot(preferred);
+  if (id && id !== care.cfg.secretId) {
+    care.setConfig({ secretId: id });
+    log('info', `background messages: sent with the Telegram bot "${(() => {
+      try {
+        return vault.reveal(id).label;
+      } catch {
+        return id;
+      }
+    })()}"`);
+  }
+  ensurePoller();
+}
+
 /** A window for one popped-out panel: the terminal's safety settings, its own page. */
 function panelWindow(query, bounds) {
   const w = new BrowserWindow({
@@ -538,7 +577,9 @@ function registerIpc() {
     }
     attempts.success();
     unlocked = true;
-    // the daily message, the warnings and the weekly report start once the ledger key has been entered
+    // the daily message, the warnings and the weekly report start once the ledger key has been entered —
+    // with a bot that exists and has a chat (a key replaced or removed since is not left pointing nowhere)
+    syncCareBot();
     care?.start();
     ensurePoller();
     void afterUnlockCare();
@@ -1262,9 +1303,14 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
   }, 5 * 60_000).unref?.();
   handle('telegram:commands', (_e, id) => {
     basicsOn = Boolean(id);
-    if (id && care && !care.cfg.secretId) care.setConfig({ secretId: id });
-    ensurePoller();
+    if (id) syncCareBot(id);
+    else ensurePoller();
     return basicsOn;
+  });
+  // the bot chosen on the Telegram panel: the background engine sends with it too
+  handle('care:bot', (_e, id) => {
+    syncCareBot(id ? String(id) : null);
+    return care.status();
   });
   handle('telegram:setStatus', (_e, snap) => {
     tgStatus = snap;
@@ -1280,9 +1326,11 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
     return { on: db.get('autoStart') === true, supported: process.platform !== 'linux', packaged: app.isPackaged };
   });
   handle('care:config', (_e, patch) => {
-    const st = care.setConfig(patch ?? {});
-    ensurePoller();
-    return st;
+    const { secretId, ...rest } = patch ?? {};
+    const st = care.setConfig(rest);
+    if (secretId !== undefined) syncCareBot(secretId);
+    else ensurePoller();
+    return secretId !== undefined ? care.status() : st;
   });
   handle('care:sendNow', async (_e, kind) => {
     if (!care.cfg.secretId) throw new Error('choose the Telegram bot first (Telegram panel)');

@@ -871,6 +871,8 @@ export interface NovusApi {
   care: {
     status(): Promise<CareStatus>;
     config(patch: Partial<CareConfig>): Promise<CareStatus>;
+    /** the bot chosen on the Telegram panel: the background engine sends with it too */
+    bot?(id: string | null): Promise<CareStatus>;
     sendNow(kind: 'daily' | 'weekly'): Promise<boolean>;
     health(): Promise<StrategyHealth[]>;
     costs(): Promise<{ measured: Record<string, MeasuredCosts>; forTests: TestCosts }>;
