@@ -904,7 +904,22 @@ export interface CareConfig {
   /** after a restart, say on Telegram that Novus Ordo waits for the ledger key */
   wakeNotice: boolean;
 }
+/** did the Telegram messages arrive (electron/care/delivery.mjs) */
+export interface TgDelivery {
+  lastOkAt: number;
+  lastOkWhat: string;
+  lastFailAt: number;
+  lastFailWhat: string;
+  /** the last failure, in plain words */
+  lastWhy: string;
+  failsInRow: number;
+  /** two or more failures in a row since the last message that arrived */
+  failing: boolean;
+  recent: { t: number; ok: boolean; what: string; why?: string }[];
+}
+
 export interface CareStatus {
+  delivery?: TgDelivery | null;
   cfg: CareConfig;
   running: boolean;
   lastDaily: string;

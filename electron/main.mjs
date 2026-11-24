@@ -12,7 +12,14 @@ import { Db, isLocked, openWithRetry } from './db.mjs';
 import { connectPhantom } from './phantom.mjs';
 import { DepositVerifier, proofAmount, proofSol } from './depositProof.mjs';
 import { DEFAULT_RPC, recentActivity, SOL_MINT, tokenInfo, walletBalances } from '../src/shared/solana.ts';
-import { TelegramCommands, tgDetectChat, tgMe, tgSendKeyboard, tgSendLong, tgSendPhoto } from '../src/shared/telegram.ts';
+import { TelegramCommands, tgDetectChat, tgMe, tgSendKeyboard as rawKeyboard, tgSendLong as rawLong, tgSendPhoto as rawPhoto } from '../src/shared/telegram.ts';
+import { Delivery } from './care/delivery.mjs';
+
+/** every Telegram message, recorded: did it arrive? (care/delivery.mjs) */
+const delivery = new Delivery();
+const tgSendLong = (token, chat, html) => delivery.track(html, () => rawLong(token, chat, html));
+const tgSendPhoto = (token, chat, png, caption) => delivery.track(caption, () => rawPhoto(token, chat, png, caption));
+const tgSendKeyboard = (token, chat, html, keyboard) => delivery.track(html, () => rawKeyboard(token, chat, html, keyboard));
 import { parseSearch, searchUrl } from '../src/shared/xapi.ts';
 import { AttemptGate, isLedgerRecord, ledgerMatches, makeLedger, PUBLIC_CHANNELS } from '../src/shared/ledger.ts';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1248,7 +1255,7 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
     if (!care?.running || care.cfg.offers === false || !commands || !lab) return;
     try {
       const s = tg(care.cfg.secretId);
-      for (const r of approvals.check()) await tgSendKeyboard(s.fields.token, s.fields.chatId, r.html, r.keyboard);
+      for (const r of approvals.check()) await (r.keyboard?.length ? tgSendKeyboard(s.fields.token, s.fields.chatId, r.html, r.keyboard) : tgSendLong(s.fields.token, s.fields.chatId, r.html));
     } catch (err) {
       log('warn', `team offer: ${err?.message ?? err}`);
     }
@@ -1419,19 +1426,21 @@ app.whenReady().then(async () => {
     return;
   }
   journal = new TradeJournal(db.db);
+  delivery.attach(db);
   care = new Care({
     db,
     journal,
     send: (id, html) => {
       const s = vault.reveal(id);
-      if (s.kind !== 'telegram' || !s.fields.token) throw new Error('choose a Telegram bot key');
-      if (!s.fields.chatId) throw new Error('the Telegram bot has no chat yet — detect it on the Telegram panel');
+      if (s.kind !== 'telegram' || !s.fields.token) return delivery.track(html, () => Promise.reject(new Error('choose a Telegram bot key')));
+      if (!s.fields.chatId) return delivery.track(html, () => Promise.reject(new Error('No chat id yet — the Telegram bot has no chat; detect it on the Telegram panel')));
       return tgSendLong(s.fields.token, s.fields.chatId, html);
     },
     swarm: () => cswarm?.state() ?? null,
     lab: () => (lab ? { farm: lab.farmState(), deployed: lab.deployedList.map((d) => ({ id: d.id, name: d.spec.name, stats: d.stats, deployedAt: d.deployedAt, on: d.on })), labBook: cswarm?.labBook ?? {} } : null),
     bots: () => (bots ? bots.list().map((b) => ({ name: b.name, mode: b.mode, running: b.running, feed: b.feed })) : []),
     screen: () => screenState,
+    delivery: () => delivery.state(),
     assumedCosts: () => ({ feeBps: lab?.cfg.feeBps ?? 4.5, slipBps: lab?.cfg.slipBps ?? 2 }),
     log,
     // probation and the automatic pause, after each 30-minute health check
@@ -1467,6 +1476,8 @@ app.whenReady().then(async () => {
     waiting: () => lab?.farmState().teamWait ?? [],
     // proven on fresh data and over 200 % a year: offered one by one
     stars: () => lab?.farmState().stars ?? [],
+    // too wide for your account: told about once, never offered
+    held: () => lab?.farmState().starsHeld ?? [],
   });
   remote = new Remote({ db, swarm: () => cswarm, bots: () => bots, wanted: (on) => care?.setWanted('swarm', on) });
   // when this computer last saw Novus Ordo running (for the crash report), and — if you asked for it —

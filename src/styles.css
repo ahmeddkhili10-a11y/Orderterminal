@@ -6913,3 +6913,9 @@ tr.bb2-together td { border-top: 1px solid var(--border); background: color-mix(
   margin: 6px 0;
   line-height: 1.45;
 }
+/* the Telegram panel: did the messages arrive */
+.tg-delivery {
+  font-size: 11px;
+  margin-top: 6px;
+  line-height: 1.45;
+}

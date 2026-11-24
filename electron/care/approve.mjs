@@ -133,6 +133,21 @@ export function starText(s, { title, swarm } = {}) {
   ]);
 }
 
+/** stars held back because their stops are too wide for the account: what they are and what they need */
+export function heldText(held, { all = false } = {}) {
+  const f = held.find((h) => h.fit)?.fit;
+  const acct = f ? accountWords(f.usd, f.zar) : 'your';
+  const n = held.length;
+  return card([
+    head('⭐', all ? 'No star fits your account yet' : `${n} new star${n === 1 ? '' : 's'} held back`, `${all ? `${n} proven strateg${n === 1 ? 'y is' : 'ies are'}` : n === 1 ? 'It is' : 'They are'} over 200 % a year, but ${n === 1 ? 'its' : 'their'} stops are too wide for your <b>${e(acct)}</b> account on Hyperliquid — most of ${n === 1 ? 'its' : 'their'} trades would be under the $10 smallest order.`),
+    table(
+      held.slice(0, 8).map((h) => [`${(h.name ?? '').split(' · ')[0].slice(0, 20)}`, h.fit ? `needs ${needWords(h.fit)}` : '—']),
+      { header: ['Strategy', 'Account'] },
+    ),
+    note(`Not offered with Deploy buttons, so nothing is deployed that could not trade. If you deposit more, set the account in the Edge Finder (💰) and ${n === 1 ? 'it is' : 'they are'} offered then.`),
+  ]);
+}
+
 const memberOf = (m) => ({ id: m.id, name: m.name, pace: m.pace ?? paceIdOf(m.style), flow: m.flow, tfH: m.tfH, coins: m.coins, oos: m.oos, dsr: m.dsr, stage: m.stage });
 
 export class Approvals {
@@ -151,6 +166,8 @@ export class Approvals {
     this.waitFn = o.waiting ?? (() => []);
     /** proven strategies over 200 % a year: each offered on its own */
     this.starsFn = o.stars ?? (() => []);
+    /** stars too wide for the account: told about, never offered */
+    this.heldFn = o.held ?? (() => []);
     this.now = o.now ?? Date.now;
   }
 
@@ -211,9 +228,19 @@ export class Approvals {
     return (this.starsFn() ?? []).filter((s) => !(sent[s.id] && now - sent[s.id] < 7 * DAY) && !deployed.has(s.name)).slice(0, 3 - today);
   }
 
+  /** stars held back since the last message about them: told at most once a day, each star once */
+  heldDue() {
+    const told = this.db.get('approve:heldTold') ?? {};
+    const now = this.now();
+    if (Object.values(told).some((t) => now - t < DAY)) return [];
+    return (this.heldFn() ?? []).filter((h) => !told[h.id]);
+  }
+
   /** /stars: every star, each with its buttons — or what is missing */
   starPool() {
     const stars = this.starsFn() ?? [];
+    const held = this.heldFn() ?? [];
+    if (!stars.length && held.length) return [{ html: heldText(held, { all: true }) }];
     if (!stars.length)
       return [
         {
@@ -243,6 +270,13 @@ export class Approvals {
       sent[t.key] = this.now();
     }
     if (out.length) this.db.set('approve:sent', sent);
+    const held = this.heldDue();
+    if (held.length) {
+      out.push({ html: heldText(held) });
+      const told = this.db.get('approve:heldTold') ?? {};
+      for (const h of held) told[h.id] = this.now();
+      this.db.set('approve:heldTold', told);
+    }
     return out;
   }
 

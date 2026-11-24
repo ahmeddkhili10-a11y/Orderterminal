@@ -377,6 +377,8 @@ export interface FarmState {
   kept?: Survivor[];
   /** proven on fresh data and over 200 % a year (at 1× or sized up): each is offered on the phone to deploy on its own */
   stars?: Survivor[];
+  /** proven and over 200 % a year, but too wide for the account (Hyperliquid's $10 smallest order): not offered on the phone */
+  starsHeld?: { id: string; name: string; style: StyleId; ret: number; fit: AccountFit | null }[];
   /** the five best still standing at each pace: proven on fresh data first, then significant, then by score */
   tops?: PaceBoard[];
   /** bots that trained well but are copies of a kind already held or already ruled out: not tested again */
@@ -2566,6 +2568,11 @@ export class Farm {
       teamWait: this.teamWait(),
       kept: this.survivors.filter((x) => this.pinned.has(x.id)).map((x) => lite(x, this.fitOf(x))),
       stars: this.stars().map((x) => lite(x, this.fitOf(x))),
+      starsHeld: this.survivors
+        .filter((x) => isStar(x) && !this.fitsAccount(x))
+        .sort((a, b) => starRet(b) - starRet(a))
+        .slice(0, 10)
+        .map((x) => ({ id: x.id, name: x.name, style: x.style, ret: starRet(x), fit: this.fitOf(x) })),
     };
   }
 

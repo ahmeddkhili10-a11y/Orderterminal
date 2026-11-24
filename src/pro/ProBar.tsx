@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtPct, fmtPrice } from '../core/format';
 import { useLab, startLabLink } from '../lab/store';
 import { hub } from '../market/hub';
+import { desktop, type TgDelivery } from '../desktop/bridge';
 import { useSettings } from '../store/settings';
 import { useHubVersion, useTicker } from '../ui/controls';
 import { isProTheme, PRO_THEME_IDS, THEMES, type ThemeId } from '../ui/theme';
@@ -217,11 +218,38 @@ export function StatusLine() {
       <span>
         LAB {lab?.running ? `RESEARCHING ${lab.progress ? Math.round((lab.progress.done / Math.max(1, lab.progress.total)) * 100) : 0}%` : `${dep} DEPLOYED`}
       </span>
+      <TelegramWarning />
       <span className="grow" />
       <span>
         {now.toISOString().slice(11, 19)} UTC · {now.toLocaleTimeString([], { hour12: false })} LOCAL
       </span>
     </div>
+  );
+}
+
+/** Telegram not getting the messages: said here, since the phone cannot say it */
+function TelegramWarning() {
+  const [d, setD] = useState<TgDelivery | null>(null);
+  useEffect(() => {
+    if (!desktop?.care) return;
+    let live = true;
+    const load = () =>
+      void desktop!.care
+        .status()
+        .then((s) => live && setD(s.delivery ?? null))
+        .catch(() => undefined);
+    load();
+    const t = setInterval(load, 60_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
+  if (!d?.failing) return null;
+  return (
+    <span className="down" title={`${d.lastWhy}\nLast tried: ${d.lastFailWhat}`} data-tg-warning>
+      ⚠ TELEGRAM NOT DELIVERING — see the Telegram panel
+    </span>
   );
 }
 

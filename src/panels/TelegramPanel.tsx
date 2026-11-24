@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { desktop, type CareConfig, type CareStatus, type SecretRecord } from '../desktop/bridge';
+import { desktop, type CareConfig, type CareStatus, type TgDelivery, type SecretRecord } from '../desktop/bridge';
 import { telegram } from '../desktop/telegram';
 import { vault } from '../desktop/vault';
 import { openConnections } from '../app/connect';
@@ -119,6 +119,34 @@ export function TelegramPanel(_: PanelProps<TelegramConfig>) {
   );
 }
 
+const when = (t: number) => new Date(t).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** did the messages arrive: the last one delivered, or why they are not getting through */
+function DeliveryLine({ d }: { d: TgDelivery | null | undefined }) {
+  if (!d) return null;
+  if (d.failing)
+    return (
+      <div className="tg-delivery down" data-delivery="failing">
+        ⚠ <b>Telegram is not getting the messages</b> — the last {d.failsInRow} failed. {d.lastWhy}
+        <div className="muted">
+          Last tried {when(d.lastFailAt)}: “{d.lastFailWhat}”{d.lastOkAt ? ` · last delivered ${when(d.lastOkAt)}` : ''}
+        </div>
+      </div>
+    );
+  if (d.lastOkAt)
+    return (
+      <div className="tg-delivery up" data-delivery="ok">
+        ✓ Last message delivered {when(d.lastOkAt)}: “{d.lastOkWhat}”
+        {d.lastFailAt > d.lastOkAt && <div className="muted">One failed after it ({d.lastWhy}) — the next will be tried as usual.</div>}
+      </div>
+    );
+  return (
+    <div className="tg-delivery muted" data-delivery="none">
+      No message sent yet{d.lastFailAt ? ` — the last try failed: ${d.lastWhy}` : ''}. “Send one now” above checks the line.
+    </div>
+  );
+}
+
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const HOURS = Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, '0')}:00` }));
 
@@ -191,6 +219,7 @@ function AwaySection({ chatReady, onNote }: { chatReady: boolean; onNote: (ok: b
         {!chatReady ? 'Link a Telegram chat above first.' : `Next check-in ${new Date(st.nextDaily).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}${st.sentAt ? ` · last message ${new Date(st.sentAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
         {st.problems.length > 0 && <div className="down">Needs a look now: {st.problems.map((p) => p.text).join(' · ')}</div>}
       </div>
+      <DeliveryLine d={st.delivery} />
     </div>
   );
 }

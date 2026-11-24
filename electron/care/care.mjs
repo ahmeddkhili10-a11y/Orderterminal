@@ -43,6 +43,8 @@ export class Care {
     this.assumed = o.assumedCosts ?? (() => ({ feeBps: 4.5, slipBps: 2 }));
     this.now = o.now ?? Date.now;
     this.log = o.log ?? (() => {});
+    /** did the Telegram messages arrive (care/delivery.mjs) */
+    this.deliveryFn = o.delivery ?? null;
     this.cfg = { ...CARE_DEFAULTS, ...(this.db.get('care:cfg') ?? {}) };
     this.st = { lastDaily: '', lastWeekly: '', warned: {}, health: {}, ...(this.db.get('care:state') ?? {}) };
     this.wanted = { swarm: false, ...(this.db.get('care:wanted') ?? {}) };
@@ -333,7 +335,7 @@ export class Care {
   }
 
   status() {
-    return { cfg: this.cfg, running: !!this.running, lastDaily: this.st.lastDaily, lastWeekly: this.st.lastWeekly, sentAt: this.st.sentAt ?? null, nextDaily: this.nextDaily(this.now()), problems: (this.lastProblems ?? []).map((p) => ({ key: p.key, text: p.text.replace(/<[^>]+>/g, '') })) };
+    return { delivery: this.deliveryFn?.() ?? null, cfg: this.cfg, running: !!this.running, lastDaily: this.st.lastDaily, lastWeekly: this.st.lastWeekly, sentAt: this.st.sentAt ?? null, nextDaily: this.nextDaily(this.now()), problems: (this.lastProblems ?? []).map((p) => ({ key: p.key, text: p.text.replace(/<[^>]+>/g, '') })) };
   }
 }
 

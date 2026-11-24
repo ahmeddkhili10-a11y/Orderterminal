@@ -46,9 +46,63 @@ export function escapeHtml(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+const TG_TAGS = new Set(['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'span', 'tg-spoiler', 'a', 'tg-emoji', 'code', 'pre', 'blockquote']);
+const STYLE = new Set(['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'span', 'tg-spoiler']);
+
+/**
+ * Why Telegram would refuse this HTML, or null when it is fine. Telegram drops the whole
+ * message on any of these (Bot API, "Formatting options"): a tag it does not know, a stray
+ * < or &, a tag left open or closed twice, a table (pre) or code inside anything but itself,
+ * anything inside a table or code, a quote inside a quote, or a quote or link holding a
+ * table, code, link or quote.
+ */
+export function tgHtmlProblem(html: string): string | null {
+  const stack: string[] = [];
+  const re = /<(\/?)([a-z-]+)([^<>]*)>|<|>|&(?!(?:lt|gt|amp|quot|#\d+|#x[0-9a-f]+);)/gi;
+  for (const m of html.matchAll(re)) {
+    if (m[0] === '<' || m[0] === '>') return `a stray "${m[0]}" (write &lt; or &gt;)`;
+    if (m[0] === '&') return 'a stray "&" (write &amp;)';
+    const name = m[2].toLowerCase();
+    if (!TG_TAGS.has(name)) return `<${name}> is not a tag Telegram knows`;
+    if (m[1]) {
+      if (stack[stack.length - 1] !== name) return `</${name}> does not close the last tag opened (${stack[stack.length - 1] ?? 'none'})`;
+      stack.pop();
+      continue;
+    }
+    const parent = stack[stack.length - 1];
+    if (parent === 'code' || (parent === 'pre' && name !== 'code')) return `<${name}> inside <${parent}>`;
+    if ((name === 'pre' || name === 'code') && stack.some((t) => STYLE.has(t) || t === 'blockquote' || t === 'a')) return `<${name}> inside <${stack.find((t) => STYLE.has(t) || t === 'blockquote' || t === 'a')}>`;
+    if (name === 'blockquote' && stack.some((t) => t === 'blockquote' || t === 'a')) return '<blockquote> inside a quote or a link';
+    if (name === 'a' && stack.some((t) => t === 'a' || t === 'blockquote')) return '<a> inside a link or a quote';
+    stack.push(name);
+  }
+  return stack.length ? `<${stack[stack.length - 1]}> is never closed` : null;
+}
+
+/** the message as plain text (for when Telegram will not take its formatting): tags out, characters back */
+export function tgPlain(html: string): string {
+  return html
+    .replace(/<[^<>]+>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(Number(d)))
+    .replace(/&amp;/g, '&');
+}
+
+/** Telegram refused the formatting (as opposed to a wrong token, chat or network) */
+export const isParseError = (e: unknown) => /can't parse|parse entities|unsupported start tag|unexpected end tag|can't find end|entity/i.test(String((e as Error)?.message ?? e));
+
 export async function tgSend(token: string, chatId: string, html: string, fetchImpl?: FetchLike) {
   if (!chatId) throw new Error('No chat id yet — use “Detect chat” first');
-  await tgApi(token, 'sendMessage', { chat_id: chatId, text: html, parse_mode: 'HTML', disable_web_page_preview: true }, fetchImpl);
+  // formatting Telegram would refuse is sent as plain text: the words arrive either way
+  if (tgHtmlProblem(html)) return void (await tgApi(token, 'sendMessage', { chat_id: chatId, text: tgPlain(html), disable_web_page_preview: true }, fetchImpl));
+  try {
+    await tgApi(token, 'sendMessage', { chat_id: chatId, text: html, parse_mode: 'HTML', disable_web_page_preview: true }, fetchImpl);
+  } catch (e) {
+    if (!isParseError(e)) throw e;
+    await tgApi(token, 'sendMessage', { chat_id: chatId, text: tgPlain(html), disable_web_page_preview: true }, fetchImpl);
+  }
 }
 
 /** Telegram caps messages at 4096 characters: split on line breaks. */
@@ -93,14 +147,25 @@ export async function tgSendLong(token: string, chatId: string, html: string, fe
 export async function tgSendPhoto(token: string, chatId: string, png: Uint8Array, captionHtml: string, fetchImpl: FetchLike = fetch) {
   checkToken(token);
   if (!chatId) throw new Error('No chat id yet — use “Detect chat” first');
-  const form = new FormData();
-  form.append('chat_id', chatId);
-  form.append('caption', captionHtml.length > 1024 ? captionHtml.replace(/<[^>]+>/g, '').slice(0, 1020) + '…' : captionHtml);
-  if (captionHtml.length <= 1024) form.append('parse_mode', 'HTML');
-  form.append('photo', new Blob([png as BlobPart], { type: 'image/png' }), 'chart.png');
-  const res = await fetchImpl(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: form });
-  const j = await res.json();
-  if (!j.ok) throw new Error(j.description ?? 'Telegram sendPhoto failed');
+  const post = async (html: boolean) => {
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    const plain = tgPlain(captionHtml);
+    form.append('caption', html ? captionHtml : plain.length > 1024 ? `${plain.slice(0, 1020)}…` : plain);
+    if (html) form.append('parse_mode', 'HTML');
+    form.append('photo', new Blob([png as BlobPart], { type: 'image/png' }), 'chart.png');
+    const res = await fetchImpl(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: form });
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.description ?? 'Telegram sendPhoto failed');
+  };
+  const html = captionHtml.length <= 1024 && !tgHtmlProblem(captionHtml);
+  try {
+    await post(html);
+  } catch (e) {
+    // the caption's formatting refused: the picture goes with plain words
+    if (!html || !isParseError(e)) throw e;
+    await post(false);
+  }
 }
 
 export const HELP_TEXT = [
@@ -131,8 +196,16 @@ export type TgButton = { text: string; callback_data: string };
 /** a message with buttons under it; returns its message id */
 export async function tgSendKeyboard(token: string, chatId: string, html: string, keyboard: TgButton[][], fetchImpl?: FetchLike): Promise<number> {
   if (!chatId) throw new Error('No chat id yet — use “Detect chat” first');
-  const m = await tgApi<{ message_id: number }>(token, 'sendMessage', { chat_id: chatId, text: html.slice(0, 4000), parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } }, fetchImpl);
-  return m.message_id;
+  const send = (text: string, html: boolean) =>
+    tgApi<{ message_id: number }>(token, 'sendMessage', { chat_id: chatId, text, ...(html ? { parse_mode: 'HTML' } : {}), disable_web_page_preview: true, reply_markup: { inline_keyboard: keyboard } }, fetchImpl);
+  const part = splitHtml(html, 4000)[0] ?? '';
+  if (tgHtmlProblem(part)) return (await send(tgPlain(part), false)).message_id;
+  try {
+    return (await send(part, true)).message_id;
+  } catch (e) {
+    if (!isParseError(e)) throw e;
+    return (await send(tgPlain(part), false)).message_id;
+  }
 }
 
 /** what the poller does besides the read-only commands */
