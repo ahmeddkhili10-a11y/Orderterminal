@@ -1,5 +1,6 @@
 // Novus Ordo desktop shell (Electron main process).
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, powerMonitor, powerSaveBlocker, safeStorage, screen, shell } from 'electron';
+import { card as tgCard, head as tgHead, note as tgNote } from '../src/shared/tgcard.ts';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
@@ -417,6 +418,40 @@ function syncCareBot(preferred) {
     })()}"`);
   }
   ensurePoller();
+}
+
+/**
+ * Stay awake: while Novus Ordo is open the screen stays on and the computer does not sleep or
+ * lock itself for being idle — it is left running for hours (the swarm, the bots, the edge
+ * finder, the data). A plugged-in laptop can still sleep or switch its screen off and lock after
+ * a few idle hours, and everything stopped with it. Closing Novus Ordo (the X) gives the
+ * computer back its usual habits at once: Windows lets go of the request with the app.
+ * On by default; the ☀ button in the top bar and Ctrl + Alt + A switch it off and on.
+ */
+let awakeId = null;
+function stayAwake(on) {
+  if (on && awakeId === null) {
+    awakeId = powerSaveBlocker.start('prevent-display-sleep');
+    log('info', 'stay awake: on — the screen stays on and the computer does not sleep while Novus Ordo is open');
+  } else if (!on && awakeId !== null) {
+    powerSaveBlocker.stop(awakeId);
+    awakeId = null;
+    log('info', 'stay awake: off — the computer sleeps and locks as usual');
+  }
+  const now = awakeId !== null;
+  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('app:awake', now);
+  return now;
+}
+
+/** the computer went to sleep (or woke): said in the log, and on the phone once it is back */
+function sleptText(from, to) {
+  const h = (to - from) / 3_600_000;
+  const t = (x) => new Date(x).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return tgCard([
+    tgHead('💤', 'The computer was asleep', `${t(from)} → ${t(to)} · ${h >= 1 ? `${h.toFixed(1)} hours` : `${Math.round(h * 60)} minutes`}`),
+    'Novus Ordo was paused meanwhile: no trades taken, no data recorded, no strategies tested. It carries on now.',
+    tgNote(awakeId !== null ? 'Stay awake was on, so something else put it to sleep: the lid closed, the battery ran low, or a Windows update or setting.' : 'Stay awake was off (☀ in the top bar, or Ctrl + Alt + A, turns it on).'),
+  ]);
 }
 
 /** A window for one popped-out panel: the terminal's safety settings, its own page. */
@@ -1384,6 +1419,14 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
 
   // ---- while you are away: the daily message, warnings, the weekly report, strategy health, real costs ----
   handle('care:status', () => care.status());
+  // stay awake: on, off, or asked
+  handle('app:stayAwake', (_e, on) => {
+    if (typeof on === 'boolean') {
+      db.set('stayAwake', on);
+      return stayAwake(on);
+    }
+    return awakeId !== null;
+  });
   handle('app:autoStart', (_e, on) => {
     if (typeof on === 'boolean') {
       db.set('autoStart', on);
@@ -1621,6 +1664,20 @@ app.whenReady().then(async () => {
       { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen', accelerator: 'F11' }] },
       { role: 'windowMenu' },
       {
+        label: 'Power',
+        submenu: [
+          {
+            label: 'Keep the computer awake while Novus Ordo is open',
+            accelerator: 'CommandOrControl+Alt+A',
+            click: () => {
+              const on = awakeId === null;
+              db.set('stayAwake', on);
+              stayAwake(on);
+            },
+          },
+        ],
+      },
+      {
         label: 'Help',
         submenu: [
           { label: 'Open log folder', click: () => void shell.openPath(join(userDataDir, 'logs')) },
@@ -1638,6 +1695,21 @@ app.whenReady().then(async () => {
   registerIpc();
   // the window first, everything heavy after it
   createWindow();
+  stayAwake(db.get('stayAwake') !== false);
+  let sleptAt = 0;
+  powerMonitor.on('suspend', () => {
+    sleptAt = Date.now();
+    log('warn', `the computer is going to sleep${awakeId !== null ? ' (stay awake was on: the lid, the battery or Windows put it to sleep)' : ''}`);
+  });
+  powerMonitor.on('resume', () => {
+    const from = sleptAt;
+    sleptAt = 0;
+    log('info', `the computer woke up${from ? ` after ${((Date.now() - from) / 60_000).toFixed(0)} minutes asleep` : ''}`);
+    if (from && Date.now() - from > 5 * 60_000 && care?.running) void care.send(sleptText(from, Date.now()), 'slept');
+  });
+  powerMonitor.on('lock-screen', () => log('info', 'Windows locked the screen'));
+  powerMonitor.on('unlock-screen', () => log('info', 'Windows screen unlocked'));
+  powerMonitor.on('shutdown', () => log('warn', 'Windows is shutting down or restarting'));
   // tiles above the taskbar are watched from outside: if Novus Ordo ever stops answering, they are taken down for it
   const topWatch = startTopmostWatch(log);
   screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow, changed: () => screensChanged(), onTopmost: (ws) => topWatch.setHandles(ws.map(handleOf).filter(Boolean)) });
@@ -1899,6 +1971,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  // the computer gets its usual sleep back with the app closed (Windows lets go of it anyway)
+  if (awakeId !== null) powerSaveBlocker.stop(awakeId);
   // closed properly: no crash report next time
   if (primary) markStopped(userDataDir);
   lab?.shutdownFarm();

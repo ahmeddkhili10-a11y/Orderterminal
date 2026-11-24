@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright-core';
-import { seedDesktopLedger } from './unlock.mjs';
+import { seedDesktopLedger, unlock } from './unlock.mjs';
 
 const require = createRequire(import.meta.url);
 const exe = require('electron');
@@ -48,6 +48,22 @@ let pidC = null;
 try {
   const page = await app.firstWindow();
   await page.waitForSelector('.lock-key input, .topbar', { timeout: 60_000 });
+  // stay awake: on by default while open; the ☀ button switches it off and on (and it is remembered)
+  console.error('• stay awake');
+  await unlock(page);
+  await page.waitForSelector('.topbar', { timeout: 60_000 });
+  const awake0 = await page.evaluate(() => window.novus.app.stayAwake());
+  expect(awake0 === true, 'the screen stays on and the computer does not sleep while Novus Ordo is open (on by default)');
+  const btn = await page.locator('[data-awake]').count();
+  if (btn) {
+    await page.click('[data-awake]');
+    await page.waitForSelector('[data-awake="off"]', { timeout: 5000 });
+    const off = await page.evaluate(() => window.novus.app.stayAwake());
+    await page.click('[data-awake]');
+    await page.waitForSelector('[data-awake="on"]', { timeout: 5000 });
+    expect(off === false && (await page.evaluate(() => window.novus.app.stayAwake())) === true, 'the ☀ button in the top bar switches it off and on again');
+  } else expect(false, 'the ☀ button is in the top bar');
+  expect(/stay awake: on/.test(readLog()), 'the log says when it is on');
   // 1 — open and fine, but minimised
   console.error('• a second click while it is open (minimised)');
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());

@@ -13,6 +13,8 @@ const fsListeners = new Set();
 const sealListeners = new Set();
 ipcRenderer.on('app:sealed', (_e, reason) => sealListeners.forEach((fn) => fn(reason)));
 ipcRenderer.on('app:fullscreen', (_e, on) => fsListeners.forEach((fn) => fn(on)));
+const awakeListeners = new Set();
+ipcRenderer.on('app:awake', (_e, on) => awakeListeners.forEach((fn) => fn(on)));
 const amtListeners = { status: new Set(), event: new Set(), train: new Set() };
 for (const ch of ['status', 'event', 'train']) ipcRenderer.on(`amt:${ch}`, (_e, msg) => amtListeners[ch].forEach((fn) => fn(msg)));
 const listen = (set, fn) => {
@@ -45,6 +47,8 @@ contextBridge.exposeInMainWorld('novus', {
     status: () => call('app:status'),
     restart: () => call('app:restart'),
     autoStart: (on) => call('app:autoStart', on),
+    stayAwake: (on) => call('app:stayAwake', on),
+    onAwake: (fn) => listen(awakeListeners, fn),
     onSealed: (fn) => listen(sealListeners, fn) },
   net: { fetchJson: (url, init) => call('net:fetchJson', url, init) },
   solana: { rpc: (method, params, rpcSecretId) => call('solana:rpc', method, params, rpcSecretId) },

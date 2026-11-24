@@ -253,6 +253,27 @@ function AlgoKill() {
 }
 
 /** Full screen (taskbar hidden) on/off; F11 does the same. */
+/** ☀ stay awake: the screen stays on and the computer does not sleep while Novus Ordo is open (Ctrl + Alt + A) */
+function AwakeButton() {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!desktop?.app.stayAwake) return;
+    void desktop.app.stayAwake().then(setOn).catch(() => undefined);
+    return desktop.app.onAwake?.(setOn);
+  }, []);
+  if (on === null) return null;
+  return (
+    <button
+      className={`chip chrome-chip${on ? ' active' : ''}`}
+      data-awake={on ? 'on' : 'off'}
+      onClick={() => void desktop!.app.stayAwake!(!on).then(setOn)}
+      title={on ? 'Stay awake is ON: the screen stays on and the computer does not sleep or lock while Novus Ordo is open. Closing Novus Ordo gives the computer its usual sleep back. Click (or Ctrl + Alt + A) to switch it off.' : 'Stay awake is OFF: the computer may sleep or lock as usual — and Novus Ordo stops with it. Click (or Ctrl + Alt + A) to keep it awake.'}
+    >
+      {on ? '☀' : '☾'} <span className="lbl keep">{on ? 'Awake' : 'Sleep ok'}</span>
+    </button>
+  );
+}
+
 function FullscreenButton() {
   const [on, setOn] = useState(false);
   useEffect(() => {
@@ -388,6 +409,7 @@ export function TopBar({ onOpen, onFocusChart, onOpenPanel, alertCount, editing,
       <button className="chip seal primary-chip chrome-chip" onClick={() => void sealTerminal()} title="Lock the terminal — back to the ENTER LEDGER KEY page. Market data and bots keep running.">
         <LockIcon /> <span className="lbl keep">Lock</span>
       </button>
+      <AwakeButton />
       <ScreensMenu />
       <FullscreenButton />
       <button className="chip" onClick={() => onOpen('settings')} title="Settings">
