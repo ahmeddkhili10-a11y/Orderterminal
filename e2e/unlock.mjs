@@ -31,3 +31,18 @@ export async function unlock(page, key = TEST_KEY) {
     await page.waitForSelector('.lock', { state: 'detached', timeout: 15_000 });
   }
 }
+
+/**
+ * The terminal's own window (the app first shows a small "starting" window, which closes once
+ * the terminal is on screen): the first window that loads the app's page.
+ */
+export async function terminalWindow(app, timeout = 60_000) {
+  const isTerminal = (p) => /^(file|https?):/.test(p.url()) && !/[?&]popout=/.test(p.url());
+  const until = Date.now() + timeout;
+  for (;;) {
+    const w = app.windows().find(isTerminal);
+    if (w) return w;
+    if (Date.now() > until) throw new Error('the terminal window never opened');
+    await app.waitForEvent('window', { timeout: 1000 }).catch(() => null);
+  }
+}

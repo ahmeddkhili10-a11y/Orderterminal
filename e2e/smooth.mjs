@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright-core';
-import { seedDesktopLedger, unlock } from './unlock.mjs';
+import { seedDesktopLedger, unlock, terminalWindow } from './unlock.mjs';
 
 const require = createRequire(import.meta.url);
 const userData = mkdtempSync(join(tmpdir(), 'novus-smooth-'));
@@ -56,7 +56,7 @@ const app = await electron.launch({
   env: { ...process.env, NOVUS_USER_DATA: userData, NOVUS_NO_FARM: '1', NOVUS_FARM_EVERY: '20000' },
 });
 try {
-  const page = await app.firstWindow();
+  const page = await terminalWindow(app);
   await page.setViewportSize({ width: 1600, height: 950 }).catch(() => undefined);
   await unlock(page);
   await page.waitForSelector('.pro-cmd-input', { timeout: 60_000 });

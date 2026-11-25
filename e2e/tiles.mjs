@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright-core';
-import { seedDesktopLedger, unlock } from './unlock.mjs';
+import { seedDesktopLedger, unlock, terminalWindow } from './unlock.mjs';
 
 const require = createRequire(import.meta.url);
 const OUT = process.env.TILES_OUT ?? new URL('./screenshots/', import.meta.url).pathname;
@@ -22,7 +22,7 @@ const expect = (cond, msg) => {
 await seedDesktopLedger(userData);
 const app = await electron.launch({ executablePath: require('electron'), args: ['.', '--no-sandbox'], env: { ...process.env, NOVUS_USER_DATA: userData, NOVUS_NO_FARM: '1' } });
 try {
-  const page = await app.firstWindow();
+  const page = await terminalWindow(app);
   await unlock(page);
   await page.waitForSelector('.pro-cmd-input', { timeout: 60_000 });
   // the simulated market, so the heat map has a book to record

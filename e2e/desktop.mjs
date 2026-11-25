@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright-core';
-import { seedDesktopLedger, TEST_KEY, unlock } from './unlock.mjs';
+import { seedDesktopLedger, TEST_KEY, unlock, terminalWindow } from './unlock.mjs';
 
 const require = createRequire(import.meta.url);
 const OUT = new URL('./screenshots/', import.meta.url).pathname;
@@ -57,7 +57,7 @@ const app = await electron.launch({
   env: { ...process.env, NOVUS_USER_DATA: userData, NOVUS_NO_FARM: '1' },
 });
 try {
-  const page = await app.firstWindow();
+  const page = await terminalWindow(app);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.setViewportSize({ width: 1600, height: 950 }).catch(() => undefined);
   step('secure boot: lock screen, sealed vault, ledger key');

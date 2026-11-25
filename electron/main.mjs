@@ -33,6 +33,7 @@ import { Remote } from './care/remote.mjs';
 import { crashText, lastErrors, markRunning, markRestart, markStopped, wakeText } from './care/crash.mjs';
 import { endStuck, onScreen, runningPid, waitForAck, writeAck } from './handover.mjs';
 import { handleOf, startTopmostWatch } from './topmostWatch.mjs';
+import { extrasFailedBefore, failedBefore, lastStart, splashHtml, startStartup } from './startup.mjs';
 import { buildSpec } from '../src/lab/flow.ts';
 import { testedStats } from '../src/lab/live.ts';
 import { costsForTests, measureCosts } from './care/costs.mjs';
@@ -145,7 +146,14 @@ try {
 } catch {
   rmSync(SAFE_FLAG, { force: true });
 }
-const safeMode = process.argv.includes('--safe-mode') || process.env.NOVUS_SAFE_MODE === '1' || existsSync(SAFE_FLAG);
+// the last start never got its window up (it froze or was closed on the way): this one runs without the graphics card
+const prevStart = lastStart(userDataDir);
+const autoSafe = failedBefore(prevStart) && !existsSync(SAFE_FLAG) && process.env.NOVUS_SAFE_MODE !== '0';
+if (autoSafe) log('warn', `the last start never showed its window (it stopped at: ${prevStart.step}) — this start runs without the graphics card`);
+// the last start froze while starting the extras: they are left off this time (tried again next time)
+const skipExtras = extrasFailedBefore(prevStart);
+if (skipExtras) log('warn', 'the last start froze while starting the extras (stay awake, sleep tracking, the topmost watcher) — they are left off this time');
+const safeMode = process.argv.includes('--safe-mode') || process.env.NOVUS_SAFE_MODE === '1' || existsSync(SAFE_FLAG) || autoSafe;
 if (safeMode) {
   app.disableHardwareAcceleration();
   log('warn', 'safe mode: hardware acceleration disabled');
@@ -235,6 +243,12 @@ if (!primary) {
 }
 
 let win = null;
+/** start-up steps, the watchdog and the small "starting" window (startup.mjs) */
+let boot = null;
+let splash = null;
+/** the extras that wait for the window to be on screen (stay awake, the topmost watcher, sleep tracking, the escape key) */
+let afterShown = () => {};
+let topWatch = { setHandles() {}, beat() {}, stop() {} };
 /** a second copy asked for the window before it was on screen: answered once it is */
 let pendingAck = false;
 let db;
@@ -311,6 +325,26 @@ function createWindow() {
       if (placed.fullScreen) w.setFullScreen(true);
       w.show();
       log('info', 'window shown');
+    }
+    if (!w.isDestroyed() && w.isVisible() && boot && !boot.done) {
+      boot.done = true;
+      boot.shown();
+      // a start without the graphics card that worked after one that did not: kept that way (Help menu to leave it)
+      if (autoSafe)
+        try {
+          writeFileSync(SAFE_FLAG, JSON.stringify({ v: 2, reason: 'the window did not show with the graphics card', at: new Date().toISOString() }));
+        } catch {
+          /* the next start notices again */
+        }
+      if (splash && !splash.isDestroyed()) splash.destroy();
+      splash = null;
+      setTimeout(() => {
+        try {
+          afterShown();
+        } catch (e) {
+          log('warn', 'an extra could not start', e);
+        }
+      }, 500);
     }
     if (!w.isDestroyed() && pendingAck && w.isVisible()) {
       pendingAck = false;
@@ -1553,6 +1587,26 @@ Trades are signed here without asking you each time. Most meme coins go to zero 
 app.whenReady().then(async () => {
   if (!primary) return;
   log('info', 'electron ready');
+  boot = startStartup(userDataDir, logFile(), log);
+  try {
+    splash = new BrowserWindow({ width: 460, height: 170, frame: false, resizable: false, movable: true, show: true, center: true, backgroundColor: '#050505', title: 'Novus Ordo — starting', icon: join(root, 'build', 'icon.png'), webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false } });
+    void splash.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml('opening your data', safeMode))}`).catch(() => undefined);
+  } catch (e) {
+    log('warn', 'could not show the starting window', e);
+  }
+  const say = (name, words) => {
+    boot.step(name);
+    if (splash && !splash.isDestroyed()) void splash.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(words, safeMode))}`).catch(() => undefined);
+  };
+  say('database', 'opening your data');
+  // checks only: the main thread held up here for a while, as a frozen start would be (e2e/startup.mjs)
+  if (Number(process.env.NOVUS_TEST_FREEZE_MS) > 0) {
+    const until = Date.now() + Number(process.env.NOVUS_TEST_FREEZE_MS);
+    await new Promise((r) => setTimeout(r, 1500));
+    while (Date.now() < until) {
+      /* frozen on purpose */
+    }
+  }
   try {
     // a previous session still closing (or a backup / antivirus scan) can hold the file for a moment: wait it out
     db = await openWithRetry(() => new Db(join(userDataDir, 'novus-ordo.sqlite')), { onWait: (n) => n === 1 && log('warn', 'the database is busy — waiting for the previous session (or a scan) to let go of it') });
@@ -1582,6 +1636,7 @@ app.whenReady().then(async () => {
     app.exit(1);
     return;
   }
+  say('background engine', 'starting the background engine');
   journal = new TradeJournal(db.db);
   delivery.attach(db);
   care = new Care({
@@ -1657,6 +1712,7 @@ app.whenReady().then(async () => {
     // Windows starting the slow portable one (it unpacks itself on every start)
     setAutoStart(true);
   }
+  say('menus and messages', 'getting the menus ready');
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
@@ -1694,24 +1750,68 @@ app.whenReady().then(async () => {
   );
   registerIpc();
   // the window first, everything heavy after it
+  say('main window', 'opening the terminal');
   createWindow();
-  stayAwake(db.get('stayAwake') !== false);
+  say('page', 'drawing the terminal');
+  // the extras wait for the window to be on screen: if one of them ever held the app up, the terminal is already there
+  afterShown = () => {
+    // a way out that always works while Novus Ordo is alive, whatever its windows look like (blank, on every screen):
+    // Ctrl + Alt + Shift + Q closes it at once (open trades stay on the exchange with their stops) — set up first
+    try {
+      globalShortcut.register('CommandOrControl+Alt+Shift+Q', () => {
+        log('warn', 'closed at once with Ctrl + Alt + Shift + Q');
+        markStopped(userDataDir);
+        app.exit(0);
+      });
+    } catch (e) {
+      log('warn', 'could not set up Ctrl + Alt + Shift + Q', e);
+    }
+    if (skipExtras) {
+      boot.step('running');
+      return;
+    }
+    boot.step('extras');
+    try {
+      stayAwake(db.get('stayAwake') !== false);
+    } catch (e) {
+      log('warn', 'stay awake could not start', e);
+    }
+    try {
+      watchPower();
+    } catch (e) {
+      log('warn', 'sleep tracking could not start', e);
+    }
+    try {
+      // tiles above the taskbar are watched from outside: if Novus Ordo ever stops answering, they are taken down for it
+      topWatch = startTopmostWatch(log);
+    } catch (e) {
+      log('warn', 'the topmost watcher could not start', e);
+    }
+    log('info', 'start-up: extras running (stay awake, sleep tracking, topmost watcher, Ctrl + Alt + Shift + Q)');
+    // a few seconds later, still answering: the extras are fine (a start that froze here is noticed by the next one)
+    setTimeout(() => boot.step('running'), 5000);
+  };
   let sleptAt = 0;
-  powerMonitor.on('suspend', () => {
-    sleptAt = Date.now();
-    log('warn', `the computer is going to sleep${awakeId !== null ? ' (stay awake was on: the lid, the battery or Windows put it to sleep)' : ''}`);
-  });
-  powerMonitor.on('resume', () => {
-    const from = sleptAt;
-    sleptAt = 0;
-    log('info', `the computer woke up${from ? ` after ${((Date.now() - from) / 60_000).toFixed(0)} minutes asleep` : ''}`);
-    if (from && Date.now() - from > 5 * 60_000 && care?.running) void care.send(sleptText(from, Date.now()), 'slept');
-  });
-  powerMonitor.on('lock-screen', () => log('info', 'Windows locked the screen'));
-  powerMonitor.on('unlock-screen', () => log('info', 'Windows screen unlocked'));
-  powerMonitor.on('shutdown', () => log('warn', 'Windows is shutting down or restarting'));
-  // tiles above the taskbar are watched from outside: if Novus Ordo ever stops answering, they are taken down for it
-  const topWatch = startTopmostWatch(log);
+  const watchPower = () => {
+    powerMonitor.on('suspend', () => {
+      sleptAt = Date.now();
+      log('warn', `the computer is going to sleep${awakeId !== null ? ' (stay awake was on: the lid, the battery or Windows put it to sleep)' : ''}`);
+    });
+    powerMonitor.on('resume', () => {
+      const from = sleptAt;
+      sleptAt = 0;
+      log('info', `the computer woke up${from ? ` after ${((Date.now() - from) / 60_000).toFixed(0)} minutes asleep` : ''}`);
+      if (from && Date.now() - from > 5 * 60_000 && care?.running) void care.send(sleptText(from, Date.now()), 'slept');
+      // screens may have changed while asleep (a monitor unplugged): the window is put on one that is there, and drawn again
+      setTimeout(() => {
+        if (win && !win.isDestroyed()) rescueWindow(win, 'after sleep');
+        repaintAll();
+      }, 2500);
+    });
+    powerMonitor.on('lock-screen', () => log('info', 'Windows locked the screen'));
+    powerMonitor.on('unlock-screen', () => log('info', 'Windows screen unlocked'));
+    powerMonitor.on('shutdown', () => log('warn', 'Windows is shutting down or restarting'));
+  };
   screens = new Screens({ screen, BrowserWindow, file: join(userDataDir, 'panel-windows.json'), mainWindow: () => win, newWindow: panelWindow, changed: () => screensChanged(), onTopmost: (ws) => topWatch.setHandles(ws.map(handleOf).filter(Boolean)) });
   const screensChanged = () => {
     for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('screens:changed', screens.state());
@@ -1720,18 +1820,9 @@ app.whenReady().then(async () => {
     screen.on(ev, () => {
       screens.retile();
       screensChanged();
+      // a monitor unplugged with the terminal on it: the terminal comes over to a screen that is there
+      if (ev === 'display-removed' && win && !win.isDestroyed()) setTimeout(() => win && !win.isDestroyed() && rescueWindow(win, 'a screen was unplugged'), 800);
     });
-  // a way out that always works while Novus Ordo is alive, whatever its windows look like (blank, on every screen):
-  // Ctrl + Alt + Shift + Q closes it at once (open trades stay on the exchange with their stops)
-  try {
-    globalShortcut.register('CommandOrControl+Alt+Shift+Q', () => {
-      log('warn', 'closed at once with Ctrl + Alt + Shift + Q');
-      markStopped(userDataDir);
-      app.exit(0);
-    });
-  } catch (e) {
-    log('warn', 'could not set up Ctrl + Alt + Shift + Q', e);
-  }
   // tiles sit above the taskbar while Novus Ordo is the app in use, and step back when you switch away
   app.on('browser-window-focus', () => screens?.cover(true));
   app.on('browser-window-blur', () => setTimeout(() => !BrowserWindow.getFocusedWindow() && screens?.cover(false), 80));
@@ -1884,33 +1975,57 @@ app.on('second-instance', () => {
     createWindow();
     return;
   }
-  try {
-    if (win.isMinimized()) win.restore();
-    // a window left on a screen that is no longer plugged in: back onto the main one
-    const back = onScreen(win.getBounds(), [screen.getPrimaryDisplay(), ...screen.getAllDisplays()].map((d) => d.workArea));
-    if (back) {
-      const full = win.isFullScreen();
-      const max = win.isMaximized();
-      if (full) win.setFullScreen(false);
-      if (max) win.unmaximize();
-      win.setBounds(back);
-      if (max || full) win.maximize();
-      log('info', 'the window was off every screen: moved back onto the main one');
-    }
-    win.moveTop();
-    if (!win.isVisible()) win.show();
-    // Windows only lets the app in front take focus: on top for a moment, so it comes to the front
-    win.setAlwaysOnTop(true);
-    win.focus();
-    win.setAlwaysOnTop(false);
-  } catch (e) {
-    log('warn', 'could not bring the window forward', e);
-  }
+  rescueWindow(win, 'second launch', true);
   if (win.isVisible()) {
     pendingAck = false;
     writeAck(userDataDir);
   }
 });
+
+/**
+ * The terminal's window back where you can see it: un-minimised, on a screen that is plugged in
+ * (a window left on — or full screen on — a monitor that is gone is moved to the screen the
+ * mouse is on), drawn again, and (when `front`) brought to the front.
+ */
+function rescueWindow(w, why, front = false) {
+  try {
+    if (w.isMinimized()) w.restore();
+    const ds = screen.getAllDisplays();
+    const b = w.getBounds();
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    // its middle is on no screen that is there now (Windows can leave a full-screen window on a monitor that has gone)
+    const lost = !ds.some((d) => cx >= d.bounds.x && cx < d.bounds.x + d.bounds.width && cy >= d.bounds.y && cy < d.bounds.y + d.bounds.height) || !!onScreen(b, ds.map((d) => d.workArea));
+    if (lost) {
+      const here = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) ?? screen.getPrimaryDisplay();
+      const full = w.isFullScreen();
+      const max = w.isMaximized();
+      if (full) w.setFullScreen(false);
+      if (max) w.unmaximize();
+      const a = here.workArea;
+      const width = Math.min(Math.max(b.width, 1000), a.width);
+      const height = Math.min(Math.max(b.height, 650), a.height);
+      w.setBounds({ x: a.x + Math.round((a.width - width) / 2), y: a.y + Math.round((a.height - height) / 2), width, height });
+      w.maximize();
+      log('info', `${why}: the window was on a screen that is not there — moved to the one in use`);
+    }
+    if (!w.isVisible()) w.show();
+    try {
+      w.webContents.invalidate();
+    } catch {
+      /* drawn as usual */
+    }
+    if (front) {
+      w.moveTop();
+      // Windows only lets the app in front take focus: on top for a moment, so it comes to the front
+      w.setAlwaysOnTop(true);
+      w.focus();
+      w.setAlwaysOnTop(false);
+    }
+  } catch (e) {
+    log('warn', `could not bring the window back (${why})`, e);
+  }
+}
 
 /**
  * This is a second copy: the open one is asked to show its window (above) and answers once it

@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright-core';
-import { seedDesktopLedger } from './unlock.mjs';
+import { seedDesktopLedger, terminalWindow } from './unlock.mjs';
 
 const require = createRequire(import.meta.url);
 const userData = mkdtempSync(join(tmpdir(), 'novus-boot-'));
@@ -34,7 +34,7 @@ for (let r = 0; r < runs; r++) {
   const t0 = Date.now();
   const app = await electron.launch({ executablePath: require('electron'), args: ['.', '--no-sandbox'], env: { ...process.env, NOVUS_USER_DATA: userData, NOVUS_NO_FARM: '1' } });
   try {
-    const page = await app.firstWindow();
+    const page = await terminalWindow(app);
     const tWin = Date.now() - t0;
     await app.evaluate(() => {
       const g = globalThis;

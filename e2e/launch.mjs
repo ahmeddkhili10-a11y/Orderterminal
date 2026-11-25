@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright-core';
-import { seedDesktopLedger, unlock } from './unlock.mjs';
+import { seedDesktopLedger, unlock, terminalWindow } from './unlock.mjs';
 
 const require = createRequire(import.meta.url);
 const exe = require('electron');
@@ -46,7 +46,7 @@ const app = await electron.launch({ executablePath: exe, args: ['.', '--no-sandb
 const pidA = app.process().pid;
 let pidC = null;
 try {
-  const page = await app.firstWindow();
+  const page = await terminalWindow(app);
   await page.waitForSelector('.lock-key input, .topbar', { timeout: 60_000 });
   // stay awake: on by default while open; the ☀ button switches it off and on (and it is remembered)
   console.error('• stay awake');

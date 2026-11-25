@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { _electron as electron } from 'playwright-core';
-import { seedDesktopLedger, unlock } from './unlock.mjs';
+import { seedDesktopLedger, unlock, terminalWindow } from './unlock.mjs';
 import { TradeJournal, fromBot, fromSwarm } from '../electron/care/journal.mjs';
 
 const require = createRequire(import.meta.url);
@@ -65,7 +65,7 @@ const cmd = async (page, code) => {
   await page.waitForTimeout(1200);
 };
 try {
-  const page = await app.firstWindow();
+  const page = await terminalWindow(app);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.setViewportSize({ width: 1600, height: 950 }).catch(() => undefined);
   await page.waitForSelector('.lock-key input', { timeout: 60_000 });
